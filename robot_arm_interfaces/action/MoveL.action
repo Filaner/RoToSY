@@ -1,0 +1,35 @@
+# ──────────────────────────────────────────────
+# Goal: Cartesian linear motion (TCP frame)
+# ──────────────────────────────────────────────
+float64 x    # mm
+float64 y    # mm
+float64 z    # mm
+float64 rx   # roll  [degrees]
+float64 ry   # pitch [degrees]
+float64 rz   # yaw   [degrees]
+float64 linear_velocity_mm_s      # linear velocity      [mm/s]  (default 50)
+float64 angular_velocity_deg_s    # angular velocity     [deg/s] (default 30)
+float64 linear_accel_mm_s2        # linear acceleration  [mm/s²]
+float64 angular_accel_deg_s2      # angular acceleration [deg/s²]
+float64 blend_radius_mm           # blending radius [mm]; 0 = no blend
+int8    reference_frame            # 0=BASE, 1=TOOL, 2=WORLD
+bool    relative                   # true = relative, false = absolute
+---
+# ──────────────────────────────────────────────
+# Result
+# ──────────────────────────────────────────────
+bool   success
+string message
+float64 execution_time_sec
+---
+# ──────────────────────────────────────────────
+# Feedback (10 Hz)
+# ──────────────────────────────────────────────
+float64 current_x
+float64 current_y
+float64 current_z
+float64 current_rx
+float64 current_ry
+float64 current_rz
+float64 progress_pct
+string  robot_state
