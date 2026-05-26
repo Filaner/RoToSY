@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>doosan_controller</name>
+  <version>0.1.0</version>
+  <description>
+    High-level controller node for the Doosan E0509 robot arm.
+    Phase 1: Servo ON/OFF + connection.
+    Phase 2: MoveJ / MoveL action servers.
+    Phase 3: WaitDuration service.
+    Architecture is modular for future gripper and vision integration.
+  </description>
+  <maintainer email="cjfgml0221@naver.com">RoToSY</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <!-- ROS2 core -->
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>action_msgs</depend>
+
+  <!-- Custom interfaces (this repo) -->
+  <depend>robot_arm_interfaces</depend>
+
+  <!-- Doosan DSR driver interfaces -->
+  <depend>dsr_msgs2</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

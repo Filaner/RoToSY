@@ -1,0 +1,22 @@
+# ──────────────────────────────────────────────
+# Goal: joint-space motion
+# ──────────────────────────────────────────────
+float64[6] joint_angles_deg   # target joint angles [degrees]
+float64    velocity_deg_s      # joint velocity  [deg/s]  (default 30)
+float64    acceleration_deg_s2 # joint accel     [deg/s²] (default 60)
+float64    blend_radius_mm     # blending radius [mm];  0 = no blend
+bool       relative            # true = relative move, false = absolute
+---
+# ──────────────────────────────────────────────
+# Result
+# ──────────────────────────────────────────────
+bool   success
+string message
+float64 execution_time_sec
+---
+# ──────────────────────────────────────────────
+# Feedback (10 Hz)
+# ──────────────────────────────────────────────
+float64[6] current_joints_deg  # live joint positions [degrees]
+float64    progress_pct        # 0.0 → 100.0
+string     robot_state         # e.g. "MOVING", "STANDBY"

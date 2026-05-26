@@ -1,0 +1,16 @@
+arm_controller:
+  ros__parameters:
+    # ─── DSR driver namespace (must match 'name' arg in dsr_bringup2) ───────
+    robot_ns: "dsr01"
+
+    # ─── Status publisher ────────────────────────────────────────────────────
+    status_rate_hz: 10.0
+
+    # ─── Motion execution ────────────────────────────────────────────────────
+    # Maximum wall-clock seconds allowed for a single MoveJ or MoveL goal.
+    # Goal is aborted if the robot is still MOVING after this duration.
+    motion_timeout: 60.0
+
+    # ─── Servo ON ────────────────────────────────────────────────────────────
+    # Number of set_robot_control attempts before giving up.
+    servo_on_retries: 3
