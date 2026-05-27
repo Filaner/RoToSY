@@ -10,6 +10,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotStatus.msg"
   "srv/ServoOn.srv"
   "srv/WaitDuration.srv"
+  "srv/Jog.srv"
+  "srv/Home.srv"
   "action/MoveJ.action"
   "action/MoveL.action"
   DEPENDENCIES std_msgs action_msgs

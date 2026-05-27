@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>web_interface</name>
+  <version>0.0.1</version>
+  <description>Web-based robot arm control interface for RoToSY</description>
+  <maintainer email="cjfgml0221@naver.com">cheol</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>robot_arm_interfaces</depend>
+  <depend>std_msgs</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
