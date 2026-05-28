@@ -1,7 +1,9 @@
 """
 Launch the Doosan E0509 full stack:
-  1. dsr_bringup2  — Doosan DSR hardware/virtual driver (TCP/IP → 110.120.1.52)
-  2. arm_controller — our high-level controller node
+  1. dsr_bringup2    — Doosan DSR hardware/virtual driver (TCP/IP → 110.120.1.52)
+  2. arm_controller  — our high-level controller node          (delay 3 s)
+  3. tcp_monitor     — TF2 기반 TCP 포즈 퍼블리셔             (delay 5 s)
+  4. web_server      — FastAPI 웹 인터페이스 (port 8000)       (delay 5 s)
 
 Usage (real hardware):
   ros2 launch doosan_controller robot_controller.launch.py mode:=real
@@ -100,4 +102,32 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    return LaunchDescription(args + [dsr_bringup, arm_controller])
+    # ── tcp_monitor node ─────────────────────────────────────────────────────
+    # Delayed 5 s — needs TF from dsr_bringup2 and arm_controller to be up.
+    tcp_monitor = TimerAction(
+        period=5.0,
+        actions=[
+            Node(
+                package    = 'doosan_controller',
+                executable = 'tcp_monitor',
+                name       = 'tcp_monitor',
+                output     = 'screen',
+            )
+        ],
+    )
+
+    # ── web_server node ──────────────────────────────────────────────────────
+    # Delayed 5 s — subscribes to /arm/status and /arm/tcp_pose.
+    web_server = TimerAction(
+        period=5.0,
+        actions=[
+            Node(
+                package    = 'web_interface',
+                executable = 'web_server',
+                name       = 'web_server',
+                output     = 'screen',
+            )
+        ],
+    )
+
+    return LaunchDescription(args + [dsr_bringup, arm_controller, tcp_monitor, web_server])

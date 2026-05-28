@@ -26,9 +26,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'arm_controller = doosan_controller.arm_controller_node:main',
-            'test_movel     = doosan_controller.test_movel:main',
+            'arm_controller  = doosan_controller.arm_controller_node:main',
+            'test_movel      = doosan_controller.test_movel:main',
             'motion_sequence = doosan_controller.motion_sequence:main',
+            'tcp_monitor     = doosan_controller.tcp_monitor:main',
         ],
     },
 )

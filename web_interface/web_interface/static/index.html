@@ -78,10 +78,10 @@
     /* ── Layout ── */
     main {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(2, 1fr);
       gap: 1.25rem;
       padding: 1.5rem 2rem;
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 0 auto;
     }
 
@@ -111,10 +111,10 @@
 
     .status-item { display: flex; flex-direction: column; gap: 0.25rem; }
 
-    .status-label { font-size: 0.72rem; color: var(--muted); }
+    .status-label { font-size: 0.75rem; color: var(--muted); }
 
     .status-value {
-      font-size: 0.95rem;
+      font-size: 1.1rem;
       font-weight: 600;
       font-family: var(--mono);
     }
@@ -225,15 +225,67 @@
       background: var(--red);
       color: white;
     }
+
+    .btn-teach {
+      background: #1e3a8a33;
+      color: var(--blue);
+      border-color: #3b82f644;
+    }
+
+    .btn-teach:hover:not(:disabled) {
+      background: var(--blue);
+      color: white;
+    }
+
+    .btn-teach.teaching-active {
+      background: var(--blue);
+      color: white;
+      border-color: var(--blue);
+    }
+
+    /* ── E-Stop ── */
+    .btn-estop {
+      background: var(--red);
+      color: white;
+      border: 2px solid #ff6b6b;
+      border-radius: 0.5rem;
+      padding: 0.45rem 1.4rem;
+      font-size: 0.85rem;
+      font-weight: 800;
+      cursor: pointer;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-family: inherit;
+      transition: background 0.1s, transform 0.1s;
+      flex-shrink: 0;
+    }
+    .btn-estop:hover  { background: #dc2626; }
+    .btn-estop:active { transform: scale(0.95); }
+
+    /* ── Recover ── */
+    .btn-recover {
+      background: #78350f33;
+      color: var(--yellow);
+      border-color: #f59e0b66;
+    }
+    .btn-recover:hover:not(:disabled) {
+      background: var(--yellow);
+      color: #1a1d27;
+    }
+    .btn-recover:disabled { opacity: 0.3; cursor: not-allowed; }
+    .btn-recover.recovering { animation: pulse 0.8s infinite; }
   </style>
 </head>
 <body>
 
 <header>
   <h1>RoTo<span>SY</span> Control Interface</h1>
-  <div id="ws-badge" class="badge connecting">
-    <div class="badge-dot"></div>
-    <span id="ws-label">연결 중...</span>
+  <div style="display:flex; align-items:center; gap:1rem;">
+    <button class="btn-estop" onclick="emergencyStop()">■ E-STOP</button>
+    <div id="ws-badge" class="badge connecting">
+      <div class="badge-dot"></div>
+      <span id="ws-label">연결 중...</span>
+    </div>
   </div>
 </header>
 
@@ -246,34 +298,43 @@
   </div>
 
   <!-- Robot state -->
-  <div class="card">
-    <div class="card-title">Robot State</div>
-    <div class="status-grid">
-      <div class="status-item">
-        <span class="status-label">State</span>
-        <span id="st-state" class="status-value plain">—</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Servo</span>
-        <span id="st-servo" class="status-value plain">—</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Motion</span>
-        <span id="st-moving" class="status-value plain">—</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Arm Ready</span>
-        <span id="st-ready" class="status-value plain">—</span>
-      </div>
-    </div>
+  <div class="card" style="grid-column: 1 / -1;">
+    <div style="display: flex; align-items: center; gap: 2rem; flex-wrap: wrap;">
 
-    <!-- Servo Control Buttons -->
-    <div class="btn-group">
-      <button id="btn-servo-on" class="btn btn-on" onclick="setServo(true)">Servo ON</button>
-      <button id="btn-servo-off" class="btn btn-off" onclick="setServo(false)">Servo OFF</button>
-      <button id="btn-home" class="btn move-btn" onclick="moveHome()" style="background: #1e3a8a33; border-color: #3b82f644; color: var(--blue);">Home</button>
+      <!-- 상태 정보 (왼쪽) -->
+      <div style="flex: 1; min-width: 280px;">
+        <div class="card-title" style="margin-bottom: 0.9rem;">Robot State</div>
+        <div style="display: flex; gap: 2.5rem; flex-wrap: wrap; align-items: flex-start;">
+          <div class="status-item">
+            <span class="status-label">State</span>
+            <span id="st-state" class="status-value plain">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Servo</span>
+            <span id="st-servo" class="status-value plain">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Motion</span>
+            <span id="st-moving" class="status-value plain">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Arm Ready</span>
+            <span id="st-ready" class="status-value plain">—</span>
+          </div>
+        </div>
+        <div id="control-feedback" style="margin-top:0.7rem; font-size:0.75rem; color:var(--muted); font-family:var(--mono); min-height:1em;"></div>
+      </div>
+
+      <!-- 컨트롤 버튼 (오른쪽) -->
+      <div style="display: flex; gap: 0.65rem; flex-shrink: 0; align-items: center;">
+        <button id="btn-servo-on"  class="btn btn-on"    onclick="setServo(true)"    style="flex: none; padding: 0.7rem 1.2rem;">Servo ON</button>
+        <button id="btn-servo-off" class="btn btn-off"   onclick="setServo(false)"   style="flex: none; padding: 0.7rem 1.2rem;">Servo OFF</button>
+        <button id="btn-home"      class="btn move-btn"  onclick="moveHome()"        style="flex: none; padding: 0.7rem 1.2rem; background:#78350f33; border-color:#f59e0b44; color:var(--yellow);">Home</button>
+        <button id="btn-teach"     class="btn btn-teach" onclick="toggleTeaching()"  style="flex: none; padding: 0.7rem 1.2rem;">직접 교시</button>
+        <button id="btn-recover"   class="btn btn-recover" onclick="safeRecover()" style="flex: none; padding: 0.7rem 1.2rem;" disabled title="SAFE_STOP / SAFE_OFF 상태에서 복구 후 직접 교시 모드 진입">⚡ 안전 복구</button>
+      </div>
+
     </div>
-    <div id="control-feedback" style="margin-top:0.75rem; font-size:0.75rem; color:var(--muted); font-family:var(--mono); min-height: 1em;"></div>
   </div>
 
   <!-- TCP Pose -->
@@ -416,34 +477,67 @@
     colorState(ready, s.arm_ready, 'good', 'muted');
 
     // UI Interlocking
-    const jogBadge = document.getElementById('jog-status-badge');
-    const jogButtons = document.querySelectorAll('.jog-btn');
+    const isTeaching = s.teaching_mode === true;
+    const jogBadge   = document.getElementById('jog-status-badge');
+    const jogButtons  = document.querySelectorAll('.jog-btn');
     const moveButtons = document.querySelectorAll('.move-btn');
     const syncButtons = document.querySelectorAll('.sync-btn');
     const speedSlider = document.getElementById('jog-speed-range');
-    const btnOn = document.getElementById('btn-servo-on');
-    const btnOff = document.getElementById('btn-servo-off');
+    const btnOn      = document.getElementById('btn-servo-on');
+    const btnOff     = document.getElementById('btn-servo-off');
+    const btnHome    = document.getElementById('btn-home');
+    const btnTeach   = document.getElementById('btn-teach');
+    const btnRecover = document.getElementById('btn-recover');
 
-    if (s.servo_on) {
+    // 복구 버튼: SAFE_STOP(5), SAFE_OFF(3), NOT_READY(15) 일 때만 활성화
+    const recoverableStates = [3, 5, 15];
+    const isRecoverable = recoverableStates.includes(s.robot_state) && !s.is_moving;
+    btnRecover.disabled = !isRecoverable;
+
+    if (isTeaching) {
+      // 직접 교시 모드: Jog + Move 비활성화, Read Current만 활성화
+      jogBadge.style.display = 'inline';
+      jogBadge.textContent = '[DISABLED: 직접 교시 모드]';
+      jogButtons.forEach(b => b.disabled = true);
+      moveButtons.forEach(b => b.disabled = true);
+      syncButtons.forEach(b => b.disabled = false);
+      speedSlider.disabled = true;
+      btnOn.disabled = true;
+      btnOff.disabled = false;
+      btnHome.disabled = true;
+      btnTeach.textContent = '교시 종료';
+      btnTeach.classList.add('teaching-active');
+      btnTeach.disabled = false;
+    } else if (s.servo_on) {
       jogBadge.style.display = 'none';
+      jogBadge.textContent = '[DISABLED: SERVO OFF]';
       jogButtons.forEach(b => b.disabled = false);
       moveButtons.forEach(b => b.disabled = false);
       syncButtons.forEach(b => b.disabled = false);
       speedSlider.disabled = false;
       btnOn.disabled = true;
       btnOff.disabled = false;
+      btnHome.disabled = false;
+      btnTeach.textContent = '직접 교시';
+      btnTeach.classList.remove('teaching-active');
+      btnTeach.disabled = false;
     } else {
       jogBadge.style.display = 'inline';
+      jogBadge.textContent = '[DISABLED: SERVO OFF]';
       jogButtons.forEach(b => b.disabled = true);
       moveButtons.forEach(b => b.disabled = true);
       syncButtons.forEach(b => b.disabled = true);
       speedSlider.disabled = true;
       btnOn.disabled = false;
       btnOff.disabled = true;
+      btnHome.disabled = true;
+      btnTeach.textContent = '직접 교시';
+      btnTeach.classList.remove('teaching-active');
+      btnTeach.disabled = true;
     }
 
-    // TCP
-    const tcp = s.current_tcp ?? [];
+    // TCP — 실시간 디스플레이는 TF2 기반 current_tcp_rt, 없으면 DSR-native current_tcp 사용
+    const tcp = (s.current_tcp_rt && s.current_tcp_rt.some(v => v !== 0)) ? s.current_tcp_rt : (s.current_tcp ?? []);
     ['tcp-x','tcp-y','tcp-z','tcp-rx','tcp-ry','tcp-rz'].forEach((id, i) => {
       document.getElementById(id).textContent = fmt(tcp[i]);
     });
@@ -582,6 +676,70 @@
     msgEl.textContent = msg;
     banner.classList.add('visible');
     setTimeout(() => banner.classList.remove('visible'), 5000);
+  }
+
+  async function safeRecover() {
+    const btn = document.getElementById('btn-recover');
+    if (btn && btn.disabled) return;
+    const feedback = document.getElementById('control-feedback');
+    feedback.style.color = 'var(--yellow)';
+    feedback.textContent = '안전 복구 시퀀스 실행 중...';
+    btn.classList.add('recovering');
+    btn.disabled = true;
+    try {
+      const resp = await fetch('/api/recover', { method: 'POST' });
+      const data = await resp.json();
+      if (resp.ok) {
+        feedback.style.color = 'var(--green)';
+        feedback.textContent = `복구 완료 — ${data.message}`;
+      } else {
+        feedback.style.color = 'var(--red)';
+        feedback.textContent = data.detail || '안전 복구 실패';
+      }
+    } catch (err) {
+      feedback.style.color = 'var(--red)';
+      feedback.textContent = '안전 복구 실패: ' + err.message;
+    } finally {
+      btn.classList.remove('recovering');
+      setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 6000);
+    }
+  }
+
+  async function emergencyStop() {
+    const feedback = document.getElementById('control-feedback');
+    feedback.style.color = 'var(--red)';
+    feedback.textContent = '비상정지 실행 중...';
+    try {
+      const resp = await fetch('/api/estop', { method: 'POST' });
+      const data = await resp.json();
+      feedback.textContent = resp.ok ? '비상정지 완료 — 서보 OFF' : (data.detail || '비상정지 실패');
+    } catch (err) {
+      feedback.textContent = '비상정지 실패: ' + err.message;
+    } finally {
+      setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 5000);
+    }
+  }
+
+  async function toggleTeaching() {
+    const isTeaching = latestState && latestState.teaching_mode === true;
+    const feedback = document.getElementById('control-feedback');
+    feedback.style.color = 'var(--muted)';
+    feedback.textContent = isTeaching ? '직접 교시 모드 해제 중...' : '직접 교시 모드 진입 중...';
+    try {
+      const resp = await fetch('/api/teaching', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable: !isTeaching })
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        feedback.style.color = 'var(--blue)';
+        feedback.textContent = data.message ?? (isTeaching ? '직접 교시 해제' : '직접 교시 활성화');
+      } else {
+        showAlert(data.detail || 'Teaching 전환 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+    finally { setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 5000); }
   }
 
   function connect() {

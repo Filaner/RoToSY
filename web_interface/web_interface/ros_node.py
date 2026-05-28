@@ -19,7 +19,7 @@ from std_msgs.msg import Bool, Float64MultiArray
 
 # Custom interfaces
 from robot_arm_interfaces.msg import RobotStatus
-from robot_arm_interfaces.srv import ServoOn, Jog, Home
+from robot_arm_interfaces.srv import ServoOn, Jog, Home, Teaching, EStop, Recover
 from robot_arm_interfaces.action import MoveJ, MoveL
 
 
@@ -31,15 +31,17 @@ class RobotBridgeNode(Node):
         self._lock = threading.Lock()
         self._command_lock = asyncio.Lock()
         self._state: dict = {
-            'robot_state':      -1,
-            'robot_state_str':  'UNKNOWN',
-            'servo_on':         False,
-            'is_moving':        False,
-            'arm_ready':        False,
+            'robot_state':        -1,
+            'robot_state_str':    'UNKNOWN',
+            'servo_on':           False,
+            'is_moving':          False,
+            'teaching_mode':      False,
+            'arm_ready':          False,
             'current_joints_deg': [0.0] * 6,
-            'current_tcp':        [0.0] * 6,  # [x, y, z, rx, ry, rz]
-            'error_code':       0,
-            'error_message':    '',
+            'current_tcp':        [0.0] * 6,  # DSR-native coords — use for MoveL input
+            'current_tcp_rt':     [0.0] * 6,  # TF2-derived real-time — display only
+            'error_code':         0,
+            'error_message':      '',
         }
 
         # ── Subscribers ──────────────────────────────────────────────────────
@@ -48,9 +50,12 @@ class RobotBridgeNode(Node):
         self.create_subscription(Float64MultiArray, '/arm/tcp_pose', self._tcp_pose_cb, 10)
 
         # ── Service Clients ──────────────────────────────────────────────────
-        self._cli_servo = self.create_client(ServoOn, '/arm/servo_on')
-        self._cli_jog   = self.create_client(Jog,     '/arm/jog')
-        self._cli_home  = self.create_client(Home,    '/arm/home')
+        self._cli_servo    = self.create_client(ServoOn,  '/arm/servo_on')
+        self._cli_jog      = self.create_client(Jog,      '/arm/jog')
+        self._cli_home     = self.create_client(Home,     '/arm/home')
+        self._cli_teaching = self.create_client(Teaching, '/arm/teaching')
+        self._cli_estop    = self.create_client(EStop,    '/arm/estop')
+        self._cli_recover  = self.create_client(Recover,  '/arm/recover')
 
         # ── Action Clients ───────────────────────────────────────────────────
         self._ac_movej = ActionClient(self, MoveJ, '/arm/move_j')
@@ -131,6 +136,22 @@ class RobotBridgeNode(Node):
             req.target = 0 # Mechanical home
             return await self._run_srv(self._cli_home, req)
 
+    async def call_teaching(self, enable: bool) -> dict:
+        """Toggle direct teaching (manual) mode."""
+        req = Teaching.Request()
+        req.enable = enable
+        return await self._run_srv(self._cli_teaching, req)
+
+    async def call_estop(self) -> dict:
+        """Emergency stop: halt motion and disable servo immediately."""
+        return await self._run_srv(self._cli_estop, EStop.Request())
+
+    async def call_recover(self) -> dict:
+        """Trigger safety recovery: SAFE_STOP/SAFE_OFF → STANDBY → teaching mode."""
+        req = Recover.Request()
+        req.go_to_teaching = True
+        return await self._run_srv(self._cli_recover, req)
+
     async def _run_action(self, client, goal) -> dict:
         """Helper to run a ROS2 action and return the result."""
         # Send goal
@@ -184,25 +205,33 @@ class RobotBridgeNode(Node):
 
     def _status_cb(self, msg: RobotStatus) -> None:
         with self._lock:
-            self._state.update({
+            update = {
                 'robot_state':        msg.robot_state,
                 'robot_state_str':    msg.robot_state_str,
                 'servo_on':           msg.servo_on,
                 'is_moving':          msg.is_moving,
+                'teaching_mode':      msg.teaching_mode,
                 'current_joints_deg': list(msg.current_joints_deg),
-                'current_tcp':        list(msg.current_tcp),
                 'error_code':         msg.error_code,
                 'error_message':      msg.error_message,
-            })
+            }
+            # current_tcp: DSR-native coords from GetCurrentPose.
+            # Same coordinate convention as move_line → always use this for MoveL sync.
+            dsr_tcp = list(msg.current_tcp)
+            if any(v != 0.0 for v in dsr_tcp):
+                update['current_tcp'] = dsr_tcp
+            self._state.update(update)
 
     def _ready_cb(self, msg: Bool) -> None:
         with self._lock:
             self._state['arm_ready'] = msg.data
 
     def _tcp_pose_cb(self, msg: Float64MultiArray) -> None:
+        # TF2-derived real-time values — display only, NOT used for MoveL input.
+        # DSR-native current_tcp (from status_cb) is the correct source for MoveL.
         if len(msg.data) >= 6:
             with self._lock:
-                self._state['current_tcp'] = list(msg.data[:6])
+                self._state['current_tcp_rt'] = list(msg.data[:6])
 
     def get_state(self) -> dict:
         """Return a shallow copy of the current robot state (thread-safe)."""

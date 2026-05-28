@@ -12,6 +12,9 @@ router = APIRouter(tags=['control'])
 class ServoRequest(BaseModel):
     enable: bool
 
+class TeachingRequest(BaseModel):
+    enable: bool
+
 class JogRequest(BaseModel):
     joint_index: int
     speed: float
@@ -102,6 +105,54 @@ async def move_l(req: MoveLRequest) -> dict:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Internal Error: {str(e)}')
+
+@router.post('/recover')
+async def recover() -> dict:
+    """Safety recovery: attempt SAFE_STOP/SAFE_OFF → STANDBY → teaching mode."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    try:
+        result = await node.call_recover()
+        if not result.get('success'):
+            raise HTTPException(status_code=500, detail=result.get('message', 'Recovery failed'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Internal Error: {str(e)}')
+
+
+@router.post('/estop')
+async def emergency_stop() -> dict:
+    """Emergency stop: immediately halt motion and disable servo."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    try:
+        result = await node.call_estop()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Internal Error: {str(e)}')
+
+
+@router.post('/teaching')
+async def set_teaching(req: TeachingRequest) -> dict:
+    """Enable or disable direct teaching (manual) mode."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+
+    try:
+        result = await node.call_teaching(req.enable)
+        if not result.get('success'):
+            raise HTTPException(status_code=500, detail=result.get('message', 'Teaching toggle failed'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Internal Error: {str(e)}')
+
 
 @router.post('/home')
 async def move_home() -> dict:

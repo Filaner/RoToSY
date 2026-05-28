@@ -5,8 +5,9 @@ std_msgs/Header header
 int32  robot_state
 string robot_state_str
 
-bool   servo_on      # true when state == STANDBY or MOVING
-bool   is_moving     # true when state == MOVING
+bool   servo_on       # true when state == STANDBY or MOVING
+bool   is_moving      # true when state == MOVING
+bool   teaching_mode  # true when SetRobotMode(MANUAL) is active
 
 float64[6] current_joints_deg  # joint positions [degrees]
 float64[6] current_tcp         # TCP pose [mm, mm, mm, deg, deg, deg]

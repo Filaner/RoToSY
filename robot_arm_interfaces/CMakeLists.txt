@@ -12,6 +12,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/WaitDuration.srv"
   "srv/Jog.srv"
   "srv/Home.srv"
+  "srv/Teaching.srv"
+  "srv/EStop.srv"
+  "srv/Recover.srv"
   "action/MoveJ.action"
   "action/MoveL.action"
   DEPENDENCIES std_msgs action_msgs

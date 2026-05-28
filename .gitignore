@@ -1,6 +1,6 @@
 build/
 install/
 log/
-__pycahce__/
+__pycache__/
 *.pyc
 doosan-robot2/

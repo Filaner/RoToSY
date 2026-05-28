@@ -1,0 +1,5 @@
+# Emergency stop: immediately halt motion and disable servo.
+# No request parameters — must always be callable.
+---
+bool   success
+string message
