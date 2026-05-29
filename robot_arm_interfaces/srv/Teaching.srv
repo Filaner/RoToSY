@@ -1,0 +1,8 @@
+# Toggle direct teaching (manual) mode.
+# enable=true  → SetRobotMode(MANUAL)      robot enters TEACHING state
+# enable=false → SetRobotMode(AUTONOMOUS)  robot returns to STANDBY
+bool enable
+---
+bool   success
+string message
+int8   robot_state_after

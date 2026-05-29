@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RoToSY Control Interface</title>
+  <style>
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3a;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --green:     #22c55e;
+      --red:       #ef4444;
+      --yellow:    #f59e0b;
+      --blue:      #3b82f6;
+      --mono:      'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: var(--text);
+    }
+
+    header h1 span { color: var(--blue); }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.8rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      border: 1px solid transparent;
+    }
+
+    .badge-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+    }
+
+    .badge.connected    { background: #14532d33; border-color: var(--green); color: var(--green); }
+    .badge.disconnected { background: #7f1d1d33; border-color: var(--red);   color: var(--red); }
+    .badge.connecting   { background: #78350f33; border-color: var(--yellow); color: var(--yellow); }
+
+    .badge.connected    .badge-dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .badge.disconnected .badge-dot { background: var(--red); }
+    .badge.connecting   .badge-dot { background: var(--yellow); animation: pulse 1s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+
+    /* ── Layout ── */
+    main {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.25rem;
+      padding: 1.5rem 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+    }
+
+    .card-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    /* ── Status card ── */
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+
+    .status-item { display: flex; flex-direction: column; gap: 0.25rem; }
+
+    .status-label { font-size: 0.75rem; color: var(--muted); }
+
+    .status-value {
+      font-size: 1.1rem;
+      font-weight: 600;
+      font-family: var(--mono);
+    }
+
+    .status-value.good  { color: var(--green); }
+    .status-value.bad   { color: var(--red); }
+    .status-value.warn  { color: var(--yellow); }
+    .status-value.plain { color: var(--text); }
+
+    /* ── Pose / Joint table ── */
+    .pose-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.6rem;
+    }
+
+    .pose-item {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.5rem 0.7rem;
+    }
+
+    .pose-axis {
+      font-size: 0.65rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .pose-val {
+      font-family: var(--mono);
+      font-size: 0.95rem;
+      color: var(--text);
+    }
+
+    /* ── Error banner ── */
+    #error-banner {
+      grid-column: 1 / -1;
+      background: #7f1d1d33;
+      border: 1px solid var(--red);
+      border-radius: 0.75rem;
+      padding: 1rem 1.25rem;
+      display: none;
+    }
+
+    #error-banner.visible { display: block; }
+
+    #error-banner .err-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--red);
+      margin-bottom: 0.35rem;
+    }
+
+    #error-banner .err-msg {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+
+    /* ── Buttons ── */
+    .btn-group {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      border-radius: 0.5rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-family: inherit;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-on {
+      background: #14532d33;
+      color: var(--green);
+      border-color: #22c55e44;
+    }
+
+    .btn-on:hover:not(:disabled) {
+      background: var(--green);
+      color: white;
+    }
+
+    .btn-off {
+      background: #7f1d1d33;
+      color: var(--red);
+      border-color: #ef444444;
+    }
+
+    .btn-off:hover:not(:disabled) {
+      background: var(--red);
+      color: white;
+    }
+
+    .btn-teach {
+      background: #1e3a8a33;
+      color: var(--blue);
+      border-color: #3b82f644;
+    }
+
+    .btn-teach:hover:not(:disabled) {
+      background: var(--blue);
+      color: white;
+    }
+
+    .btn-teach.teaching-active {
+      background: var(--blue);
+      color: white;
+      border-color: var(--blue);
+    }
+
+    /* ── E-Stop ── */
+    .btn-estop {
+      background: var(--red);
+      color: white;
+      border: 2px solid #ff6b6b;
+      border-radius: 0.5rem;
+      padding: 0.45rem 1.4rem;
+      font-size: 0.85rem;
+      font-weight: 800;
+      cursor: pointer;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-family: inherit;
+      transition: background 0.1s, transform 0.1s;
+      flex-shrink: 0;
+    }
+    .btn-estop:hover  { background: #dc2626; }
+    .btn-estop:active { transform: scale(0.95); }
+
+    /* ── Recover ── */
+    .btn-recover {
+      background: #78350f33;
+      color: var(--yellow);
+      border-color: #f59e0b66;
+    }
+    .btn-recover:hover:not(:disabled) {
+      background: var(--yellow);
+      color: #1a1d27;
+    }
+    .btn-recover:disabled { opacity: 0.3; cursor: not-allowed; }
+    .btn-recover.recovering { animation: pulse 0.8s infinite; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>RoTo<span>SY</span> Control Interface</h1>
+  <div style="display:flex; align-items:center; gap:1rem;">
+    <button class="btn-estop" onclick="emergencyStop()">■ E-STOP</button>
+    <div id="ws-badge" class="badge connecting">
+      <div class="badge-dot"></div>
+      <span id="ws-label">연결 중...</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- Error banner (hidden by default) -->
+  <div id="error-banner">
+    <div class="err-title">Error</div>
+    <div id="error-msg" class="err-msg"></div>
+  </div>
+
+  <!-- Robot state -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div style="display: flex; align-items: center; gap: 2rem; flex-wrap: wrap;">
+
+      <!-- 상태 정보 (왼쪽) -->
+      <div style="flex: 1; min-width: 280px;">
+        <div class="card-title" style="margin-bottom: 0.9rem;">Robot State</div>
+        <div style="display: flex; gap: 2.5rem; flex-wrap: wrap; align-items: flex-start;">
+          <div class="status-item">
+            <span class="status-label">State</span>
+            <span id="st-state" class="status-value plain">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Servo</span>
+            <span id="st-servo" class="status-value plain">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Motion</span>
+            <span id="st-moving" class="status-value plain">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Arm Ready</span>
+            <span id="st-ready" class="status-value plain">—</span>
+          </div>
+        </div>
+        <div id="control-feedback" style="margin-top:0.7rem; font-size:0.75rem; color:var(--muted); font-family:var(--mono); min-height:1em;"></div>
+      </div>
+
+      <!-- 컨트롤 버튼 (오른쪽) -->
+      <div style="display: flex; gap: 0.65rem; flex-shrink: 0; align-items: center;">
+        <button id="btn-servo-on"  class="btn btn-on"    onclick="setServo(true)"    style="flex: none; padding: 0.7rem 1.2rem;">Servo ON</button>
+        <button id="btn-servo-off" class="btn btn-off"   onclick="setServo(false)"   style="flex: none; padding: 0.7rem 1.2rem;">Servo OFF</button>
+        <button id="btn-home"      class="btn move-btn"  onclick="moveHome()"        style="flex: none; padding: 0.7rem 1.2rem; background:#78350f33; border-color:#f59e0b44; color:var(--yellow);">Home</button>
+        <button id="btn-teach"     class="btn btn-teach" onclick="toggleTeaching()"  style="flex: none; padding: 0.7rem 1.2rem;">직접 교시</button>
+        <button id="btn-recover"   class="btn btn-recover" onclick="safeRecover()" style="flex: none; padding: 0.7rem 1.2rem;" disabled title="SAFE_STOP / SAFE_OFF 상태에서 복구 후 직접 교시 모드 진입">⚡ 안전 복구</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- TCP Pose -->
+  <div class="card">
+    <div class="card-title">TCP Pose &nbsp;<span style="color:var(--blue);font-weight:400;text-transform:none;letter-spacing:0">실시간</span></div>
+    <div class="pose-grid">
+      <div class="pose-item"><div class="pose-axis">X (mm)</div><div class="pose-val" id="tcp-x">—</div></div>
+      <div class="pose-item"><div class="pose-axis">Y (mm)</div><div class="pose-val" id="tcp-y">—</div></div>
+      <div class="pose-item"><div class="pose-axis">Z (mm)</div><div class="pose-val" id="tcp-z">—</div></div>
+      <div class="pose-item"><div class="pose-axis">Rx (°)</div><div class="pose-val" id="tcp-rx">—</div></div>
+      <div class="pose-item"><div class="pose-axis">Ry (°)</div><div class="pose-val" id="tcp-ry">—</div></div>
+      <div class="pose-item"><div class="pose-axis">Rz (°)</div><div class="pose-val" id="tcp-rz">—</div></div>
+    </div>
+  </div>
+
+  <!-- Joint Angles -->
+  <div class="card">
+    <div class="card-title">Joint Angles</div>
+    <div class="pose-grid">
+      <div class="pose-item"><div class="pose-axis">J1 (°)</div><div class="pose-val" id="j1">—</div></div>
+      <div class="pose-item"><div class="pose-axis">J2 (°)</div><div class="pose-val" id="j2">—</div></div>
+      <div class="pose-item"><div class="pose-axis">J3 (°)</div><div class="pose-val" id="j3">—</div></div>
+      <div class="pose-item"><div class="pose-axis">J4 (°)</div><div class="pose-val" id="j4">—</div></div>
+      <div class="pose-item"><div class="pose-axis">J5 (°)</div><div class="pose-val" id="j5">—</div></div>
+      <div class="pose-item"><div class="pose-axis">J6 (°)</div><div class="pose-val" id="j6">—</div></div>
+    </div>
+  </div>
+
+  <!-- Joint Jog Control -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">
+      Joint Jog Control
+      <span id="jog-status-badge" style="margin-left: 0.5rem; color: var(--red); display: none;">[DISABLED: SERVO OFF]</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+      <template id="jog-row-template">
+        <div class="pose-item" style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="pose-axis" style="font-weight: 700;">J<span class="j-idx"></span></span>
+            <span class="pose-val" style="font-size: 0.8rem; color: var(--muted);"><span class="j-val">0.00</span>°</span>
+          </div>
+          <div class="btn-group" style="margin-top: 0;">
+            <button class="btn btn-off jog-btn" data-dir="-1" style="padding: 0.5rem;">-</button>
+            <button class="btn btn-on jog-btn" data-dir="1" style="padding: 0.5rem;">+</button>
+          </div>
+        </div>
+      </template>
+      <div id="jog-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; width: 100%;"></div>
+    </div>
+    
+    <div style="margin-top: 1.5rem; display: flex; align-items: center; gap: 1rem;">
+      <span class="status-label">Jog Speed</span>
+      <input type="range" id="jog-speed-range" min="1" max="50" value="5" style="flex: 1; accent-color: var(--blue);">
+      <span id="jog-speed-val" class="status-value plain" style="width: 3ch; text-align: right;">5</span>
+      <span class="status-label">%</span>
+    </div>
+  </div>
+
+  <!-- Direct Move Control -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">Direct Move Control</div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+      
+      <!-- Task Space (MoveL) -->
+      <div class="pose-item" style="border: none; background: transparent; padding: 0;">
+        <div class="pose-axis" style="margin-bottom: 0.75rem; font-size: 0.75rem; color: var(--blue);">Task Space (Linear Move)</div>
+        <div class="pose-grid" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="status-item"><span class="pose-axis">X</span><input type="number" id="in-x" step="1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">Y</span><input type="number" id="in-y" step="1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">Z</span><input type="number" id="in-z" step="1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">Rx</span><input type="number" id="in-rx" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">Ry</span><input type="number" id="in-ry" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">Rz</span><input type="number" id="in-rz" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+        </div>
+        <div class="btn-group" style="margin-top:1rem;">
+          <button class="btn btn-on move-btn" onclick="moveL()" style="flex: 2;">Move Linear (MoveL)</button>
+          <button class="btn sync-btn" onclick="syncCurrentTask()" style="flex: 1; background: var(--surface); border-color: var(--border); color: var(--muted); font-size: 0.7rem;">Read Current</button>
+        </div>
+      </div>
+
+      <!-- Joint Space (MoveJ) -->
+      <div class="pose-item" style="border: none; background: transparent; padding: 0;">
+        <div class="pose-axis" style="margin-bottom: 0.75rem; font-size: 0.75rem; color: var(--green);">Joint Space (Joint Move)</div>
+        <div class="pose-grid" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="status-item"><span class="pose-axis">J1</span><input type="number" id="in-j1" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">J2</span><input type="number" id="in-j2" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">J3</span><input type="number" id="in-j3" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">J4</span><input type="number" id="in-j4" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">J5</span><input type="number" id="in-j5" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div class="status-item"><span class="pose-axis">J6</span><input type="number" id="in-j6" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+        </div>
+        <div class="btn-group" style="margin-top:1rem;">
+          <button class="btn btn-on move-btn" onclick="moveJ()" style="flex: 2; color:var(--green); border-color:rgba(34, 197, 94, 0.27);">Move Joint (MoveJ)</button>
+          <button class="btn sync-btn" onclick="syncCurrentJoint()" style="flex: 1; background: var(--surface); border-color: var(--border); color: var(--muted); font-size: 0.7rem;">Read Current</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<script>
+  const badge   = document.getElementById('ws-badge');
+  const wslabel = document.getElementById('ws-label');
+
+  function setConnectionStatus(state) {
+    badge.className = 'badge ' + state;
+    wslabel.textContent = { connected: '연결됨', disconnected: '연결 끊김', connecting: '연결 중...' }[state];
+  }
+
+  function fmt(v, decimals = 2) {
+    return typeof v === 'number' ? v.toFixed(decimals) : '—';
+  }
+
+  function colorState(el, val, trueClass, falseClass) {
+    el.className = 'status-value ' + (val ? trueClass : falseClass);
+  }
+
+  let latestState = null;
+
+  function applyState(s) {
+    latestState = s;
+    // Robot state
+    document.getElementById('st-state').textContent  = s.robot_state_str ?? '—';
+
+    // Servo
+    const servo = document.getElementById('st-servo');
+    servo.textContent = s.servo_on ? 'ON' : 'OFF';
+    colorState(servo, s.servo_on, 'good', 'bad');
+
+    // Moving
+    const moving = document.getElementById('st-moving');
+    moving.textContent = s.is_moving ? 'MOVING' : 'IDLE';
+    colorState(moving, s.is_moving, 'warn', 'plain');
+
+    // Arm ready
+    const ready = document.getElementById('st-ready');
+    ready.textContent = s.arm_ready ? 'READY' : 'NOT READY';
+    colorState(ready, s.arm_ready, 'good', 'muted');
+
+    // UI Interlocking
+    const isTeaching = s.teaching_mode === true;
+    const jogBadge   = document.getElementById('jog-status-badge');
+    const jogButtons  = document.querySelectorAll('.jog-btn');
+    const moveButtons = document.querySelectorAll('.move-btn');
+    const syncButtons = document.querySelectorAll('.sync-btn');
+    const speedSlider = document.getElementById('jog-speed-range');
+    const btnOn      = document.getElementById('btn-servo-on');
+    const btnOff     = document.getElementById('btn-servo-off');
+    const btnHome    = document.getElementById('btn-home');
+    const btnTeach   = document.getElementById('btn-teach');
+    const btnRecover = document.getElementById('btn-recover');
+
+    // 복구 버튼: SAFE_STOP(5), SAFE_OFF(3), NOT_READY(15) 일 때만 활성화
+    const recoverableStates = [3, 5, 15];
+    const isRecoverable = recoverableStates.includes(s.robot_state) && !s.is_moving;
+    btnRecover.disabled = !isRecoverable;
+
+    if (isTeaching) {
+      // 직접 교시 모드: Jog + Move 비활성화, Read Current만 활성화
+      jogBadge.style.display = 'inline';
+      jogBadge.textContent = '[DISABLED: 직접 교시 모드]';
+      jogButtons.forEach(b => b.disabled = true);
+      moveButtons.forEach(b => b.disabled = true);
+      syncButtons.forEach(b => b.disabled = false);
+      speedSlider.disabled = true;
+      btnOn.disabled = true;
+      btnOff.disabled = false;
+      btnHome.disabled = true;
+      btnTeach.textContent = '교시 종료';
+      btnTeach.classList.add('teaching-active');
+      btnTeach.disabled = false;
+    } else if (s.servo_on) {
+      jogBadge.style.display = 'none';
+      jogBadge.textContent = '[DISABLED: SERVO OFF]';
+      jogButtons.forEach(b => b.disabled = false);
+      moveButtons.forEach(b => b.disabled = false);
+      syncButtons.forEach(b => b.disabled = false);
+      speedSlider.disabled = false;
+      btnOn.disabled = true;
+      btnOff.disabled = false;
+      btnHome.disabled = false;
+      btnTeach.textContent = '직접 교시';
+      btnTeach.classList.remove('teaching-active');
+      btnTeach.disabled = false;
+    } else {
+      jogBadge.style.display = 'inline';
+      jogBadge.textContent = '[DISABLED: SERVO OFF]';
+      jogButtons.forEach(b => b.disabled = true);
+      moveButtons.forEach(b => b.disabled = true);
+      syncButtons.forEach(b => b.disabled = true);
+      speedSlider.disabled = true;
+      btnOn.disabled = false;
+      btnOff.disabled = true;
+      btnHome.disabled = true;
+      btnTeach.textContent = '직접 교시';
+      btnTeach.classList.remove('teaching-active');
+      btnTeach.disabled = true;
+    }
+
+    // TCP — 실시간 디스플레이는 TF2 기반 current_tcp_rt, 없으면 DSR-native current_tcp 사용
+    const tcp = (s.current_tcp_rt && s.current_tcp_rt.some(v => v !== 0)) ? s.current_tcp_rt : (s.current_tcp ?? []);
+    ['tcp-x','tcp-y','tcp-z','tcp-rx','tcp-ry','tcp-rz'].forEach((id, i) => {
+      document.getElementById(id).textContent = fmt(tcp[i]);
+    });
+
+    // Joints
+    const joints = s.current_joints_deg ?? [];
+    ['j1','j2','j3','j4','j5','j6'].forEach((id, i) => {
+      const val = fmt(joints[i]);
+      document.getElementById(id).textContent = val;
+      const jogVal = document.getElementById(`jog-val-${i}`);
+      if (jogVal) jogVal.textContent = val;
+    });
+
+    // Error
+    const banner = document.getElementById('error-banner');
+    if (s.error_code && s.error_code !== 0) {
+      document.getElementById('error-msg').textContent = `[${s.error_code}] ${s.error_message}`;
+      banner.classList.add('visible');
+    } else {
+      banner.classList.remove('visible');
+    }
+  }
+
+  async function setServo(enable) {
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = `Sending Servo ${enable ? 'ON' : 'OFF'} command...`;
+    try {
+      const resp = await fetch('/api/servo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable })
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        feedback.textContent = `Success: ${data.message}`;
+        feedback.style.color = 'var(--green)';
+      } else {
+        showAlert(data.detail || 'Command failed');
+      }
+    } catch (err) { showAlert(err.message); }
+    finally { setTimeout(() => feedback.textContent = '', 5000); }
+  }
+
+  async function moveHome() {
+    const btn = document.getElementById('btn-home');
+    if (btn && btn.disabled) return;
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = 'Moving Home...';
+    try {
+      const resp = await fetch('/api/home', { method: 'POST' });
+      const data = await resp.json();
+      if (resp.ok) {
+        feedback.textContent = `Home Alignment Success`;
+        feedback.style.color = 'var(--green)';
+      } else {
+        showAlert(data.detail || 'Home failed');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function moveJ() {
+    const me = document.querySelector('button[onclick="moveJ()"]');
+    if (me && me.disabled) return;
+    const joints = [
+      parseFloat(document.getElementById('in-j1').value), parseFloat(document.getElementById('in-j2').value),
+      parseFloat(document.getElementById('in-j3').value), parseFloat(document.getElementById('in-j4').value),
+      parseFloat(document.getElementById('in-j5').value), parseFloat(document.getElementById('in-j6').value)
+    ];
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = 'Executing MoveJ...';
+    try {
+      const resp = await fetch('/api/move_j', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ joints })
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        feedback.textContent = `MoveJ Success (${data.time.toFixed(2)}s)`;
+        feedback.style.color = 'var(--green)';
+      } else {
+        showAlert(data.detail || 'MoveJ failed');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function moveL() {
+    const me = document.querySelector('button[onclick="moveL()"]');
+    if (me && me.disabled) return;
+    const pose = [
+      parseFloat(document.getElementById('in-x').value), parseFloat(document.getElementById('in-y').value),
+      parseFloat(document.getElementById('in-z').value), parseFloat(document.getElementById('in-rx').value),
+      parseFloat(document.getElementById('in-ry').value), parseFloat(document.getElementById('in-rz').value)
+    ];
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = 'Executing MoveL...';
+    try {
+      const resp = await fetch('/api/move_l', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pose })
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        feedback.textContent = `MoveL Success (${data.time.toFixed(2)}s)`;
+        feedback.style.color = 'var(--green)';
+      } else {
+        showAlert(data.detail || 'MoveL failed');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  function syncCurrentTask() {
+    if (!latestState || !latestState.current_tcp) return;
+    const tcp = latestState.current_tcp;
+    const ids = ['in-x', 'in-y', 'in-z', 'in-rx', 'in-ry', 'in-rz'];
+    ids.forEach((id, i) => {
+        const el = document.getElementById(id);
+        if (el) el.value = tcp[i].toFixed(2);
+    });
+  }
+
+  function syncCurrentJoint() {
+    if (!latestState || !latestState.current_joints_deg) return;
+    const joints = latestState.current_joints_deg;
+    const ids = ['in-j1', 'in-j2', 'in-j3', 'in-j4', 'in-j5', 'in-j6'];
+    ids.forEach((id, i) => {
+        const el = document.getElementById(id);
+        if (el) el.value = joints[i].toFixed(2);
+    });
+  }
+
+  function showAlert(msg, type = 'error') {
+    const banner = document.getElementById('error-banner');
+    const msgEl = document.getElementById('error-msg');
+    msgEl.textContent = msg;
+    banner.classList.add('visible');
+    setTimeout(() => banner.classList.remove('visible'), 5000);
+  }
+
+  async function safeRecover() {
+    const btn = document.getElementById('btn-recover');
+    if (btn && btn.disabled) return;
+    const feedback = document.getElementById('control-feedback');
+    feedback.style.color = 'var(--yellow)';
+    feedback.textContent = '안전 복구 시퀀스 실행 중...';
+    btn.classList.add('recovering');
+    btn.disabled = true;
+    try {
+      const resp = await fetch('/api/recover', { method: 'POST' });
+      const data = await resp.json();
+      if (resp.ok) {
+        feedback.style.color = 'var(--green)';
+        feedback.textContent = `복구 완료 — ${data.message}`;
+      } else {
+        feedback.style.color = 'var(--red)';
+        feedback.textContent = data.detail || '안전 복구 실패';
+      }
+    } catch (err) {
+      feedback.style.color = 'var(--red)';
+      feedback.textContent = '안전 복구 실패: ' + err.message;
+    } finally {
+      btn.classList.remove('recovering');
+      setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 6000);
+    }
+  }
+
+  async function emergencyStop() {
+    const feedback = document.getElementById('control-feedback');
+    feedback.style.color = 'var(--red)';
+    feedback.textContent = '비상정지 실행 중...';
+    try {
+      const resp = await fetch('/api/estop', { method: 'POST' });
+      const data = await resp.json();
+      feedback.textContent = resp.ok ? '비상정지 완료 — 서보 OFF' : (data.detail || '비상정지 실패');
+    } catch (err) {
+      feedback.textContent = '비상정지 실패: ' + err.message;
+    } finally {
+      setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 5000);
+    }
+  }
+
+  async function toggleTeaching() {
+    const isTeaching = latestState && latestState.teaching_mode === true;
+    const feedback = document.getElementById('control-feedback');
+    feedback.style.color = 'var(--muted)';
+    feedback.textContent = isTeaching ? '직접 교시 모드 해제 중...' : '직접 교시 모드 진입 중...';
+    try {
+      const resp = await fetch('/api/teaching', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable: !isTeaching })
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        feedback.style.color = 'var(--blue)';
+        feedback.textContent = data.message ?? (isTeaching ? '직접 교시 해제' : '직접 교시 활성화');
+      } else {
+        showAlert(data.detail || 'Teaching 전환 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+    finally { setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 5000); }
+  }
+
+  function connect() {
+    setConnectionStatus('connecting');
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onopen  = () => setConnectionStatus('connected');
+    ws.onclose = () => { setConnectionStatus('disconnected'); setTimeout(connect, 3000); };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (e) => { try { applyState(JSON.parse(e.data)); } catch (_) {} };
+  }
+
+  connect();
+
+  const jogContainer = document.getElementById('jog-container');
+  const jogTemplate  = document.getElementById('jog-row-template');
+  const speedRange   = document.getElementById('jog-speed-range');
+  const speedVal     = document.getElementById('jog-speed-val');
+  speedRange.oninput = () => { speedVal.textContent = speedRange.value; };
+
+  for (let i = 0; i < 6; i++) {
+    const clone = jogTemplate.content.cloneNode(true);
+    clone.querySelector('.j-idx').textContent = i + 1;
+    clone.querySelector('.j-val').id = `jog-val-${i}`;
+    const btns = clone.querySelectorAll('.jog-btn');
+    btns.forEach(btn => {
+      const dir = parseInt(btn.dataset.dir);
+      btn.onpointerdown = async (e) => {
+        if (btn.disabled) return;
+        try { await fetch('/api/jog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ joint_index: i, speed: parseFloat(speedRange.value) * dir }) }); } catch (err) {}
+      };
+      btn.onpointerup = btn.onpointerleave = async (e) => {
+        if (btn.disabled) return;
+        try { await fetch('/api/jog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ joint_index: i, speed: 0 }) }); } catch (err) {}
+      };
+    });
+    jogContainer.appendChild(clone);
+  }
+</script>
+</body>
+</html>

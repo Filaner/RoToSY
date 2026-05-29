@@ -1,0 +1,10 @@
+# Enable or disable servo power.
+# Servo ON  → transitions robot from SAFE_OFF / NOT_READY → STANDBY
+# Servo OFF → applies a controlled stop and removes power
+bool enable       # true = ON, false = OFF
+int8 stop_type    # Only used when enable=false:
+                  # 0=QUICK_STO, 1=QUICK, 2=SLOW, 3=HOLD(emergency)
+---
+bool   success
+string message
+int8   robot_state_after   # GetRobotState result after the command

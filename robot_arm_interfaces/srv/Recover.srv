@@ -1,0 +1,9 @@
+# Trigger safety recovery sequence.
+# Attempts to transition SAFE_STOP / SAFE_OFF → STANDBY, then optionally
+# enters direct-teaching mode so the operator can verify robot position.
+bool go_to_teaching   # enter MANUAL mode after successful recovery
+---
+bool   success
+string message
+int32  robot_state_after
+string last_alarm     # last alarm info from DSR (level:group:index params)

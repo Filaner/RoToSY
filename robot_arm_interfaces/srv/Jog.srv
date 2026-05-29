@@ -1,0 +1,9 @@
+# Jog a single joint
+# joint_index: 0-5 (J1-J6)
+# speed: percentage of max speed (e.g., 10.0 for 10%, -10.0 for reverse)
+#        Set to 0 to stop jogging that joint.
+int8 joint_index
+float64 speed
+---
+bool success
+string message

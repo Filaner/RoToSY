@@ -1,0 +1,18 @@
+camera_extrinsic:
+  ros__parameters:
+    base_frame: "base_link"
+    camera_frame: "camera_color_optical_frame"
+    translation_xyz: [0.81817233, 0.61561038, 0.86309139]
+    rotation_quat_xyzw: [0.74236826, 0.63561630, -0.15995041, 0.13891419]
+
+hand_eye_result:
+  ros__parameters:
+    gripper_frame: "link_6"
+    marker_frame: "calibration_aruco_marker"
+    gripper_to_marker_xyz: [-0.08260684, 0.10580424, 0.00910738]
+    gripper_to_marker_quat_xyzw: [-0.28210154, -0.61769150, -0.29542788, 0.67201064]
+    marker_id: 0
+    marker_size_m: 0.05000000
+    samples: 14
+    mean_position_residual_m: 0.01265651
+    max_position_residual_m: 0.02418496

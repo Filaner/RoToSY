@@ -1,0 +1,6 @@
+# Inject a timed pause into the motion sequence.
+# Blocks the caller until duration_sec elapses; does NOT freeze the executor.
+float64 duration_sec   # seconds to wait (≥ 0)
+---
+bool   success
+float64 actual_duration_sec
