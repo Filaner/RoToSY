@@ -1,0 +1,17 @@
+camera_extrinsic:
+  ros__parameters:
+    base_frame: "base_link"
+    camera_frame: "camera_color_optical_frame"
+    translation_xyz: [0.67744208, 0.45732799, 0.84526635]
+    rotation_quat_xyzw: [0.74626348, 0.63484653, -0.14617884, 0.13672031]
+
+# manual_calib: samples=6  mean=3.42mm  max=5.65mm
+
+hand_eye_result:
+  ros__parameters:
+    gripper_frame: "link_6"
+    marker_frame: "calibration_aruco_marker"
+    gripper_to_marker_xyz: [-0.04032655, 0.09161299, -0.00066978]
+    gripper_to_marker_quat_xyzw: [-0.26441589, -0.62651231, -0.2851028, 0.6754872]
+    marker_id: 0
+    marker_size_m: 0.05

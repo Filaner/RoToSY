@@ -1,0 +1,31 @@
+aruco_camera_calibrator:
+  ros__parameters:
+    image_topic: "/camera/camera/color/image_raw"
+    camera_info_topic: "/camera/camera/color/camera_info"
+
+    base_frame: "base_link"
+    gripper_frame: "link_6"
+    camera_frame: "camera_color_optical_frame"
+    marker_frame: "calibration_aruco_marker"
+
+    # Attach the marker rigidly to link_6/flange. The marker offset does not
+    # need to be measured; it is estimated from multiple robot poses.
+    marker_id: 0
+    marker_size_m: 0.05
+    aruco_dictionary: "DICT_4X4_50"
+
+    # Move the wrist through diverse poses. Rotation diversity matters more
+    # than collecting many nearly identical samples.
+    samples_required: 25
+    max_samples: 100
+    min_sample_interval_sec: 0.7
+    min_translation_delta_m: 0.01
+    min_rotation_delta_deg: 3.0
+    sample_mode: "auto"
+    take_sample_service: "/calibration/take_sample"
+    max_marker_age_sec: 1.5
+
+    publish_marker_tf: true
+    publish_static_tf_on_complete: true
+    save_result: true
+    result_path: "/home/cheol/RoToSY_ws/src/rotosy_calibration/config/camera_extrinsic.yaml"

@@ -9,18 +9,31 @@ Architecture:
 """
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Set
 
+# 폴링 엔드포인트 access 로그 무음 처리
+_MUTED_PATHS = {'/camera/markers', '/camera/detections', '/camera/stream'}
+
+class _MutePollingFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(p in msg for p in _MUTED_PATHS)
+
+logging.getLogger('uvicorn.access').addFilter(_MutePollingFilter())
+
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import ros_node as ros
+from . import camera as cam_module
 from .routers import status as status_router
 from .routers import control as control_router
+from .routers import manual_calib as manual_calib_router
 
 STATIC_DIR = Path(__file__).parent / 'static'
 BROADCAST_HZ = 10  # state push rate to WebSocket clients
@@ -74,9 +87,11 @@ async def _broadcast_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ros.init_ros()
+    cam_module.camera.start()
     broadcast_task = asyncio.create_task(_broadcast_loop())
     yield
     broadcast_task.cancel()
+    cam_module.camera.stop()
     ros.shutdown_ros()
 
 
@@ -86,6 +101,7 @@ app = FastAPI(title='RoToSY Web Interface', version='0.1.0', lifespan=lifespan)
 
 app.include_router(status_router.router, prefix='/api')
 app.include_router(control_router.router, prefix='/api')
+app.include_router(manual_calib_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')
@@ -94,6 +110,51 @@ if STATIC_DIR.exists():
 @app.get('/', response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / 'index.html').read_text())
+
+
+@app.get('/camera/stream')
+async def camera_stream():
+    """MJPEG stream from the RealSense camera."""
+    from fastapi import HTTPException as _HTTPException
+    if not cam_module.camera.available:
+        raise _HTTPException(status_code=503, detail='pyrealsense2 not installed')
+    if cam_module.camera.error:
+        raise _HTTPException(status_code=503, detail=cam_module.camera.error)
+
+    async def generate():
+        while True:
+            frame = cam_module.camera.get_jpeg()
+            if frame:
+                yield (
+                    b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n'
+                    + frame +
+                    b'\r\n'
+                )
+            await asyncio.sleep(1 / 30)
+
+    return StreamingResponse(
+        generate(),
+        media_type='multipart/x-mixed-replace; boundary=frame',
+    )
+
+
+@app.get('/camera/markers')
+async def camera_markers() -> dict:
+    """Return the latest detected ArUco marker positions."""
+    return {
+        'markers': cam_module.camera.get_aruco_markers(),
+        'error':   cam_module.camera.error,
+    }
+
+
+@app.get('/camera/detections')
+async def camera_detections() -> dict:
+    """Return the latest YOLO detection results with 3D robot-base coordinates."""
+    return {
+        'detections': cam_module.camera.get_yolo_detections(),
+        'error':      cam_module.camera.error,
+    }
 
 
 @app.websocket('/ws')

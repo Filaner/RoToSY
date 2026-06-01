@@ -1,7 +1,0 @@
-# DO 출력 제어 (컨베이어 등)
-uint8  index   # DO 인덱스 (0-based)
-bool   value   # true=ON, false=OFF
----
-bool   success
-string message
-uint8  do_mask  # 명령 후 현재 DO 상태 비트마스크
