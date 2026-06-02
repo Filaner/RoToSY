@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Set
 
 # 폴링 엔드포인트 access 로그 무음 처리
-_MUTED_PATHS = {'/camera/markers', '/camera/detections', '/camera/stream'}
+_MUTED_PATHS = {'/camera/markers', '/camera/stream'}
 
 class _MutePollingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
@@ -86,7 +86,9 @@ async def _broadcast_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    ros.init_ros()
+    # rclpy.init() + DDS 디스커버리가 수 초 걸릴 수 있으므로 스레드에서 실행해
+    # asyncio 이벤트 루프를 막지 않는다 → 웹페이지가 즉시 로드됨
+    await asyncio.get_running_loop().run_in_executor(None, ros.init_ros)
     cam_module.camera.start()
     broadcast_task = asyncio.create_task(_broadcast_loop())
     yield
@@ -131,7 +133,7 @@ async def camera_stream():
                     + frame +
                     b'\r\n'
                 )
-            await asyncio.sleep(1 / 30)
+            await asyncio.sleep(1 / 60)
 
     return StreamingResponse(
         generate(),
@@ -147,14 +149,6 @@ async def camera_markers() -> dict:
         'error':   cam_module.camera.error,
     }
 
-
-@app.get('/camera/detections')
-async def camera_detections() -> dict:
-    """Return the latest YOLO detection results with 3D robot-base coordinates."""
-    return {
-        'detections': cam_module.camera.get_yolo_detections(),
-        'error':      cam_module.camera.error,
-    }
 
 
 @app.websocket('/ws')

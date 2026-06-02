@@ -11,6 +11,8 @@
 P_base_marker = TCP_xyz + gripper_to_marker_xyz (yaml에서 자동 로드, 근사값)
 """
 
+import asyncio
+import random
 import threading
 from pathlib import Path
 
@@ -28,8 +30,11 @@ _CALIB_PATH = Path('/home/cheol/RoToSY_ws/src/rotosy_calibration/config/camera_e
 _MIN_POINTS = 4
 
 _lock   = threading.Lock()
-_points: list = []  # [{label, p_tcp_mm, p_cam_m}]
+_points: list = []  # [{label, p_tcp_mm, p_cam_m, tcp_orient_deg}]
 _result: dict = {}
+
+_auto_lock   = threading.Lock()
+_auto_status: dict = {'running': False, 'done': True, 'progress': 0, 'total': 0, 'captured': 0, 'log': []}
 
 
 # ── 유틸 ──────────────────────────────────────────────────────────────────────
@@ -125,10 +130,19 @@ def capture(req: CaptureRequest):
     if m.get('x_cam_m') is None:
         raise HTTPException(status_code=422, detail='Depth 값 없음 — 카메라와의 거리 확인')
 
+    # 현재 TCP 자세(rx, ry, rz)를 ROS 노드에서 읽어 저장 — compute 시 포인트별 gm_offset 변환에 사용
+    orient = [0.0, 0.0, 0.0]
+    node = ros.get_node()
+    if node is not None:
+        tcp_state = node.get_state().get('current_tcp', [])
+        if len(tcp_state) >= 6:
+            orient = [float(tcp_state[3]), float(tcp_state[4]), float(tcp_state[5])]
+
     entry = {
-        'label':     req.label or f'pt{len(_points)+1}',
-        'p_tcp_mm':  [req.x_tcp_mm, req.y_tcp_mm, req.z_tcp_mm],
-        'p_cam_m':   [m['x_cam_m'], m['y_cam_m'], m['z_cam_m']],
+        'label':          req.label or f'pt{len(_points)+1}',
+        'p_tcp_mm':       [req.x_tcp_mm, req.y_tcp_mm, req.z_tcp_mm],
+        'p_cam_m':        [m['x_cam_m'], m['y_cam_m'], m['z_cam_m']],
+        'tcp_orient_deg': orient,
     }
     with _lock:
         _points.append(entry)
@@ -157,9 +171,10 @@ def capture_auto(marker_id: int = 0):
         raise HTTPException(status_code=422, detail='Depth 값 없음')
 
     entry = {
-        'label':    f'pt{len(_points)+1}',
-        'p_tcp_mm': [float(tcp[0]), float(tcp[1]), float(tcp[2])],
-        'p_cam_m':  [m['x_cam_m'], m['y_cam_m'], m['z_cam_m']],
+        'label':          f'pt{len(_points)+1}',
+        'p_tcp_mm':       [float(tcp[0]), float(tcp[1]), float(tcp[2])],
+        'p_cam_m':        [m['x_cam_m'], m['y_cam_m'], m['z_cam_m']],
+        'tcp_orient_deg': [float(tcp[3]), float(tcp[4]), float(tcp[5])],
     }
     with _lock:
         _points.append(entry)
@@ -205,13 +220,19 @@ def compute_calibration(req: ComputeRequest):
         raise HTTPException(status_code=422,
                             detail=f'{_MIN_POINTS}개 이상 필요 (현재 {len(pts)}개)')
 
-    # 사용자가 입력한 TCP→마커 오프셋 (tool 좌표계)
-    R_tcp       = _euler_to_rotation(req.rx_deg, req.ry_deg, req.rz_deg)
-    gm_mm       = np.array([req.gm_x_mm, req.gm_y_mm, req.gm_z_mm])
-    gm_world_mm = R_tcp @ gm_mm    # 월드 좌표계로 변환
+    gm_mm     = np.array([req.gm_x_mm, req.gm_y_mm, req.gm_z_mm])
+    R_tcp_fix = _euler_to_rotation(req.rx_deg, req.ry_deg, req.rz_deg)  # 저장된 자세 없을 때 fallback
 
-    P_base = (np.array([p['p_tcp_mm'] for p in pts]) + gm_world_mm) / 1000.0
-    P_cam  = np.array([p['p_cam_m']   for p in pts], dtype=float)
+    # 포인트마다 캡처 시점의 실제 TCP 자세로 gm_offset을 월드 좌표계로 변환
+    P_base_list = []
+    for p in pts:
+        orient = p.get('tcp_orient_deg')
+        R_i = _euler_to_rotation(orient[0], orient[1], orient[2]) if orient else R_tcp_fix
+        gm_world_i = R_i @ gm_mm
+        P_base_list.append((np.array(p['p_tcp_mm']) + gm_world_i) / 1000.0)
+
+    P_base = np.array(P_base_list)
+    P_cam  = np.array([p['p_cam_m'] for p in pts], dtype=float)
 
     R, t, residuals = _svd_rigid(P_cam, P_base)
     q = _rot_to_quat(R)
@@ -223,9 +244,7 @@ def compute_calibration(req: ComputeRequest):
         'max_residual_mm':       float(np.max(residuals) * 1000),
         'per_point_residual_mm': [round(r * 1000, 2) for r in residuals],
         'samples':               len(pts),
-        'fixed_orientation_deg': [req.rx_deg, req.ry_deg, req.rz_deg],
         'gm_offset_tool_mm':     gm_mm.tolist(),
-        'gm_offset_world_mm':    gm_world_mm.tolist(),
     }
     with _lock:
         _result.update(res)
@@ -277,3 +296,118 @@ def save_calibration():
 
     _CALIB_PATH.write_text(content, encoding='utf-8')
     return {'success': True, 'saved_to': str(_CALIB_PATH), **r}
+
+
+# ── 자동 캘리브레이션 ─────────────────────────────────────────────────────────
+
+class AutoRunRequest(BaseModel):
+    x_min: float = 310.0
+    x_max: float = 460.0
+    y_min: float = -154.0
+    y_max: float = 350.0
+    z_min: float = 136.0
+    z_max: float = 460.0
+    count: int = 20
+    velocity: float = 30.0
+    acceleration: float = 60.0
+
+
+async def _run_auto_calib(req: AutoRunRequest) -> None:
+    node = ros.get_node()
+    tcp0 = node.get_state().get('current_tcp', [0.0] * 6)
+    rx_fix, ry_fix, rz_fix = float(tcp0[3]), float(tcp0[4]), float(tcp0[5])
+
+    captured  = 0
+    attempts  = 0
+    max_tries = req.count * 3
+
+    while captured < req.count and attempts < max_tries:
+        with _auto_lock:
+            if not _auto_status['running']:
+                break
+
+        attempts += 1
+        xr = random.uniform(req.x_min, req.x_max)
+        yr = random.uniform(req.y_min, req.y_max)
+        zr = random.uniform(req.z_min, req.z_max)
+
+        with _auto_lock:
+            _auto_status['log'].append(f'[{attempts}] → ({xr:.0f}, {yr:.0f}, {zr:.0f}) mm')
+
+        result = await node.call_movel(
+            [xr, yr, zr, rx_fix, ry_fix, rz_fix],
+            req.velocity, req.acceleration,
+        )
+
+        if not result.get('success'):
+            with _auto_lock:
+                _auto_status['log'].append(f'  ✗ {result.get("message", "이동 실패")}')
+            await asyncio.sleep(0.3)
+            continue
+
+        await asyncio.sleep(0.4)  # 카메라 안정화
+
+        markers = cam_module.camera.get_aruco_markers()
+        mk = next((m for m in markers if m['id'] == 0), None)
+
+        if mk is None or mk.get('x_cam_m') is None:
+            with _auto_lock:
+                _auto_status['log'].append('  ✗ 마커 미감지 — 스킵')
+            continue
+
+        cur = node.get_state().get('current_tcp', [0.0] * 6)
+        entry = {
+            'label':          f'auto{captured + 1}',
+            'p_tcp_mm':       [float(cur[0]), float(cur[1]), float(cur[2])],
+            'p_cam_m':        [mk['x_cam_m'], mk['y_cam_m'], mk['z_cam_m']],
+            'tcp_orient_deg': [float(cur[3]), float(cur[4]), float(cur[5])],
+        }
+        with _lock:
+            _points.append(entry)
+            captured += 1
+
+        with _auto_lock:
+            _auto_status['progress'] = captured
+            _auto_status['log'].append(f'  ✓ {captured}/{req.count} 캡처 완료')
+
+    with _auto_lock:
+        _auto_status['running'] = False
+        _auto_status['done']    = True
+        _auto_status['captured'] = captured
+        tail = (f'완료! {captured}개 수집' if captured >= req.count
+                else f'종료 — {captured}/{req.count}개 수집 (시도 {attempts}회)')
+        _auto_status['log'].append(tail)
+
+
+@router.post('/auto_run')
+async def auto_run(req: AutoRunRequest):
+    global _auto_status
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 노드 미연결')
+
+    with _auto_lock:
+        if _auto_status.get('running'):
+            raise HTTPException(status_code=409, detail='이미 자동 캘리브레이션 실행 중')
+        _auto_status = {
+            'running': True, 'done': False,
+            'progress': 0, 'total': req.count, 'captured': 0,
+            'log': ['자동 캘리브레이션 시작...'],
+        }
+
+    asyncio.create_task(_run_auto_calib(req))
+    return {'started': True}
+
+
+@router.post('/auto_stop')
+def auto_stop():
+    with _auto_lock:
+        _auto_status['running'] = False
+        _auto_status['log'].append('사용자 중지 요청 (현재 이동 완료 후 정지)')
+    return {'stopped': True}
+
+
+@router.get('/auto_status')
+def get_auto_status():
+    with _auto_lock:
+        return dict(_auto_status)

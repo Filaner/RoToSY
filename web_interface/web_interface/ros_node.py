@@ -146,10 +146,42 @@ class RobotBridgeNode(Node):
         """Emergency stop: halt motion and disable servo immediately."""
         return await self._run_srv(self._cli_estop, EStop.Request())
 
+    async def call_jog_cart_step(self, axis: int, direction: int, step: float) -> bool:
+        """현재 TCP에서 axis 방향으로 step(mm 또는 deg) 만큼 MoveL."""
+        state = self.get_state()
+        tcp = state.get('current_tcp', [0.0] * 6)
+        if len(tcp) < 6 or all(v == 0.0 for v in tcp[:3]):
+            return False
+
+        target = [float(v) for v in tcp]
+        target[axis] += step * direction
+
+        if not self._ac_movel.wait_for_server(timeout_sec=0.5):
+            return False
+
+        goal = MoveL.Goal()
+        goal.x, goal.y, goal.z, goal.rx, goal.ry, goal.rz = target
+        goal.linear_velocity_mm_s = 50.0
+        goal.linear_accel_mm_s2   = 100.0
+
+        send_fut = self._ac_movel.send_goal_async(goal)
+        while not send_fut.done():
+            await asyncio.sleep(0.01)
+
+        handle = send_fut.result()
+        if not handle.accepted:
+            return False
+
+        res_fut = handle.get_result_async()
+        while not res_fut.done():
+            await asyncio.sleep(0.02)
+
+        return bool(res_fut.result().result.success)
+
     async def call_recover(self) -> dict:
-        """Trigger safety recovery: SAFE_STOP/SAFE_OFF → STANDBY → teaching mode."""
+        """Trigger safety recovery: SAFE_STOP/SAFE_OFF → STANDBY (servo ON)."""
         req = Recover.Request()
-        req.go_to_teaching = True
+        req.go_to_teaching = False
         return await self._run_srv(self._cli_recover, req)
 
     async def _run_action(self, client, goal) -> dict:

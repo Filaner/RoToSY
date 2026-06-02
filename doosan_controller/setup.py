@@ -28,6 +28,7 @@ setup(
         'console_scripts': [
             'arm_controller  = doosan_controller.arm_controller_node:main',
             'test_movel      = doosan_controller.test_movel:main',
+            'test_moveC      = doosan_controller.test_moveC:main',
             'motion_sequence = doosan_controller.motion_sequence:main',
             'tcp_monitor     = doosan_controller.tcp_monitor:main',
         ],

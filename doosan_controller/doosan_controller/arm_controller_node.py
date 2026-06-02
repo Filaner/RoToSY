@@ -135,7 +135,8 @@ class ArmControllerNode(Node):
         self._current_tcp    = [0.0] * 6
 
         # ── 안전복구 이벤트 / 스레드 ─────────────────────────────────────
-        self._recovery_event  = threading.Event()
+        self._recovery_event        = threading.Event()
+        self._intentional_servo_off = False   # 사용자가 의도적으로 Servo OFF 한 경우 True
         self._recovery_thread = threading.Thread(
             target=self._auto_recovery_loop, daemon=True
         )
@@ -341,15 +342,18 @@ class ArmControllerNode(Node):
         # SAFE_STOP / SAFE_OFF 전환 감지 → 자동복구 트리거
         # 반드시 정상 운전 중(STANDBY/MOVING)에서 폴트 상태로 전환된 경우에만 발동.
         # 기동 시 NOT_READY → SAFE_OFF 전환은 정상 시퀀스이므로 무시.
+        # 사용자가 의도적으로 Servo OFF 한 경우에는 자동복구 제외.
         if (self._prev_robot_state in (STATE_STANDBY, STATE_MOVING) and
                 state in (STATE_SAFE_STOP, STATE_SAFE_OFF) and
-                self._auto_recovery_enabled):
+                self._auto_recovery_enabled and
+                not self._intentional_servo_off):
             self.get_logger().warn(
                 f'[SafeRecovery] 상태 전환 감지: '
                 f'{STATE_STR.get(self._prev_robot_state, self._prev_robot_state)} '
                 f'→ {STATE_STR.get(state, state)} — 자동복구 예약'
             )
             self._recovery_event.set()
+        self._intentional_servo_off = False   # 매 주기 초기화
         self._prev_robot_state = state
 
         msg = RobotStatus()
@@ -377,6 +381,7 @@ class ArmControllerNode(Node):
         if request.enable:
             response.success, response.message = self._do_servo_on()
         else:
+            self._intentional_servo_off = True   # 의도적 OFF — 자동복구 억제
             response.success, response.message = self._do_servo_off(request.stop_type)
 
         response.robot_state_after = self._get_robot_state_now()

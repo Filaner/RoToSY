@@ -25,8 +25,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'aruco_camera_calibrator = rotosy_calibration.aruco_camera_calibrator:main',
+            'aruco_camera_calibrator   = rotosy_calibration.aruco_camera_calibrator:main',
             'calibration_motion_runner = rotosy_calibration.calibration_motion_runner:main',
+            'touch_calibration         = rotosy_calibration.touch_calibration:main',
         ],
     },
 )

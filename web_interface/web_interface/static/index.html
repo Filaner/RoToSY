@@ -419,18 +419,17 @@
         </button>
       </div>
     </div>
-    <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-start;">
-      <div style="flex:1; min-width:300px; position:relative;">
+    <div style="display:flex; gap:1rem; align-items:flex-start;">
+      <div style="flex:0 0 75%; position:relative;">
         <img id="camera-img"
           src="/camera/stream"
           style="width:100%; border-radius:0.5rem; border:1px solid var(--border); display:block; background:#000;"
-          onerror="document.getElementById('camera-img').style.display='none'; document.getElementById('camera-err').style.display='block';"
         />
         <div id="camera-err" style="display:none; padding:2rem; text-align:center; color:var(--muted); font-size:0.85rem;">
-          카메라 연결 안 됨 — RealSense 연결 확인
+          카메라 연결 중... 잠시 대기
         </div>
       </div>
-      <div id="aruco-list" style="min-width:160px; font-family:var(--mono); font-size:0.8rem; color:var(--text);">
+      <div id="aruco-list" style="flex:1; font-family:var(--mono); font-size:0.8rem; color:var(--text);">
         <div style="color:var(--muted); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.5rem;">검출된 마커</div>
         <div id="aruco-items" style="color:var(--muted);">—</div>
       </div>
@@ -459,6 +458,7 @@
         <div style="display:flex; gap:0.5rem;">
           <button class="btn" onclick="calibFillTcp()" style="flex:1; padding:0.5rem; font-size:0.72rem; background:var(--surface); border-color:var(--border); color:var(--muted);">웹 TCP 자동 입력</button>
           <button class="btn btn-on" onclick="calibCapture()" style="flex:1.5; padding:0.5rem; font-size:0.8rem; font-weight:700;">캡처</button>
+          <button class="btn btn-teach" onclick="calibCaptureAuto()" style="flex:1; padding:0.5rem; font-size:0.75rem; font-weight:700;">Auto 캡처</button>
         </div>
         <div id="calib-feedback" style="margin-top:0.4rem; font-size:0.75rem; font-family:var(--mono); color:var(--muted); min-height:1em;"></div>
       </div>
@@ -477,32 +477,81 @@
       포인트 없음
     </div>
 
-    <!-- 계산 파라미터 -->
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:0.75rem;">
-      <!-- 고정 TCP 방향 -->
+    <!-- 계산 파라미터 — TCP 방향은 캡처 시 자동 저장됨 -->
+    <div style="margin-bottom:0.75rem;">
       <div style="background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem;">
-        <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem;">고정 TCP 방향 (deg)</div>
+        <div style="font-size:0.68rem; color:var(--yellow); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem;">TCP → 마커 오프셋 (tool 좌표계, mm) <span style="color:var(--muted);text-transform:none;letter-spacing:0;">— 그리퍼에 마커 부착 위치, 한 번만 설정</span></div>
         <div style="display:flex; gap:0.4rem; align-items:center;">
-          <span class="pose-axis">rx</span><input id="cb-rx" type="number" value="90"  step="1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
-          <span class="pose-axis">ry</span><input id="cb-ry" type="number" value="-90" step="1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
-          <span class="pose-axis">rz</span><input id="cb-rz" type="number" value="0"   step="1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span class="pose-axis">x</span><input id="cb-gm-x" type="number" value="50"  step="0.1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span class="pose-axis">y</span><input id="cb-gm-y" type="number" value="0"   step="0.1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span class="pose-axis">z</span><input id="cb-gm-z" type="number" value="-55" step="0.1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span style="font-size:0.7rem; color:var(--muted); margin-left:0.5rem;">TCP 방향은 캡처 시 자동 저장 — 별도 입력 불필요</span>
         </div>
-      </div>
-      <!-- TCP → 마커 오프셋 -->
-      <div style="background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem;">
-        <div style="font-size:0.68rem; color:var(--yellow); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem;">TCP → 마커 오프셋 (tool 좌표계, mm)</div>
-        <div style="display:flex; gap:0.4rem; align-items:center;">
-          <span class="pose-axis">x</span><input id="cb-gm-x" type="number" value="0"  step="0.1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
-          <span class="pose-axis">y</span><input id="cb-gm-y" type="number" value="55" step="0.1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
-          <span class="pose-axis">z</span><input id="cb-gm-z" type="number" value="50" step="0.1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
-        </div>
-        <div style="font-size:0.65rem; color:var(--muted); margin-top:0.3rem;">마커→TCP = y:-55mm, z:-50mm → 반대 방향 입력</div>
       </div>
     </div>
     <div style="display:flex; gap:0.75rem; align-items:center;">
       <button class="btn btn-on" onclick="computeCalib()" style="flex:none; padding:0.6rem 1.2rem;">계산 (SVD)</button>
       <button class="btn" onclick="saveCalib()" id="btn-calib-save" disabled style="flex:none; padding:0.6rem 1.2rem; background:var(--surface); border-color:var(--border); color:var(--muted);">저장</button>
       <div id="calib-result" style="flex:1; font-family:var(--mono); font-size:0.8rem;"></div>
+    </div>
+  </div>
+
+  <!-- Auto Calibration -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>자동 캘리브레이션 <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem;">— 범위 내 랜덤 이동 → ID 0 마커 감지 시 자동 캡처</span></span>
+      <span id="auto-count-badge" style="font-size:0.75rem; color:var(--muted); font-family:var(--mono);">대기 중</span>
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:0.75rem; margin-bottom:1rem;">
+      <div>
+        <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.3rem;">X (mm)</div>
+        <div style="display:flex; gap:0.4rem; align-items:center;">
+          <input id="ar-xmin" type="number" value="310" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span style="color:var(--muted); flex-shrink:0;">~</span>
+          <input id="ar-xmax" type="number" value="460" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.3rem;">Y (mm)</div>
+        <div style="display:flex; gap:0.4rem; align-items:center;">
+          <input id="ar-ymin" type="number" value="-154" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span style="color:var(--muted); flex-shrink:0;">~</span>
+          <input id="ar-ymax" type="number" value="350" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.3rem;">Z (mm)</div>
+        <div style="display:flex; gap:0.4rem; align-items:center;">
+          <input id="ar-zmin" type="number" value="136" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span style="color:var(--muted); flex-shrink:0;">~</span>
+          <input id="ar-zmax" type="number" value="460" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:1.5rem; align-items:center; margin-bottom:1rem; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span style="font-size:0.75rem; color:var(--muted);">목표 캡처 수</span>
+        <input id="ar-count" type="number" value="20" min="4" max="60" style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span style="font-size:0.75rem; color:var(--muted);">이동 속도 (mm/s)</span>
+        <input id="ar-vel" type="number" value="30" min="5" max="100" style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+    </div>
+
+    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.75rem;">
+      <button id="btn-auto-start" class="btn btn-on" onclick="startAutoCalib()" style="flex:none; padding:0.6rem 1.4rem;">▶ 자동 시작</button>
+      <button id="btn-auto-stop" class="btn btn-off" onclick="stopAutoCalib()" disabled style="flex:none; padding:0.6rem 1rem;">■ 중지</button>
+      <div style="flex:1; background:var(--bg); border:1px solid var(--border); border-radius:4px; height:8px; overflow:hidden;">
+        <div id="auto-progress-bar" style="width:0%; height:100%; background:var(--green); transition:width 0.4s;"></div>
+      </div>
+      <span id="auto-progress-text" style="font-family:var(--mono); font-size:0.8rem; color:var(--muted); white-space:nowrap;">0 / 0</span>
+    </div>
+
+    <div id="auto-log" style="font-family:var(--mono); font-size:0.75rem; max-height:130px; overflow-y:auto; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.5rem; color:var(--muted);">
+      시작 전
     </div>
   </div>
 
@@ -533,6 +582,41 @@
       <input type="range" id="jog-speed-range" min="1" max="50" value="5" style="flex: 1; accent-color: var(--blue);">
       <span id="jog-speed-val" class="status-value plain" style="width: 3ch; text-align: right;">5</span>
       <span class="status-label">%</span>
+    </div>
+  </div>
+
+  <!-- Cartesian Jog -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">
+      TCP Jog (Cartesian)
+      <span id="cart-jog-badge" style="margin-left:0.5rem; color:var(--red); display:none;">[DISABLED: SERVO OFF]</span>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:1rem;">
+      <template id="cart-jog-template">
+        <div class="pose-item" style="display:flex; flex-direction:column; gap:0.5rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span class="pose-axis" style="font-weight:700;" data-label></span>
+            <span class="pose-val" style="font-size:0.8rem; color:var(--muted);"><span data-val>0.00</span><span data-unit></span></span>
+          </div>
+          <div class="btn-group" style="margin-top:0;">
+            <button class="btn btn-off cart-jog-btn" data-dir="-1" style="padding:0.5rem;">-</button>
+            <button class="btn btn-on  cart-jog-btn" data-dir="1"  style="padding:0.5rem;">+</button>
+          </div>
+        </div>
+      </template>
+      <div id="cart-jog-container" style="display:contents;"></div>
+    </div>
+    <div style="margin-top:1.5rem; display:flex; align-items:center; gap:1.5rem; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="status-label">이동 (mm)</span>
+        <input type="number" id="cart-step-trans" value="50" min="1" max="200" step="1"
+          style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="status-label">회전 (°)</span>
+        <input type="number" id="cart-step-rot" value="1" min="0.1" max="10" step="0.1"
+          style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
     </div>
   </div>
 
@@ -661,9 +745,9 @@
     const btnTeach   = document.getElementById('btn-teach');
     const btnRecover = document.getElementById('btn-recover');
 
-    // 복구 버튼: SAFE_STOP(5), SAFE_OFF(3), NOT_READY(15) 일 때만 활성화
-    const recoverableStates = [3, 5, 15];
-    const isRecoverable = recoverableStates.includes(s.robot_state) && !s.is_moving;
+    // 복구 버튼: fault 상태이거나 서보 OFF이면 활성화 (이동 중 제외)
+    const _NORMAL = new Set([1, 2, 4]);  // STANDBY, MOVING, TEACHING
+    const isRecoverable = s.robot_state !== -1 && !s.is_moving && !_NORMAL.has(s.robot_state);
     btnRecover.disabled = !isRecoverable;
 
     if (isTeaching) {
@@ -707,6 +791,21 @@
       btnTeach.classList.remove('teaching-active');
       btnTeach.disabled = true;
     }
+
+    // Cartesian Jog 인터락 (서보 OFF 또는 교시 모드이면 비활성)
+    const cartBtns  = document.querySelectorAll('.cart-jog-btn');
+    const cartBadge = document.getElementById('cart-jog-badge');
+    const cartEnabled = s.servo_on && !isTeaching;
+    cartBtns.forEach(b => b.disabled = !cartEnabled);
+    cartBadge.style.display = cartEnabled ? 'none' : 'inline';
+    cartBadge.textContent   = isTeaching ? '[DISABLED: 직접 교시 모드]' : '[DISABLED: SERVO OFF]';
+
+    // Cartesian Jog TCP 값 실시간 업데이트
+    const ctcp = (s.current_tcp_rt && s.current_tcp_rt.some(v => v !== 0)) ? s.current_tcp_rt : (s.current_tcp ?? []);
+    CART_AXES.forEach((_, i) => {
+      const el = document.getElementById(`cart-val-${i}`);
+      if (el) el.textContent = fmt(ctcp[i], i < 3 ? 1 : 2);
+    });
 
     // TCP — 실시간 디스플레이는 TF2 기반 current_tcp_rt, 없으면 DSR-native current_tcp 사용
     const tcp = (s.current_tcp_rt && s.current_tcp_rt.some(v => v !== 0)) ? s.current_tcp_rt : (s.current_tcp ?? []);
@@ -925,6 +1024,27 @@
 
   connect();
 
+  // ── 카메라 스트림 자동 재시도 ────────────────────────────────────────────
+  (function initStream() {
+    const img = document.getElementById('camera-img');
+    const err = document.getElementById('camera-err');
+
+    function loadStream() {
+      img.style.display = 'block';
+      err.style.display = 'none';
+      img.src = '/camera/stream?t=' + Date.now();
+    }
+
+    img.onerror = function () {
+      img.style.display = 'none';
+      err.style.display = 'block';
+      err.textContent = '카메라 연결 중... 잠시 대기';
+      setTimeout(loadStream, 2000);
+    };
+
+    loadStream();
+  })();
+
   // ── Manual Calibration ──────────────────────────────────────────────────
   setInterval(async () => {
     try {
@@ -987,14 +1107,19 @@
       if (!d.points?.length) {
         list.innerHTML = '<span style="color:var(--muted)">포인트 없음</span>'; return;
       }
-      list.innerHTML = d.points.map((p, i) =>
-        `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.25rem;">
-          <span style="color:var(--yellow); min-width:3rem;">${p.label}</span>
-          <span>TCP (${p.p_tcp_mm.map(v=>v.toFixed(1)).join(', ')}) mm</span>
-          <span style="color:var(--muted)">cam (${p.p_cam_m.map(v=>v.toFixed(3)).join(', ')}) m</span>
-          <button onclick="calibDeletePoint(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 0.3rem;">✕</button>
-        </div>`
-      ).join('');
+      list.innerHTML = d.points.map((p, i) => {
+        const o = p.tcp_orient_deg;
+        const orientStr = o
+          ? `<span style="color:var(--blue);">A${o[0].toFixed(1)} B${o[1].toFixed(1)} C${o[2].toFixed(1)}</span>`
+          : `<span style="color:var(--red);">방향 미저장</span>`;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.25rem; gap:0.5rem;">
+          <span style="color:var(--yellow); min-width:3rem; flex-shrink:0;">${p.label}</span>
+          <span style="flex-shrink:0;">TCP (${p.p_tcp_mm.map(v=>v.toFixed(1)).join(', ')}) mm</span>
+          <span style="flex-shrink:0; font-size:0.72rem;">${orientStr}</span>
+          <span style="color:var(--muted); flex-shrink:0;">cam (${p.p_cam_m.map(v=>v.toFixed(3)).join(', ')}) m</span>
+          <button onclick="calibDeletePoint(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 0.3rem; flex-shrink:0;">✕</button>
+        </div>`;
+      }).join('');
     } catch(_) {}
   }
 
@@ -1014,17 +1139,13 @@
   async function computeCalib() {
     const fb = document.getElementById('calib-result');
     fb.style.color = 'var(--muted)'; fb.textContent = '계산 중...';
-    const rx    = parseFloat(document.getElementById('cb-rx').value);
-    const ry    = parseFloat(document.getElementById('cb-ry').value);
-    const rz    = parseFloat(document.getElementById('cb-rz').value);
     const gmx   = parseFloat(document.getElementById('cb-gm-x').value);
     const gmy   = parseFloat(document.getElementById('cb-gm-y').value);
     const gmz   = parseFloat(document.getElementById('cb-gm-z').value);
     try {
       const r = await fetch('/api/manual_calib/compute', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({rx_deg: rx, ry_deg: ry, rz_deg: rz,
-                              gm_x_mm: gmx, gm_y_mm: gmy, gm_z_mm: gmz})
+        body: JSON.stringify({gm_x_mm: gmx, gm_y_mm: gmy, gm_z_mm: gmz})
       });
       const d = await r.json();
       if (r.ok) {
@@ -1072,10 +1193,22 @@
       } else {
         badge.textContent = `마커 ${data.markers.length}개`;
         badge.style.color = 'var(--yellow)';
-        items.innerHTML = data.markers.map(m =>
-          `<div style="margin-bottom:0.3rem;">ID <span style="color:var(--yellow)">${m.id}</span>
-           &nbsp; (${m.px}, ${m.py})</div>`
-        ).join('');
+        items.innerHTML = data.markers.map(m => {
+          const hasCoord = m.x_mm != null;
+          const coord = hasCoord
+            ? `<div style="color:var(--text); margin-top:0.15rem; font-size:0.75rem;">
+                 x <span style="color:var(--green)">${m.x_mm.toFixed(1)}</span>
+                 &nbsp;y <span style="color:var(--green)">${m.y_mm.toFixed(1)}</span>
+                 &nbsp;z <span style="color:var(--green)">${m.z_mm.toFixed(1)}</span>
+                 <span style="color:var(--muted)"> mm</span>
+               </div>`
+            : `<div style="color:var(--red); font-size:0.7rem;">depth 불량</div>`;
+          return `<div style="margin-bottom:0.6rem; padding:0.4rem 0.5rem; background:var(--bg); border:1px solid var(--border); border-radius:0.4rem;">
+            <span style="color:var(--muted); font-size:0.68rem;">ID</span>
+            <span style="color:var(--yellow); font-weight:700; margin-left:0.2rem;">${m.id}</span>
+            ${coord}
+          </div>`;
+        }).join('');
       }
     } catch (_) {}
   }
@@ -1083,6 +1216,138 @@
   fetchAruco();
 
   function toggleAruco() { fetchAruco(); }
+
+  // ── Auto 캡처 (단일) ────────────────────────────────────────────────────────
+  async function calibCaptureAuto() {
+    const fb = document.getElementById('calib-feedback');
+    fb.style.color = 'var(--muted)'; fb.textContent = 'Auto 캡처 중...';
+    try {
+      const r = await fetch('/api/manual_calib/capture_auto', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        fb.style.color = 'var(--green)';
+        fb.textContent = `✓ Auto ${d.count}개 수집됨`;
+        calibRefreshList();
+      } else {
+        fb.style.color = 'var(--red)';
+        fb.textContent = d.detail || '캡처 실패';
+      }
+    } catch(e) { fb.style.color = 'var(--red)'; fb.textContent = e.message; }
+  }
+
+  // ── 자동 캘리브레이션 ────────────────────────────────────────────────────────
+  let _autoTimer = null;
+
+  async function startAutoCalib() {
+    const req = {
+      x_min: parseFloat(document.getElementById('ar-xmin').value),
+      x_max: parseFloat(document.getElementById('ar-xmax').value),
+      y_min: parseFloat(document.getElementById('ar-ymin').value),
+      y_max: parseFloat(document.getElementById('ar-ymax').value),
+      z_min: parseFloat(document.getElementById('ar-zmin').value),
+      z_max: parseFloat(document.getElementById('ar-zmax').value),
+      count: parseInt(document.getElementById('ar-count').value),
+      velocity: parseFloat(document.getElementById('ar-vel').value),
+      acceleration: parseFloat(document.getElementById('ar-vel').value) * 2,
+    };
+    try {
+      const r = await fetch('/api/manual_calib/auto_run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+      });
+      if (!r.ok) { const d = await r.json(); showAlert(d.detail || '시작 실패'); return; }
+      document.getElementById('btn-auto-start').disabled = true;
+      document.getElementById('btn-auto-stop').disabled  = false;
+      _autoTimer = setInterval(pollAutoStatus, 1000);
+    } catch(e) { showAlert(e.message); }
+  }
+
+  async function pollAutoStatus() {
+    try {
+      const d = await (await fetch('/api/manual_calib/auto_status')).json();
+      const total = d.total || 1;
+      const pct   = Math.round((d.progress / total) * 100);
+      document.getElementById('auto-progress-bar').style.width = pct + '%';
+      document.getElementById('auto-progress-text').textContent = `${d.progress} / ${total}`;
+      document.getElementById('auto-count-badge').textContent =
+        d.running ? `실행 중 ${d.progress}/${total}` : `완료 ${d.progress}개`;
+
+      const logEl = document.getElementById('auto-log');
+      logEl.innerHTML = (d.log || []).map(l => {
+        const color = l.includes('✓') ? 'var(--green)' : l.includes('✗') ? 'var(--red)' : 'var(--muted)';
+        return `<div style="color:${color}">${l}</div>`;
+      }).join('');
+      logEl.scrollTop = logEl.scrollHeight;
+
+      if (d.done) {
+        clearInterval(_autoTimer); _autoTimer = null;
+        document.getElementById('btn-auto-start').disabled = false;
+        document.getElementById('btn-auto-stop').disabled  = true;
+        calibRefreshList();
+      }
+    } catch(_) {}
+  }
+
+  async function stopAutoCalib() {
+    await fetch('/api/manual_calib/auto_stop', { method: 'POST' });
+  }
+
+  // ── Cartesian Jog ────────────────────────────────────────────────────────────
+  const CART_AXES = [
+    { label: 'X', unit: ' mm', stateKey: 0 },
+    { label: 'Y', unit: ' mm', stateKey: 1 },
+    { label: 'Z', unit: ' mm', stateKey: 2 },
+    { label: 'Rx', unit: '°',  stateKey: 3 },
+    { label: 'Ry', unit: '°',  stateKey: 4 },
+    { label: 'Rz', unit: '°',  stateKey: 5 },
+  ];
+  const cartContainer = document.getElementById('cart-jog-container');
+  const cartTemplate  = document.getElementById('cart-jog-template');
+
+  CART_AXES.forEach((ax, axisIdx) => {
+    const clone = cartTemplate.content.cloneNode(true);
+    clone.querySelector('[data-label]').textContent = ax.label;
+    clone.querySelector('[data-unit]').textContent  = ax.unit;
+    const valEl = clone.querySelector('[data-val]');
+    valEl.id = `cart-val-${axisIdx}`;
+
+    clone.querySelectorAll('.cart-jog-btn').forEach(btn => {
+      const dir = parseInt(btn.dataset.dir);
+      let pressing = false;
+
+      btn.onpointerdown = async () => {
+        if (btn.disabled) return;
+        pressing = true;
+        const step = axisIdx < 3
+          ? parseFloat(document.getElementById('cart-step-trans').value)
+          : parseFloat(document.getElementById('cart-step-rot').value);
+        try {
+          await fetch('/api/jog_cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ axis: axisIdx, speed: step * dir }),
+          });
+        } catch (_) {}
+      };
+
+      const stopCart = async () => {
+        if (!pressing) return;
+        pressing = false;
+        try {
+          await fetch('/api/jog_cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ axis: axisIdx, speed: 0 }),
+          });
+        } catch (_) {}
+      };
+
+      btn.onpointerup    = stopCart;
+      btn.onpointerleave = stopCart;
+    });
+    cartContainer.appendChild(clone);
+  });
 
   const jogContainer = document.getElementById('jog-container');
   const jogTemplate  = document.getElementById('jog-row-template');
