@@ -100,8 +100,13 @@ class RobotBridgeNode(Node):
             return {'success': False, 'message': 'Robot is busy'}
 
         async with self._command_lock:
-            if not self._ac_movej.wait_for_server(timeout_sec=2.0):
-                return {'success': False, 'message': 'MoveJ action server unavailable'}
+            if not self._ac_movej.server_is_ready():
+                loop = asyncio.get_event_loop()
+                ready = await loop.run_in_executor(
+                    None, lambda: self._ac_movej.wait_for_server(timeout_sec=2.0)
+                )
+                if not ready:
+                    return {'success': False, 'message': 'MoveJ action server unavailable'}
 
             goal = MoveJ.Goal()
             goal.joint_angles_deg = [float(j) for j in joints]
@@ -116,8 +121,13 @@ class RobotBridgeNode(Node):
             return {'success': False, 'message': 'Robot is busy'}
 
         async with self._command_lock:
-            if not self._ac_movel.wait_for_server(timeout_sec=2.0):
-                return {'success': False, 'message': 'MoveL action server unavailable'}
+            if not self._ac_movel.server_is_ready():
+                loop = asyncio.get_event_loop()
+                ready = await loop.run_in_executor(
+                    None, lambda: self._ac_movel.wait_for_server(timeout_sec=2.0)
+                )
+                if not ready:
+                    return {'success': False, 'message': 'MoveL action server unavailable'}
 
             goal = MoveL.Goal()
             goal.x, goal.y, goal.z, goal.rx, goal.ry, goal.rz = [float(p) for p in pose]
@@ -210,9 +220,16 @@ class RobotBridgeNode(Node):
     async def _run_srv(self, client, request) -> dict:
         """Wait for service and poll the rclpy future in an asyncio-friendly way."""
         self.get_logger().info(f'Calling service {client.srv_name}...')
-        if not client.wait_for_service(timeout_sec=2.0):
-            self.get_logger().error(f'Service {client.srv_name} not available')
-            return {'success': False, 'message': f'Service {client.srv_name} not available'}
+        # service_is_ready() is non-blocking — avoids freezing the asyncio event loop.
+        # If not ready, wait up to 2 s in a thread executor so the loop stays alive.
+        if not client.service_is_ready():
+            loop = asyncio.get_event_loop()
+            ready = await loop.run_in_executor(
+                None, lambda: client.wait_for_service(timeout_sec=2.0)
+            )
+            if not ready:
+                self.get_logger().error(f'Service {client.srv_name} not available')
+                return {'success': False, 'message': f'Service {client.srv_name} not available'}
         
         try:
             future = client.call_async(request)

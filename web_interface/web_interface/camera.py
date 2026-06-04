@@ -34,11 +34,17 @@ def _find_calib_yaml() -> Optional[Path]:
             return p
     return None
 
-def _load_T_base_camera(yaml_path: Path) -> Optional[np.ndarray]:
-    """camera_extrinsic.yaml → 4×4 변환 행렬 (T_base_camera)."""
+def _load_calib(yaml_path: Path) -> tuple:
+    """camera_extrinsic.yaml → (T_base_camera 4×4, marker_size_m float).
+
+    marker_size_m은 hand_eye_result 섹션에서 읽으며 없으면 0.05(5cm) 기본값.
+    """
+    T = None
+    marker_size_m = 0.05
     try:
         with open(yaml_path) as f:
             data = yaml.safe_load(f)
+
         params = data['camera_extrinsic']['ros__parameters']
         t = np.array(params['translation_xyz'], dtype=float)
         q = params['rotation_quat_xyzw']
@@ -51,10 +57,17 @@ def _load_T_base_camera(yaml_path: Path) -> Optional[np.ndarray]:
         T = np.eye(4)
         T[:3, :3] = R
         T[:3, 3]  = t
-        return T
+
+        try:
+            her = data['hand_eye_result']['ros__parameters']
+            marker_size_m = float(her.get('marker_size_m', marker_size_m))
+        except (KeyError, TypeError):
+            pass
+
     except Exception as exc:
         print(f'[camera] calib load failed: {exc}')
-        return None
+
+    return T, marker_size_m
 
 
 class CameraManager:
@@ -75,9 +88,11 @@ class CameraManager:
 
         calib_path = _find_calib_yaml()
         self._T_base_camera: Optional[np.ndarray] = None
+        self._marker_size_m: float = 0.05
         if calib_path:
-            self._T_base_camera = _load_T_base_camera(calib_path)
+            self._T_base_camera, self._marker_size_m = _load_calib(calib_path)
             print(f'[camera] calibration loaded: {calib_path}')
+            print(f'[camera] marker_size_m = {self._marker_size_m}')
         else:
             print('[camera] WARNING: camera_extrinsic.yaml not found — robot coords unavailable')
 
@@ -143,9 +158,10 @@ class CameraManager:
     def _capture_loop(self) -> None:
         import time as _t
         aruco_detector = self._init_aruco()
+        _retry_delay = 5.0   # 지수 백오프 초기값
 
         while self._running:
-            # ── 파이프라인 시작 (실패 시 재시도) ─────────────────────────────
+            # ── 파이프라인 시작 (실패 시 지수 백오프 재시도) ──────────────────
             pipeline = rs.pipeline()
             config   = rs.config()
             config.enable_stream(rs.stream.depth, self._width, self._height, rs.format.z16,  self._fps)
@@ -153,10 +169,15 @@ class CameraManager:
 
             try:
                 profile = pipeline.start(config)
+                _retry_delay = 5.0   # 연결 성공 시 초기화
             except Exception as exc:
                 self._error = '카메라 연결 대기 중...'
-                print(f'[camera] 시작 실패: {exc} — 3초 후 재시도')
-                _t.sleep(3.0)
+                print(f'[camera] 시작 실패: {exc} — {_retry_delay:.0f}초 후 재시도')
+                # 세분화된 슬립으로 GIL 해제 빈도 높임
+                deadline = _t.monotonic() + _retry_delay
+                while _t.monotonic() < deadline and self._running:
+                    _t.sleep(0.5)
+                _retry_delay = min(_retry_delay * 1.5, 60.0)
                 continue
 
             try:
@@ -168,6 +189,21 @@ class CameraManager:
                 pipeline.stop()
                 _t.sleep(3.0)
                 continue
+
+            # ArUco solvePnP용 카메라 행렬 및 마커 오브젝트 포인트 (파이프라인당 1회)
+            _cam_matrix = np.array([
+                [intrinsics.fx, 0,             intrinsics.ppx],
+                [0,             intrinsics.fy, intrinsics.ppy],
+                [0,             0,             1             ],
+            ], dtype=np.float64)
+            _dist_coeffs = np.array(intrinsics.coeffs, dtype=np.float64)
+            _half = self._marker_size_m / 2.0
+            _obj_pts = np.array([
+                [-_half,  _half, 0],
+                [ _half,  _half, 0],
+                [ _half, -_half, 0],
+                [-_half, -_half, 0],
+            ], dtype=np.float32)
 
             spatial      = rs.spatial_filter()
             spatial.set_option(rs.option.filter_magnitude,    2)
@@ -186,7 +222,7 @@ class CameraManager:
             try:
                 while self._running:
                     try:
-                        frames = pipeline.wait_for_frames(timeout_ms=2000)
+                        frames = pipeline.wait_for_frames(timeout_ms=500)
                         consecutive_errors = 0
                     except RuntimeError:
                         consecutive_errors += 1
@@ -226,16 +262,38 @@ class CameraManager:
                                 cx = int(corners[i][0][:, 0].mean())
                                 cy = int(corners[i][0][:, 1].mean())
 
-                                depth_m = self._sample_depth_patch(depth_data, depth_scale, cx, cy, radius=12)
-                                p_cam   = None
-                                robot   = None
+                                # 3D 좌표: depth sensor + rs2_deproject (기존 캘리브레이션과 동일 방식)
+                                p_cam = None
+                                robot = None
+                                depth_m = self._sample_depth_patch(
+                                    depth_data, depth_scale, cx, cy, radius=12
+                                )
                                 if depth_m is not None:
-                                    pt    = rs.rs2_deproject_pixel_to_point(intrinsics, [float(cx), float(cy)], depth_m)
+                                    pt = rs.rs2_deproject_pixel_to_point(
+                                        intrinsics, [float(cx), float(cy)], depth_m
+                                    )
                                     p_cam = (float(pt[0]), float(pt[1]), float(pt[2]))
                                     if self._T_base_camera is not None:
                                         p_h    = np.array([pt[0], pt[1], pt[2], 1.0])
                                         p_base = self._T_base_camera @ p_h
                                         robot  = (float(p_base[0]*1000), float(p_base[1]*1000), float(p_base[2]*1000))
+
+                                # rvec: solvePnPGeneric으로 취득 (hand-eye 캘리브레이션 UI 전용)
+                                rvec_flat = None
+                                img_pts = corners[i][0].astype(np.float32)
+                                n_sols, rvecs_s, _, _ = cv2.solvePnPGeneric(
+                                    _obj_pts, img_pts, _cam_matrix, _dist_coeffs,
+                                    flags=cv2.SOLVEPNP_IPPE_SQUARE,
+                                )
+                                if n_sols > 0:
+                                    chosen_rvec = rvecs_s[0]
+                                    for k in range(n_sols):
+                                        R_k, _ = cv2.Rodrigues(rvecs_s[k])
+                                        if R_k[2, 2] < 0:
+                                            chosen_rvec = rvecs_s[k]
+                                            break
+                                    rv = chosen_rvec.flatten()
+                                    rvec_flat = [float(rv[0]), float(rv[1]), float(rv[2])]
 
                                 markers_out.append({
                                     'id':      int(marker_id),
@@ -244,6 +302,7 @@ class CameraManager:
                                     'x_cam_m': round(p_cam[0], 6) if p_cam else None,
                                     'y_cam_m': round(p_cam[1], 6) if p_cam else None,
                                     'z_cam_m': round(p_cam[2], 6) if p_cam else None,
+                                    'rvec':    rvec_flat,
                                     'x_mm':    round(robot[0], 1) if robot else None,
                                     'y_mm':    round(robot[1], 1) if robot else None,
                                     'z_mm':    round(robot[2], 1) if robot else None,

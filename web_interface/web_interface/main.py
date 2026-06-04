@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Set
 
 # 폴링 엔드포인트 access 로그 무음 처리
-_MUTED_PATHS = {'/camera/markers', '/camera/stream'}
+_MUTED_PATHS = {'/camera/markers', '/camera/stream', '/api/manual_calib/touch/status'}
 
 class _MutePollingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:

@@ -630,41 +630,42 @@ class ArmControllerNode(Node):
             req.radius     = g.blend_radius_mm
             req.mode       = 1 if g.relative else 0
             req.blend_type = 0
-            req.sync_type  = 0   # SYNC: 완료까지 블로킹 → 동작 순서 보장
+
+            # blend_radius > 0 → ASYNC(비동기): DSR이 관절 이동을 시작하자마자 반환.
+            # 이후 바로 MoveL을 전송하면 DSR이 내부적으로 블렌딩 처리.
+            # blend_radius == 0 → SYNC(동기): 완료까지 블로킹 (기존 동작 유지).
+            blend_mode = g.blend_radius_mm > 0.0
+            req.sync_type = 1 if blend_mode else 0
 
             self._robot_state = STATE_MOVING
 
-            done_event = threading.Event()
-            def feedback_thread():
-                while not done_event.is_set():
-                    if goal_handle.is_cancel_requested:
-                        self._request_move_stop()
-                        break
-                    fb = MoveJ.Feedback()
-                    fb.current_joints_deg = self._current_joints
-                    fb.robot_state        = 'MOVING'
-                    goal_handle.publish_feedback(fb)
-                    time.sleep(0.1)
-
-            fb_t = threading.Thread(target=feedback_thread, daemon=True)
-            fb_t.start()
-
             resp = self._call_service_sync(self._cli_move_joint, req, timeout=self._motion_timeout)
-            done_event.set()
-            fb_t.join()
-
-            elapsed = time.time() - t_start
-            if goal_handle.is_cancel_requested:
-                goal_handle.canceled()
-                result.success = False
-                result.message = 'Cancelled'
-                result.execution_time_sec = elapsed
-                return result
 
             if resp is None or not resp.success:
                 result.success = False
                 result.message = 'move_joint failed'
                 goal_handle.abort()
+                return result
+
+            elapsed = time.time() - t_start
+
+            if blend_mode:
+                # ASYNC 모드: DSR이 동작 중이므로 lock을 즉시 해제해
+                # 다음 MoveL이 바로 큐에 들어갈 수 있도록 함
+                log.info(f'MoveJ blending (radius={g.blend_radius_mm}°) — MoveL 즉시 전송 가능')
+                self._motion_lock.release()
+                goal_handle.succeed()
+                result.success = True
+                result.message = f'blending radius={g.blend_radius_mm}'
+                result.execution_time_sec = elapsed
+                return result
+
+            # SYNC 모드: 완전 종료 후 반환
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                result.success = False
+                result.message = 'Cancelled'
+                result.execution_time_sec = elapsed
                 return result
 
             self._robot_state = STATE_STANDBY
@@ -675,7 +676,9 @@ class ArmControllerNode(Node):
             result.execution_time_sec = elapsed
             return result
         finally:
-            self._motion_lock.release()
+            # blend_mode에서는 위에서 이미 release했으므로 중복 방지
+            if self._motion_lock.locked():
+                self._motion_lock.release()
 
     # ══════════════════════════════════════════════════════════════════════════
     # Phase 2 — MoveL execute callback

@@ -496,6 +496,121 @@
     </div>
   </div>
 
+  <!-- 터치 캘리브레이션 (권장) -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>터치 캘리브레이션
+        <span style="color:var(--green);font-weight:600;font-size:0.72rem;text-transform:none;letter-spacing:0;"> ★ 권장</span>
+        <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem;">
+          — TCP로 마커 터치 → P_base 기록 → 로봇 치우기 → 계산
+        </span>
+      </span>
+      <div style="display:flex; gap:0.5rem; align-items:center;">
+        <span id="touch-count-badge" style="font-size:0.75rem; color:var(--muted); font-family:var(--mono);">0 기록</span>
+        <button class="btn" onclick="touchReset()" style="padding:0.35rem 0.7rem; font-size:0.7rem; background:var(--surface); border-color:var(--border); color:var(--red);">초기화</button>
+      </div>
+    </div>
+
+    <!-- 현재 TCP 표시 -->
+    <div style="background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem; margin-bottom:1rem; display:flex; align-items:center; gap:1.5rem;">
+      <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.08em; flex-shrink:0;">현재 TCP</div>
+      <div id="touch-tcp-display" style="font-family:var(--mono); font-size:0.85rem; color:var(--text);">—</div>
+    </div>
+
+    <!-- 공면 경고 -->
+    <div id="touch-coplanar-warn" style="display:none; background:#78350f33; border:1px solid var(--yellow);
+         border-radius:0.5rem; padding:0.6rem; margin-bottom:0.75rem; font-size:0.78rem; color:var(--yellow);"></div>
+
+    <!-- 마커 테이블 -->
+    <div id="touch-marker-table" style="margin-bottom:1rem;">
+      <div style="font-family:var(--mono); font-size:0.72rem; color:var(--muted); display:grid;
+           grid-template-columns:3.5rem 1fr 1fr 6rem; gap:0.3rem; padding:0.3rem 0.5rem;
+           border-bottom:1px solid var(--border);">
+        <span>ID</span><span>카메라 감지 (mm)</span><span>TCP 기록 (mm)</span><span></span>
+      </div>
+      <div id="touch-rows"></div>
+    </div>
+
+    <!-- 절차 안내 -->
+    <div style="background:var(--bg); border:1px solid var(--yellow); border-radius:0.5rem; padding:0.6rem; margin-bottom:1rem; font-size:0.75rem; color:var(--text); line-height:1.8;">
+      <b style="color:var(--yellow);">절차</b><br>
+      ① 그리퍼 끝으로 마커를 터치 → <b>"TCP 기록"</b> (카메라에 안 보여도 됨)<br>
+      ② 마커 1~5 반복 + <b style="color:var(--green);">캐비닛 앞면과 깊이가 다른 곳에 마커 추가</b> (테이블 위, 캐비닛 측면 등)<br>
+      ③ 로봇을 캐비닛에서 멀리 이동 → 카메라가 모든 마커를 선명히 봄<br>
+      ④ <b>"계산"</b> 클릭<br>
+      <span style="color:var(--muted);">※ 마커 0은 그리퍼 위에 있으므로 이 목록에 표시되지 않습니다</span>
+    </div>
+    <div style="display:flex; gap:0.75rem; align-items:center;">
+      <button class="btn btn-on" onclick="touchCompute()" style="flex:none; padding:0.6rem 1.2rem;">계산 (SVD)</button>
+      <button class="btn" onclick="touchSave()" id="touch-btn-save" disabled
+              style="flex:none; padding:0.6rem 1.2rem; background:var(--surface); border-color:var(--border); color:var(--muted);">저장</button>
+      <div id="touch-result" style="flex:1; font-family:var(--mono); font-size:0.8rem;"></div>
+    </div>
+  </div>
+
+  <!-- 교시 Hand-Eye Calibration -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>교시 Hand-Eye 캘리브레이션
+        <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem;">
+          — 로봇 직접 교시 → 마커 보일 때 캡처 → calibrateHandEye(PARK)
+        </span>
+      </span>
+      <div style="display:flex; gap:0.5rem; align-items:center;">
+        <span id="he-count-badge" style="font-size:0.75rem; color:var(--muted); font-family:var(--mono);">0 샘플</span>
+        <button class="btn" onclick="heReset()" style="padding:0.35rem 0.7rem; font-size:0.7rem; background:var(--surface); border-color:var(--border); color:var(--red);">초기화</button>
+      </div>
+    </div>
+
+    <!-- 상태 표시 -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+      <div style="background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.7rem;">
+        <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem;">현재 TCP (mm / deg)</div>
+        <div id="he-tcp-display" style="font-family:var(--mono); font-size:0.82rem; color:var(--text); line-height:1.8;">—</div>
+      </div>
+      <div style="background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.7rem;">
+        <div style="font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem; display:flex; align-items:center; gap:0.4rem;">
+          <span id="he-marker-dot" style="width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block;"></span>
+          <span id="he-marker-label" style="color:var(--red);">ID 0 마커 미감지</span>
+        </div>
+        <div id="he-marker-display" style="font-family:var(--mono); font-size:0.82rem; color:var(--muted); line-height:1.8;">—</div>
+      </div>
+    </div>
+
+    <!-- 캡처 버튼 -->
+    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:1rem;">
+      <button id="he-btn-capture" class="btn btn-on" onclick="heCapture()"
+              style="padding:0.7rem 2rem; font-size:0.95rem; font-weight:700; flex:none;">
+        ● 샘플 캡처
+      </button>
+      <div id="he-capture-feedback" style="font-family:var(--mono); font-size:0.8rem; color:var(--muted);"></div>
+    </div>
+
+    <!-- 샘플 목록 -->
+    <div id="he-sample-list" style="font-family:var(--mono); font-size:0.75rem; max-height:140px; overflow-y:auto;
+         background:var(--bg); border:1px solid var(--border); border-radius:0.5rem;
+         padding:0.5rem; margin-bottom:1rem; color:var(--muted);">
+      샘플 없음
+    </div>
+
+    <!-- 계산 / 저장 -->
+    <div style="display:flex; gap:0.75rem; align-items:center;">
+      <button class="btn btn-on" onclick="heCompute()" style="flex:none; padding:0.6rem 1.2rem;">계산 (PARK)</button>
+      <button class="btn" onclick="heSave()" id="he-btn-save" disabled
+              style="flex:none; padding:0.6rem 1.2rem; background:var(--surface); border-color:var(--border); color:var(--muted);">저장</button>
+      <div id="he-result" style="flex:1; font-family:var(--mono); font-size:0.8rem;"></div>
+    </div>
+
+    <div style="margin-top:0.75rem; padding:0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem;
+         font-size:0.72rem; color:var(--muted); line-height:1.6;">
+      <b style="color:var(--yellow);">교시 가이드</b> —
+      다양한 방향에서 15~20개 수집 권장.
+      로봇 손목(J6) 방향을 ±45° 이상 변화시킬수록 정확도 향상.
+      마커가 카메라 화면에서 크고 선명하게 보일 때 캡처.
+      잔차 <b style="color:var(--green);">5mm 이하</b>이면 양호.
+    </div>
+  </div>
+
   <!-- Auto Calibration -->
   <div class="card" style="grid-column: 1 / -1;">
     <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
@@ -1381,6 +1496,296 @@
     });
     jogContainer.appendChild(clone);
   }
+
+  // ── 터치 캘리브레이션 ──────────────────────────────────────────────────────
+
+  async function touchRefresh() {
+    try {
+      const d = await (await fetch('/api/manual_calib/touch/status')).json();
+      document.getElementById('touch-count-badge').textContent = `${d.count} / 6 기록`;
+
+      const rows = document.getElementById('touch-rows');
+      rows.innerHTML = d.markers.map(m => {
+        const camTxt = m.cam_visible
+          ? `<span style="color:var(--green);">X${(m.p_cam_m[0]*1000).toFixed(0)} Y${(m.p_cam_m[1]*1000).toFixed(0)} Z${(m.p_cam_m[2]*1000).toFixed(0)}</span>`
+          : '<span style="color:var(--muted);">— (터치 중이거나 미감지)</span>';
+        const tcpTxt = m.tcp_mm
+          ? `<span style="color:var(--green);">✓ X${m.tcp_mm[0].toFixed(0)} Y${m.tcp_mm[1].toFixed(0)} Z${m.tcp_mm[2].toFixed(0)}</span>`
+          : '<span style="color:var(--muted);">미기록</span>';
+        const delBtn = m.tcp_mm
+          ? `<button onclick="touchRemove(${m.marker_id})" title="삭제"
+               style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem; padding:0 0.2rem;">✕</button>`
+          : '';
+        return `<div style="display:grid; grid-template-columns:3.5rem 1fr 1fr 6rem; gap:0.3rem;
+                  align-items:center; padding:0.35rem 0.5rem; border-bottom:1px solid var(--border);
+                  font-family:var(--mono); font-size:0.78rem;">
+          <span style="color:var(--blue); font-weight:700;">ID ${m.marker_id}</span>
+          <span>${camTxt}</span>
+          <span>${tcpTxt}</span>
+          <span style="display:flex; gap:0.25rem; align-items:center;">
+            <button onclick="touchRecord(${m.marker_id})"
+              style="background:var(--blue); color:#fff; border:none; border-radius:3px;
+                     padding:0.22rem 0.45rem; cursor:pointer; font-size:0.72rem; font-weight:700;">
+              TCP 기록
+            </button>${delBtn}
+          </span>
+        </div>`;
+      }).join('');
+    } catch (_) {}
+  }
+
+  setInterval(touchRefresh, 800);
+
+  // WebSocket → TCP 실시간 반영
+  if (ws) {
+    ws.addEventListener('message', e => {
+      try {
+        const s = JSON.parse(e.data);
+        const tcp = s.current_tcp || [];
+        if (tcp.length >= 3) {
+          document.getElementById('touch-tcp-display').innerHTML =
+            `X <b>${tcp[0].toFixed(1)}</b> &nbsp; Y <b>${tcp[1].toFixed(1)}</b> &nbsp; Z <b>${tcp[2].toFixed(1)}</b> mm`;
+        }
+      } catch (_) {}
+    });
+  }
+
+  async function touchRecord(markerId) {
+    try {
+      const r = await fetch(`/api/manual_calib/touch/record/${markerId}`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) { alert(`✗ ${d.detail}`); return; }
+      touchRefresh();
+    } catch (e) { alert(`✗ ${e}`); }
+  }
+
+  async function touchRemove(markerId) {
+    await fetch(`/api/manual_calib/touch/remove/${markerId}`, { method: 'DELETE' });
+    touchRefresh();
+  }
+
+  async function touchReset() {
+    await fetch('/api/manual_calib/touch/reset', { method: 'DELETE' });
+    document.getElementById('touch-result').textContent = '';
+    document.getElementById('touch-btn-save').disabled = true;
+    touchRefresh();
+  }
+
+  async function touchCompute() {
+    const res = document.getElementById('touch-result');
+    const warn = document.getElementById('touch-coplanar-warn');
+    res.textContent = '계산 중...';
+    res.style.color = 'var(--muted)';
+    warn.style.display = 'none';
+    try {
+      const r = await fetch('/api/manual_calib/touch/compute', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        // 공면 경고
+        if (d.coplanar_warning) {
+          warn.style.display = 'block';
+          warn.textContent = '⚠ ' + d.coplanar_warning;
+        }
+        const ok = d.mean_residual_mm < 5 && !d.coplanar_warning;
+        res.style.color = ok ? 'var(--green)' : d.mean_residual_mm < 15 ? 'var(--yellow)' : 'var(--red)';
+        const t = d.translation_xyz;
+        // 포인트별 잔차
+        const ptList = (d.per_point || []).map(p => {
+          const bad = p.residual_mm > 15;
+          return `<span style="color:${bad ? 'var(--red)' : 'var(--muted)'}">ID${p.marker_id}:${p.residual_mm}mm</span>`;
+        }).join('  ');
+        res.innerHTML =
+          `잔차 평균 <b>${d.mean_residual_mm}</b>mm  최대 <b>${d.max_residual_mm}</b>mm<br>` +
+          `포인트별: ${ptList}<br>` +
+          (d.outlier_markers.length ? `<span style="color:var(--red)">⚠ 아웃라이어 의심: ID [${d.outlier_markers}] — 해당 마커 삭제 후 재계산 권장</span><br>` : '') +
+          `t=[${t.map(v=>v.toFixed(3)).join(', ')}]`;
+        const btn = document.getElementById('touch-btn-save');
+        btn.disabled = d.coplanar_warning != null;
+        btn.style.color = d.coplanar_warning ? 'var(--muted)' : 'var(--text)';
+        btn.style.borderColor = ok ? 'var(--green)' : 'var(--yellow)';
+      } else {
+        res.style.color = 'var(--red)';
+        res.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) {
+      res.style.color = 'var(--red)';
+      res.textContent = `✗ ${e}`;
+    }
+  }
+
+  async function touchSave() {
+    const res = document.getElementById('touch-result');
+    try {
+      const r = await fetch('/api/manual_calib/touch/save', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        res.style.color = 'var(--green)';
+        res.textContent = `✓ 저장 완료 (잔차 평균 ${d.mean_residual_mm}mm)`;
+        document.getElementById('touch-btn-save').disabled = true;
+      } else {
+        res.style.color = 'var(--red)';
+        res.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) { res.style.color = 'var(--red)'; res.textContent = `✗ ${e}`; }
+  }
+
+  touchRefresh();
+
+  // ── 교시 Hand-Eye 캘리브레이션 ─────────────────────────────────────────────
+
+  // WebSocket 상태 업데이트에서 TCP / 마커 실시간 표시
+  const _heOrigOnState = typeof onStateUpdate === 'function' ? onStateUpdate : null;
+  function heUpdateFromState(state) {
+    // TCP 표시
+    const tcp = state.current_tcp || [];
+    if (tcp.length >= 6) {
+      document.getElementById('he-tcp-display').innerHTML =
+        `X <b>${tcp[0].toFixed(1)}</b>  Y <b>${tcp[1].toFixed(1)}</b>  Z <b>${tcp[2].toFixed(1)}</b><br>` +
+        `Rx <b>${tcp[3].toFixed(1)}</b>  Ry <b>${tcp[4].toFixed(1)}</b>  Rz <b>${tcp[5].toFixed(1)}</b>`;
+    }
+  }
+
+  // 마커 상태 폴링 (카메라 마커 API)
+  async function heUpdateMarker() {
+    try {
+      const d = await (await fetch('/camera/markers')).json();
+      const m = (d.markers || []).find(x => x.id === 0);
+      const dot   = document.getElementById('he-marker-dot');
+      const label = document.getElementById('he-marker-label');
+      const disp  = document.getElementById('he-marker-display');
+      if (m && m.rvec) {
+        dot.style.background   = 'var(--green)';
+        dot.style.boxShadow    = '0 0 6px var(--green)';
+        label.style.color      = 'var(--green)';
+        label.textContent      = 'ID 0 마커 감지됨';
+        disp.style.color       = 'var(--text)';
+        disp.innerHTML =
+          `cam X <b>${(m.x_cam_m*1000).toFixed(1)}</b>  Y <b>${(m.y_cam_m*1000).toFixed(1)}</b>  Z <b>${(m.z_cam_m*1000).toFixed(1)}</b> mm<br>` +
+          `base X <b>${m.x_mm ?? '—'}</b>  Y <b>${m.y_mm ?? '—'}</b>  Z <b>${m.z_mm ?? '—'}</b> mm`;
+      } else {
+        dot.style.background   = 'var(--red)';
+        dot.style.boxShadow    = 'none';
+        label.style.color      = 'var(--red)';
+        label.textContent      = 'ID 0 마커 미감지';
+        disp.style.color       = 'var(--muted)';
+        disp.textContent       = '—';
+      }
+    } catch (_) {}
+  }
+  setInterval(heUpdateMarker, 500);
+
+  // WebSocket onmessage 확장
+  const _origWsOnMsg = ws ? ws.onmessage : null;
+  if (ws) {
+    ws.addEventListener('message', e => {
+      try { heUpdateFromState(JSON.parse(e.data)); } catch (_) {}
+    });
+  }
+
+  async function heCapture() {
+    const fb = document.getElementById('he-capture-feedback');
+    fb.style.color = 'var(--muted)';
+    fb.textContent = '캡처 중...';
+    try {
+      const r = await fetch('/api/manual_calib/handeye/capture', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        fb.style.color = 'var(--green)';
+        fb.textContent = `✓ ${d.label} 저장 (총 ${d.count}개)`;
+        heRefreshList();
+      } else {
+        fb.style.color = 'var(--red)';
+        fb.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) {
+      fb.style.color = 'var(--red)';
+      fb.textContent = `✗ ${e}`;
+    }
+  }
+
+  async function heRefreshList() {
+    try {
+      const d = await (await fetch('/api/manual_calib/handeye/status')).json();
+      document.getElementById('he-count-badge').textContent = `${d.count} 샘플`;
+      const list = document.getElementById('he-sample-list');
+      if (d.samples.length === 0) {
+        list.textContent = '샘플 없음';
+        return;
+      }
+      list.innerHTML = d.samples.map((s, i) => {
+        const tcp = s.tcp_mm;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:0.15rem 0;border-bottom:1px solid var(--border);">
+          <span><b style="color:var(--blue);">${s.label}</b>
+            &nbsp;X${tcp[0].toFixed(0)} Y${tcp[1].toFixed(0)} Z${tcp[2].toFixed(0)}
+            &nbsp;Rx${tcp[3].toFixed(0)} Ry${tcp[4].toFixed(0)} Rz${tcp[5].toFixed(0)}</span>
+          <button onclick="heDeleteSample(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 0.3rem;">✕</button>
+        </div>`;
+      }).join('');
+    } catch (_) {}
+  }
+
+  async function heDeleteSample(i) {
+    await fetch(`/api/manual_calib/handeye/sample/${i}`, { method: 'DELETE' });
+    heRefreshList();
+  }
+
+  async function heReset() {
+    await fetch('/api/manual_calib/handeye/reset', { method: 'DELETE' });
+    document.getElementById('he-result').textContent = '';
+    document.getElementById('he-btn-save').disabled = true;
+    document.getElementById('he-btn-save').style.color = 'var(--muted)';
+    document.getElementById('he-capture-feedback').textContent = '';
+    heRefreshList();
+  }
+
+  async function heCompute() {
+    const res = document.getElementById('he-result');
+    res.textContent = '계산 중...';
+    res.style.color = 'var(--muted)';
+    try {
+      const r = await fetch('/api/manual_calib/handeye/compute', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        const ok = d.mean_residual_mm < 10;
+        res.style.color = ok ? 'var(--green)' : 'var(--yellow)';
+        const t = d.translation_xyz;
+        res.innerHTML =
+          `잔차 평균 <b>${d.mean_residual_mm.toFixed(2)}</b> mm  최대 <b>${d.max_residual_mm.toFixed(2)}</b> mm  |  ` +
+          `t=[${t.map(v=>v.toFixed(3)).join(', ')}]`;
+        const btn = document.getElementById('he-btn-save');
+        btn.disabled = false;
+        btn.style.color = 'var(--text)';
+        btn.style.borderColor = ok ? 'var(--green)' : 'var(--yellow)';
+      } else {
+        res.style.color = 'var(--red)';
+        res.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) {
+      res.style.color = 'var(--red)';
+      res.textContent = `✗ ${e}`;
+    }
+  }
+
+  async function heSave() {
+    const res = document.getElementById('he-result');
+    try {
+      const r = await fetch('/api/manual_calib/handeye/save', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        res.style.color = 'var(--green)';
+        res.textContent = `✓ 저장 완료 → ${d.saved_to}  (잔차 평균 ${d.mean_residual_mm.toFixed(2)}mm)`;
+        document.getElementById('he-btn-save').disabled = true;
+      } else {
+        res.style.color = 'var(--red)';
+        res.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) {
+      res.style.color = 'var(--red)';
+      res.textContent = `✗ ${e}`;
+    }
+  }
+
+  heRefreshList();
 </script>
 </body>
 </html>
