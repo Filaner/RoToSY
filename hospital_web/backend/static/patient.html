@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RoToSY — 약품 현황</title>
+<style>
+:root {
+  --bg:      #f4f6fa;
+  --surface: #ffffff;
+  --surf2:   #eef1f7;
+  --border:  #dde2ed;
+  --text:    #1a2540;
+  --muted:   #6b7a99;
+  --green:   #16a34a;
+  --red:     #dc2626;
+  --yellow:  #b45309;
+  --blue:    #1d4ed8;
+  --cyan:    #0e7490;
+  --purple:  #7c3aed;
+  --teal:    #16a34a;
+  --orange:  #c2410c;
+  --mono:    'JetBrains Mono','Fira Code','Courier New',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  font-size:16px;min-height:100vh;
+}
+
+/* ── Top bar ── */
+header{
+  background:var(--surface);border-bottom:1px solid var(--border);
+  box-shadow:0 1px 4px rgba(0,0,0,.05);padding:1rem 1.25rem;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:50;
+}
+.logo{font-size:1.1rem;font-weight:800;letter-spacing:.05em;color:var(--text);}
+.logo span{color:var(--green);}
+.ws-dot{width:9px;height:9px;border-radius:50%;background:var(--muted);}
+.ws-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green);}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ── Layout ── */
+main{max-width:520px;margin:0 auto;padding:1.25rem 1rem 3rem;}
+
+/* ── Card ── */
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:.85rem;padding:1.35rem;margin-bottom:1.1rem;
+  box-shadow:0 1px 4px rgba(26,37,64,.06);
+}
+.card-title{
+  font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:1rem;
+}
+.card-subtitle{font-size:.85rem;color:var(--muted);margin-bottom:.85rem;}
+
+/* ── Status step bar ── */
+.steps{display:flex;align-items:center;margin-bottom:1.5rem;}
+.step{flex:1;display:flex;flex-direction:column;align-items:center;gap:.35rem;position:relative;}
+.step:not(:last-child)::after{
+  content:'';position:absolute;top:14px;left:calc(50% + 14px);
+  right:calc(-50% + 14px);height:2px;background:var(--border);z-index:0;
+}
+.step.done::after{background:var(--green);}
+.step.active::after{background:var(--border);}
+.step-dot{
+  width:28px;height:28px;border-radius:50%;border:2px solid var(--border);
+  background:var(--surface);display:flex;align-items:center;justify-content:center;
+  font-size:.75rem;font-weight:700;color:var(--muted);z-index:1;position:relative;
+  transition:all .3s;
+}
+.step.done .step-dot{background:var(--green);border-color:var(--green);color:#fff;}
+.step.active .step-dot{
+  background:var(--teal);border-color:var(--teal);color:#fff;
+  box-shadow:0 0 0 4px rgba(15,118,110,.15);
+  animation:pulse 1.5s infinite;
+}
+.step-label{font-size:.68rem;color:var(--muted);text-align:center;font-weight:500;line-height:1.3;}
+.step.done .step-label{color:var(--green);}
+.step.active .step-label{color:var(--teal);font-weight:700;}
+
+/* ── Current status display ── */
+.status-big{
+  text-align:center;padding:1.5rem 1rem;background:var(--surf2);
+  border-radius:.65rem;margin-bottom:1rem;
+}
+.status-big .status-icon{font-size:1.5rem;color:var(--green);font-weight:800;margin-bottom:.35rem;}
+.status-big .status-text{font-size:1.1rem;font-weight:700;color:var(--text);}
+.status-big .status-sub{font-size:.85rem;color:var(--muted);margin-top:.3rem;}
+
+/* ── Info rows ── */
+.info-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:.6rem 0;border-bottom:1px solid var(--border);font-size:.9rem;
+}
+.info-row:last-child{border-bottom:none;}
+.info-row .lbl{color:var(--muted);}
+.info-row .val{font-weight:600;}
+
+/* ── Med list ── */
+.med-item{
+  display:flex;align-items:center;gap:.85rem;
+  padding:.7rem .85rem;background:var(--surf2);
+  border:1px solid var(--border);border-radius:.5rem;margin-bottom:.4rem;
+}
+.med-name{flex:1;font-size:.92rem;font-weight:500;}
+.med-time-badge{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:.35rem;padding:.2rem .55rem;font-size:.75rem;
+  color:var(--muted);font-family:var(--mono);white-space:nowrap;
+}
+.med-done{color:var(--green);font-size:.8rem;font-weight:600;white-space:nowrap;}
+.med-pending{color:var(--yellow);font-size:.8rem;font-weight:600;white-space:nowrap;}
+
+/* ── Button ── */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:.7rem 1.35rem;border-radius:.5rem;font-size:.9rem;font-weight:600;
+  cursor:pointer;border:1px solid transparent;transition:all .15s;
+  font-family:inherit;letter-spacing:.02em;
+}
+.btn-full{width:100%;}
+.btn-teal{background:#dcfce7;color:#166534;border-color:#86efac;}
+.btn-teal:hover{background:var(--green);color:#fff;}
+.btn-ghost{background:var(--surf2);color:var(--muted);border-color:var(--border);}
+.btn-ghost:hover{color:var(--text);}
+
+/* ── Section heading ── */
+.section-heading{
+  font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);margin:1.35rem 0 .6rem;
+}
+
+/* ── Alert box ── */
+.alert-box{
+  background:#fef9c3;border:1px solid #fde68a;border-radius:.5rem;
+  padding:.75rem 1rem;font-size:.85rem;color:#92400e;margin-bottom:1rem;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">RoTo<span>SY</span></div>
+  <div style="display:flex;align-items:center;gap:.6rem;">
+    <span style="font-size:.8rem;color:var(--muted);" id="ws-text">연결 중...</span>
+    <div class="ws-dot" id="ws-dot"></div>
+  </div>
+</header>
+
+<main>
+
+  <!-- 환자 정보 -->
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:1.15rem;font-weight:700;" id="pt-name">내 약품 현황</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-top:.2rem;" id="pt-id">—</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:.72rem;color:var(--muted);">담당 병동</div>
+        <div style="font-weight:600;font-size:.9rem;">3병동</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 배송 현황 -->
+  <div class="section-heading">현재 배송 상태</div>
+  <div class="card">
+    <!-- Step bar -->
+    <div class="steps" id="step-bar">
+      <div class="step done" id="step-0"><div class="step-dot">1</div><div class="step-label">처방<br>접수</div></div>
+      <div class="step" id="step-1"><div class="step-dot">2</div><div class="step-label">조제<br>중</div></div>
+      <div class="step" id="step-2"><div class="step-dot">3</div><div class="step-label">배송<br>중</div></div>
+      <div class="step" id="step-3"><div class="step-dot">4</div><div class="step-label">도착</div></div>
+    </div>
+
+    <div class="status-big">
+      <div class="status-icon" id="big-icon">---</div>
+      <div class="status-text" id="big-status">대기 중</div>
+      <div class="status-sub" id="big-sub">처방이 접수되어 검토 중입니다.</div>
+    </div>
+
+    <div id="mission-info">
+      <div class="info-row"><span class="lbl">처방 ID</span><span class="val" id="info-pid">—</span></div>
+      <div class="info-row"><span class="lbl">목적지</span><span class="val" id="info-dest">—</span></div>
+      <div class="info-row"><span class="lbl">미션 상태</span><span class="val" id="info-mstatus">—</span></div>
+    </div>
+  </div>
+
+  <!-- 오늘 복약 일정 -->
+  <div class="section-heading">오늘 복약 일정</div>
+  <div class="card">
+    <div id="med-schedule">
+      <div class="med-item">
+        <div class="med-name">아세트아미노펜 500mg</div>
+        <div class="med-time-badge">08:00</div>
+        <div class="med-done">완료</div>
+      </div>
+      <div class="med-item">
+        <div class="med-name">이부프로펜 400mg</div>
+        <div class="med-time-badge">14:00</div>
+        <div class="med-pending">예정</div>
+      </div>
+      <div class="med-item">
+        <div class="med-name">아세트아미노펜 500mg</div>
+        <div class="med-time-badge">20:00</div>
+        <div class="med-pending">예정</div>
+      </div>
+    </div>
+    <div style="margin-top:.85rem;font-size:.8rem;color:var(--muted);">
+      * 복용 전 반드시 담당 간호사에게 확인하세요.
+    </div>
+  </div>
+
+  <!-- 처방 내역 -->
+  <div class="section-heading">처방 내역</div>
+  <div class="card">
+    <div class="card-subtitle">가장 최근 처방</div>
+    <div id="presc-list">
+      <div style="text-align:center;color:var(--muted);font-size:.85rem;padding:1rem 0;">
+        처방 내역 불러오는 중...
+      </div>
+    </div>
+  </div>
+
+  <!-- 안내 / 연락 -->
+  <div class="section-heading">도움이 필요하신가요?</div>
+  <div class="card">
+    <div style="font-size:.9rem;color:var(--muted);margin-bottom:1rem;line-height:1.6;">
+      약품 배달이 지연되거나 복약 관련 궁금한 점이 있으시면 담당 간호사에게 문의하세요.
+    </div>
+    <button class="btn btn-teal btn-full" onclick="callNurse()">담당 간호사 호출</button>
+    <div style="height:.5rem;"></div>
+    <button class="btn btn-ghost btn-full" onclick="callHelp()">도움말 / 복약 안내</button>
+    <div class="feedback" id="call-feedback" style="font-size:.8rem;color:var(--muted);min-height:1em;margin-top:.5rem;text-align:center;"></div>
+  </div>
+
+</main>
+
+<script>
+// ── WebSocket ──────────────────────────────────────────────────────────
+const STATUS_MAP = {
+  IDLE:            {icon:'[대기]',   text:'처방 검토 중',    sub:'약사가 처방전을 검토하고 있습니다.'},
+  AWAITING_CONFIRM:{icon:'[조제]',   text:'조제 중',         sub:'로봇이 약품을 준비하고 있습니다.'},
+  CONFIRMED:       {icon:'[준비]',   text:'출발 준비 완료', sub:'곧 배송이 시작됩니다.'},
+  DISPATCHED:      {icon:'[출발]',   text:'배송 출발',       sub:'약품이 병동으로 이동 중입니다.'},
+  DELIVERING:      {icon:'[이동중]', text:'이동 중',          sub:'약품이 배송 중입니다. 잠시만 기다려 주세요.'},
+  ARRIVED:         {icon:'[도착]',   text:'도착!',           sub:'간호사가 약품을 가져다 드릴 예정입니다.'},
+  COMPLETED:       {icon:'[완료]',   text:'수령 완료',       sub:'약품이 전달되었습니다.'},
+};
+
+const STEP_MAP = {
+  IDLE:0, AWAITING_CONFIRM:1, CONFIRMED:1, DISPATCHED:2, DELIVERING:2, ARRIVED:3, COMPLETED:3
+};
+
+function applyMission(m) {
+  const statusKey = m.status || 'IDLE';
+  const info = STATUS_MAP[statusKey] || STATUS_MAP.IDLE;
+
+  document.getElementById('big-icon').textContent   = info.icon;
+  document.getElementById('big-status').textContent  = info.text;
+  document.getElementById('big-sub').textContent     = info.sub;
+  document.getElementById('info-pid').textContent    = m.prescription_id || '—';
+  document.getElementById('info-dest').textContent   = m.destination || '—';
+  document.getElementById('info-mstatus').textContent = statusKey;
+
+  const active = STEP_MAP[statusKey] ?? 0;
+  for (let i = 0; i <= 3; i++) {
+    const el = document.getElementById('step-' + i);
+    if (!el) continue;
+    el.className = 'step ' + (i < active ? 'done' : i === active ? 'active' : '');
+  }
+}
+
+function connect() {
+  const dot  = document.getElementById('ws-dot');
+  const text = document.getElementById('ws-text');
+  dot.className  = 'ws-dot';
+  text.textContent = '연결 중...';
+
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen  = () => { dot.className='ws-dot ok'; text.textContent='연결됨'; };
+  ws.onclose = () => { dot.className='ws-dot'; text.textContent='연결 끊김'; setTimeout(connect,3000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = e => {
+    try {
+      const s = JSON.parse(e.data);
+      if (s.mission) applyMission(s.mission);
+    } catch(_) {}
+  };
+}
+
+// ── Prescriptions ──────────────────────────────────────────────────────
+async function loadPrescriptions() {
+  try {
+    const r = await fetch('/api/prescription');
+    const list = await r.json();
+    const container = document.getElementById('presc-list');
+    if (!list || list.length === 0) {
+      container.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:.85rem;padding:.5rem 0;">처방 내역 없음</div>';
+      return;
+    }
+    const statusLabel = {pending:'검토 대기',approved:'승인됨',rejected:'반려됨',completed:'완료',awaiting_load_confirm:'배송 준비 중'};
+    container.innerHTML = list.slice(0,3).map(p => {
+      const drugStr = p.drugs.map(d=>d.name.split(' ')[0]).join(', ');
+      return `
+      <div style="padding:.65rem 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:.9rem;font-weight:600;">${p.patient_name}</span>
+          <span style="font-size:.75rem;color:var(--muted);">${statusLabel[p.status]||p.status}</span>
+        </div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:.2rem;">${drugStr}</div>
+        <div style="font-size:.75rem;color:var(--muted);">${p.created_at.substring(0,16)}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
+function callNurse() {
+  const fb = document.getElementById('call-feedback');
+  fb.style.color = 'var(--teal)';
+  fb.textContent = '간호사 호출 신호를 보냈습니다. 잠시만 기다려 주세요.';
+  setTimeout(() => { fb.textContent = ''; }, 5000);
+}
+
+function callHelp() {
+  alert('복약 안내\n\n- 식후 30분 이내 복용\n- 물과 함께 복용\n- 복용 중 이상 증상 시 즉시 담당 간호사에게 알리세요');
+}
+
+connect();
+loadPrescriptions();
+</script>
+</body>
+</html>

@@ -1,0 +1,1783 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RoToSY — 관리자 관제</title>
+<style>
+:root {
+  --bg:      #f4f6fa;
+  --surface: #ffffff;
+  --surf2:   #eef1f7;
+  --border:  #dde2ed;
+  --text:    #1a2540;
+  --muted:   #6b7a99;
+  --green:   #16a34a;
+  --red:     #dc2626;
+  --yellow:  #b45309;
+  --blue:    #1d4ed8;
+  --cyan:    #0e7490;
+  --purple:  #7c3aed;
+  --teal:    #0f766e;
+  --orange:  #c2410c;
+  --mono:    'JetBrains Mono','Fira Code','Courier New',monospace;
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+body{
+  font-size:16px;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── Topbar ── */
+#topbar{
+  height:var(--topbar);display:flex;align-items:center;justify-content:space-between;
+  padding:0 1.5rem;background:var(--surface);border-bottom:1px solid var(--border);
+  flex-shrink:0;z-index:100;
+}
+#topbar .logo{font-size:1.1rem;font-weight:800;letter-spacing:.06em;}
+#topbar .logo span{color:var(--blue);}
+#topbar .right{display:flex;align-items:center;gap:1rem;}
+
+.btn-gestop{
+  background:var(--red);color:#fff;border:2px solid #ff6b6b;border-radius:.45rem;
+  padding:.45rem 1.6rem;font-size:.92rem;font-weight:800;cursor:pointer;
+  letter-spacing:.1em;text-transform:uppercase;font-family:inherit;
+  transition:background .1s,transform .1s;
+}
+.btn-gestop:hover{background:#dc2626;}
+.btn-gestop:active{transform:scale(.95);}
+
+/* ── WS badge ── */
+.badge{display:inline-flex;align-items:center;gap:.4rem;padding:.28rem .75rem;
+  border-radius:9999px;font-size:.92rem;font-weight:600;border:1px solid transparent;}
+.badge-dot{width:7px;height:7px;border-radius:50%;}
+.badge.connected{background:#14532d33;border-color:var(--green);color:var(--green);}
+.badge.disconnected{background:#7f1d1d33;border-color:var(--red);color:var(--red);}
+.badge.connecting{background:#78350f33;border-color:var(--yellow);color:var(--yellow);}
+.badge.connected .badge-dot{background:var(--green);box-shadow:0 0 6px var(--green);}
+.badge.disconnected .badge-dot{background:var(--red);}
+.badge.connecting .badge-dot{background:var(--yellow);animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── Layout ── */
+#layout{display:flex;flex:1;overflow:hidden;}
+
+/* ── Sidebar ── */
+#sidebar{
+  width:var(--sidebar);background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;
+}
+.nav-section{
+  padding:.9rem 1.25rem .3rem;font-size:.92rem;font-weight:700;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+}
+.nav-item{
+  display:flex;align-items:center;padding:.85rem 1.25rem;cursor:pointer;
+  font-size:.92rem;font-weight:500;color:var(--muted);border-left:3px solid transparent;
+  transition:all .15s;user-select:none;line-height:1;
+}
+.nav-item:hover{background:var(--surf2);color:var(--text);}
+.nav-item.active{background:#eff6ff;color:var(--blue);border-left-color:var(--blue);font-weight:600;}
+.nav-divider{height:1px;background:var(--border);margin:.4rem 1rem;}
+
+/* ── Main content ── */
+#content{flex:1;overflow-y:auto;padding:1.5rem;}
+
+/* ── Tab panels ── */
+.tab-panel{display:none;}
+.tab-panel.active{display:block;}
+#tab-vision.active{display:flex;}
+
+/* ── Card ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:.75rem;padding:1.25rem;box-shadow:0 1px 4px rgba(26,37,64,.06);margin-bottom:1.25rem;}
+.card-title{font-size:.92rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:1rem;}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;}
+@media(max-width:900px){.grid-2{grid-template-columns:1fr;}.grid-4{grid-template-columns:1fr 1fr;}}
+
+/* ── KPI ── */
+.kpi{background:var(--surf2);border:1px solid var(--border);border-radius:.6rem;padding:1rem;text-align:center;}
+.kpi-val{font-size:2rem;font-weight:800;font-family:var(--mono);}
+.kpi-lbl{font-size:.92rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:.25rem;}
+
+/* ── Pipeline strip ── */
+#pipeline{
+  display:flex;align-items:flex-start;margin-bottom:1.5rem;
+}
+.pip-step{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:.4rem;
+  position:relative;
+}
+.pip-step:not(:last-child)::after{
+  content:'';position:absolute;top:13px;left:calc(50% + 16px);
+  right:calc(-50% + 16px);height:2px;background:var(--border);z-index:0;
+  transition:background .3s;
+}
+.pip-step.done::after{background:var(--green);}
+.pip-dot{
+  width:28px;height:28px;border-radius:50%;border:2px solid var(--border);
+  background:var(--surface);display:flex;align-items:center;justify-content:center;
+  font-size:.92rem;font-weight:700;color:var(--muted);z-index:1;position:relative;
+  transition:all .3s;
+}
+.pip-label{
+  font-size:.92rem;color:var(--muted);text-align:center;font-weight:500;line-height:1.35;
+}
+.pip-step.done .pip-dot{background:var(--green);border-color:var(--green);color:#fff;}
+.pip-step.done .pip-label{color:var(--green);}
+.pip-step.active .pip-dot{
+  background:var(--blue);border-color:var(--blue);color:#fff;
+  box-shadow:0 0 0 4px rgba(29,78,216,.15);
+  animation:pip-pulse 1.5s infinite;
+}
+.pip-step.active .pip-label{color:var(--blue);font-weight:700;}
+@keyframes pip-pulse{0%,100%{opacity:1}50%{opacity:.6}}
+
+/* ── Status item ── */
+.st-item{display:flex;flex-direction:column;gap:.2rem;}
+.st-label{font-size:.92rem;color:var(--muted);}
+.st-val{font-size:1rem;font-weight:600;font-family:var(--mono);}
+.good{color:var(--green);}.bad{color:var(--red);}.warn{color:var(--yellow);}.info{color:var(--blue);}
+
+/* ── Pose / Joint grid ── */
+.pose-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;}
+.pose-item{background:var(--bg);border:1px solid var(--border);border-radius:.5rem;padding:.5rem .7rem;}
+.pose-axis{font-size:.92rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;}
+.pose-val{font-family:var(--mono);font-size:.9rem;color:var(--text);}
+
+/* ── Buttons ── */
+.btn{
+  padding:.65rem 1rem;border-radius:.5rem;font-size:.92rem;font-weight:600;cursor:pointer;
+  border:1px solid transparent;transition:all .15s;font-family:inherit;text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.btn:disabled{opacity:.4;cursor:not-allowed;}
+.btn-green{background:#dcfce7;color:#166534;border-color:#86efac;}
+.btn-green:hover:not(:disabled){background:var(--green);color:#fff;}
+.btn-red{background:#fee2e2;color:#991b1b;border-color:#fca5a5;}
+.btn-red:hover:not(:disabled){background:var(--red);color:#fff;}
+.btn-yellow{background:#fef3c7;color:#92400e;border-color:#fcd34d;}
+.btn-yellow:hover:not(:disabled){background:var(--yellow);color:#fff;}
+.btn-blue{background:#dbeafe;color:#1e40af;border-color:#93c5fd;}
+.btn-blue:hover:not(:disabled){background:var(--blue);color:#fff;}
+.btn-cyan{background:#cffafe;color:#155e75;border-color:#67e8f9;}
+.btn-cyan:hover:not(:disabled){background:var(--cyan);color:#fff;}
+.btn-ghost{background:var(--surf2);color:var(--muted);border-color:var(--border);}
+.btn-ghost:hover:not(:disabled){color:var(--text);border-color:var(--muted);}
+.btn-full{width:100%;}
+.btn-group{display:flex;gap:.6rem;flex-wrap:wrap;}
+.btn.active{opacity:1;}
+
+/* ── Mission / Confirm card ── */
+.confirm-row{display:flex;gap:1rem;margin-top:.75rem;}
+.confirm-box{
+  flex:1;border:2px dashed var(--border);border-radius:.6rem;padding:1rem 1.25rem;
+  display:flex;flex-direction:column;align-items:center;gap:.55rem;text-align:center;
+  transition:all .25s;
+}
+.confirm-box.confirmed{border-color:var(--green);border-style:solid;background:#dcfce7;}
+.confirm-box .actor-lbl{font-size:.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;}
+
+/* CSS-only 체크 인디케이터 */
+.confirm-indicator{
+  width:36px;height:36px;border-radius:50%;
+  border:2.5px solid var(--border);background:var(--surf2);
+  display:flex;align-items:center;justify-content:center;
+  transition:all .25s;position:relative;
+}
+.confirm-indicator::after{
+  content:'';width:12px;height:7px;
+  border-left:2.5px solid transparent;border-bottom:2.5px solid transparent;
+  transform:rotate(-45deg) translateY(-2px);
+  transition:border-color .2s;
+}
+.confirm-indicator.done{background:var(--green);border-color:var(--green);}
+.confirm-indicator.done::after{border-left-color:#fff;border-bottom-color:#fff;}
+
+/* ── AMR status badge ── */
+.amr-badge{
+  display:inline-flex;align-items:center;gap:.5rem;padding:.4rem 1rem;
+  border-radius:9999px;font-size:.92rem;font-weight:700;border:1px solid;
+}
+.amr-IDLE{background:#1e3a8a22;border-color:var(--blue);color:var(--blue);}
+.amr-DELIVERING{background:#78350f22;border-color:var(--yellow);color:var(--yellow);}
+.amr-ARRIVED{background:#14532d22;border-color:var(--green);color:var(--green);}
+.amr-RETURNING{background:#4a1d9622;border-color:var(--purple);color:var(--purple);}
+.amr-CHARGING{background:#0e4f5922;border-color:var(--cyan);color:var(--cyan);}
+.amr-ERROR{background:#7f1d1d33;border-color:var(--red);color:var(--red);}
+
+/* ── Door badge ── */
+.door-OPEN{color:var(--green);}
+.door-CLOSED{color:var(--muted);}
+.door-ERROR{color:var(--red);}
+
+/* ── Battery bar ── */
+.battery-wrap{display:flex;align-items:center;gap:.75rem;}
+.battery-bar{flex:1;height:8px;background:var(--surf2);border-radius:9999px;overflow:hidden;border:1px solid var(--border);}
+.battery-fill{height:100%;border-radius:9999px;transition:width .5s;}
+
+/* ── Node health ── */
+.node-card{display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;background:var(--surf2);border:1px solid var(--border);border-radius:.6rem;}
+.node-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.dot-ONLINE{background:var(--green);box-shadow:0 0 8px var(--green);}
+.dot-DEGRADED{background:var(--yellow);box-shadow:0 0 8px var(--yellow);}
+.dot-OFFLINE{background:var(--red);}
+.dot-UNKNOWN{background:var(--muted);}
+.node-name{font-size:.92rem;font-weight:600;}
+.node-seen{font-size:.92rem;color:var(--muted);font-family:var(--mono);}
+
+/* ── Jog control ── */
+.jog-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.85rem;}
+.jog-cell{background:var(--bg);border:1px solid var(--border);border-radius:.5rem;padding:.6rem .75rem;}
+.jog-axis{font-size:.92rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem;}
+.jog-btns{display:flex;gap:.4rem;}
+.jog-btns .btn{flex:1;padding:.45rem;font-size:.9rem;text-transform:none;letter-spacing:0;}
+
+/* ── Audit log table ── */
+.audit-table{width:100%;border-collapse:collapse;font-size:.92rem;}
+.audit-table th{padding:.5rem .75rem;background:var(--surf2);color:var(--muted);text-align:left;font-size:.92rem;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--border);}
+.audit-table td{padding:.5rem .75rem;border-bottom:1px solid #1e2130;font-family:var(--mono);}
+.audit-table tr:last-child td{border-bottom:none;}
+.actor-admin{color:var(--blue);}
+.actor-pharmacist{color:var(--cyan);}
+.actor-system{color:var(--muted);}
+
+/* ── Placeholder ── */
+.placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:3rem;gap:.75rem;text-align:center;color:var(--muted);}
+.placeholder .ph-icon{font-size:2.5rem;opacity:.4;}
+.placeholder .ph-title{font-size:1rem;font-weight:600;}
+.placeholder .ph-sub{font-size:.92rem;opacity:.7;}
+
+/* ── Demo Mode ── */
+.btn-demo-toggle{
+  background:#1a1a2e;color:#f59e0b;border:1.5px solid #f59e0b;border-radius:.4rem;
+  padding:.4rem .9rem;font-size:.82rem;font-weight:800;cursor:pointer;
+  letter-spacing:.08em;text-transform:uppercase;font-family:inherit;
+  transition:all .15s;
+}
+.btn-demo-toggle.active{background:#f59e0b;color:#1a1a2e;box-shadow:0 0 12px #f59e0b88;}
+.btn-demo-toggle:hover{opacity:.85;}
+
+#demo-bar{
+  flex-shrink:0;background:#1a1a2e;border-bottom:2px solid #f59e0b44;
+  padding:.6rem 1.25rem;display:none;align-items:center;gap:.75rem;
+  flex-wrap:wrap;overflow-x:auto;
+}
+#demo-bar.visible{display:flex;}
+.demo-label{
+  font-size:.68rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  color:#f59e0b;flex-shrink:0;padding:.2rem .5rem;background:#f59e0b22;
+  border:1px solid #f59e0b44;border-radius:.3rem;
+}
+.demo-steps{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;}
+.demo-step-btn{
+  display:flex;align-items:center;gap:.35rem;
+  padding:.38rem .75rem;border-radius:.4rem;font-size:.78rem;font-weight:600;
+  cursor:pointer;border:1px solid #ffffff22;background:#ffffff0d;color:#94a3b8;
+  transition:all .15s;font-family:inherit;white-space:nowrap;
+}
+.demo-step-btn:hover{background:#ffffff1a;color:#e2e8f0;border-color:#ffffff44;}
+.demo-step-btn.active{
+  background:#f59e0b22;border-color:#f59e0b;color:#f59e0b;
+  box-shadow:0 0 8px #f59e0b44;
+}
+.demo-step-btn.done{
+  background:#16a34a22;border-color:#22c55e66;color:#4ade80;
+}
+.demo-step-btn.done::before{content:'✓ ';font-weight:800;}
+.demo-step-btn:disabled{opacity:.35;cursor:not-allowed;}
+.demo-arrow{color:#ffffff22;font-size:.85rem;flex-shrink:0;}
+.demo-sep{width:1px;height:20px;background:#ffffff22;flex-shrink:0;margin:0 .25rem;}
+.demo-feedback{
+  font-size:.75rem;font-family:var(--mono);color:#94a3b8;
+  flex-shrink:0;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.demo-feedback.ok{color:#4ade80;}
+.demo-feedback.err{color:#f87171;}
+
+/* ── Alert feed ── */
+.alert-feed{display:flex;flex-direction:column;gap:.4rem;max-height:200px;overflow-y:auto;}
+.alert-item{display:flex;gap:.75rem;align-items:flex-start;font-size:.92rem;padding:.4rem .6rem;border-radius:.4rem;background:var(--surf2);}
+.alert-time{color:var(--muted);font-family:var(--mono);white-space:nowrap;flex-shrink:0;}
+.alert-ok{border-left:3px solid var(--green);}
+.alert-warn{border-left:3px solid var(--yellow);}
+.alert-err{border-left:3px solid var(--red);}
+.alert-info{border-left:3px solid var(--blue);}
+
+/* ── Feedback bar ── */
+.feedback{font-size:.92rem;color:var(--muted);font-family:var(--mono);min-height:1em;margin-top:.5rem;}
+
+/* ── Dispatch section ── */
+#dispatch-btn{
+  width:100%;padding:1rem;font-size:1rem;font-weight:800;letter-spacing:.06em;
+  border-radius:.6rem;border:2px solid;cursor:pointer;font-family:inherit;transition:all .2s;
+  text-transform:uppercase;
+}
+#dispatch-btn.ready{background:#14532d33;color:var(--green);border-color:var(--green);}
+#dispatch-btn.ready:hover{background:var(--green);color:#fff;}
+#dispatch-btn.not-ready{background:var(--surf2);color:var(--muted);border-color:var(--border);cursor:not-allowed;}
+</style>
+</head>
+<body>
+
+<!-- ── Top bar ── -->
+<div id="topbar">
+  <div class="logo">RoTo<span>SY</span> <span style="font-weight:400;color:var(--muted);font-size:.92rem;">관리자 관제</span></div>
+  <div class="right">
+    <button id="demo-toggle-btn" class="btn-demo-toggle" onclick="toggleDemoMode()">⚡ DEMO</button>
+    <button class="btn-gestop" onclick="globalEstop()"> 전체 정지</button>
+    <div id="ws-badge" class="badge connecting">
+      <div class="badge-dot"></div>
+      <span id="ws-label">연결 중...</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Demo bar ── -->
+<div id="demo-bar">
+  <div class="demo-label">⚡ DEMO</div>
+  <div class="demo-steps">
+    <button class="demo-step-btn active" id="dstep-approve"      onclick="demoStep('approve')"     >①처방 승인</button>
+    <div class="demo-arrow">›</div>
+    <button class="demo-step-btn"        id="dstep-robot_start"  onclick="demoStep('robot_start')" >②로봇 시작</button>
+    <div class="demo-arrow">›</div>
+    <button class="demo-step-btn"        id="dstep-confirm_all"  onclick="demoStep('confirm_all')" >③적재 확인</button>
+    <div class="demo-arrow">›</div>
+    <button class="demo-step-btn"        id="dstep-dispatch"     onclick="demoStep('dispatch')"    >④AMR 출발</button>
+    <div class="demo-arrow">›</div>
+    <button class="demo-step-btn"        id="dstep-amr_arrive"   onclick="demoStep('amr_arrive')"  >⑤AMR 도착</button>
+    <div class="demo-arrow">›</div>
+    <button class="demo-step-btn"        id="dstep-complete"     onclick="demoStep('complete')"    >⑥배송 완료</button>
+  </div>
+  <div class="demo-sep"></div>
+  <button class="demo-step-btn" style="border-color:#38bdf844;color:#7dd3fc;" onclick="demoStep('sensor')">온습도 갱신</button>
+  <button class="demo-step-btn" style="border-color:#f8717144;color:#fca5a5;" onclick="demoReset()"> 초기화</button>
+  <div class="demo-sep"></div>
+  <div class="demo-feedback" id="demo-feedback">단계 버튼을 순서대로 클릭하세요</div>
+</div>
+
+<!-- ── Layout ── -->
+<div id="layout">
+
+  <!-- Sidebar -->
+  <nav id="sidebar">
+    <div class="nav-section">관제</div>
+    <div class="nav-item active" onclick="showTab('vision')" id="nav-vision">카메라/비전</div>
+    <div class="nav-item" onclick="showTab('dashboard')" id="nav-dashboard">대시보드</div>
+    <div class="nav-item" onclick="showTab('robot')" id="nav-robot">로봇 암</div>
+    <div class="nav-item" onclick="showTab('amr')" id="nav-amr">AMR 관제</div>
+    <div class="nav-divider"></div>
+    <div class="nav-section">장치</div>
+    <div class="nav-item" onclick="showTab('plc')" id="nav-plc">컨베이어 / PLC</div>
+    <div class="nav-item" onclick="showTab('arduino')" id="nav-arduino">온습도 센서</div>
+    <div class="nav-divider"></div>
+    <div class="nav-section">시스템</div>
+    <div class="nav-item" onclick="showTab('nodes')" id="nav-nodes">노드 상태</div>
+    <div class="nav-item" onclick="showTab('audit')" id="nav-audit">감사 로그</div>
+  </nav>
+
+  <!-- Main content -->
+  <div id="content">
+
+    <!-- ═══════════════════════════ 카메라/비전 ═══════════════════════════ -->
+    <div class="tab-panel active" id="tab-vision" style="flex-direction:column;gap:1.5rem;padding:1.5rem;overflow-y:auto;">
+
+      <!-- 카메라 스트림 -->
+      <div class="card" style="flex:0 0 auto;">
+        <div class="card-title">RealSense D455 카메라 스트림</div>
+        <div id="camera-container" style="position:relative;width:100%;padding-bottom:75%;background:var(--bg);border:1px solid var(--border);border-radius:.5rem;overflow:hidden;">
+          <img id="camera-frame" src="" alt="카메라 스트림"
+               style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;background:var(--surf2);">
+        </div>
+        <div style="font-size:.85rem;color:var(--muted);margin-top:.5rem;">
+          스트림 상태: <span id="stream-status" style="font-weight:600;">대기 중</span>
+        </div>
+      </div>
+
+      <!-- Vision AI 결과 -->
+      <div class="card" style="flex:0 0 auto;">
+        <div class="card-title">Vision AI — ArUco 마커 인식</div>
+        <div id="vision-results" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.75rem;font-size:.85rem;">
+          <div style="text-align:center;color:var(--muted);padding:1rem;">
+            카메라 연결 대기 중...
+          </div>
+        </div>
+      </div>
+
+      <!-- 약품 서랍(카비닛) 위치 맵 -->
+      <div class="card" style="flex:0 0 auto;">
+        <div class="card-title">약품 서랍 위치 맵 (2열 × 3행)</div>
+        <div id="drawer-map" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1.25rem;padding:1rem;">
+          <!-- JS에서 동적 생성 -->
+        </div>
+      </div>
+
+    </div><!-- /tab-vision -->
+
+    <!-- ═══════════════════════════ 대시보드 ═══════════════════════════ -->
+    <div class="tab-panel" id="tab-dashboard">
+
+      <!-- Pipeline -->
+      <div id="pipeline">
+        <div class="pip-step" id="pip-0"><div class="pip-dot">1</div><div class="pip-label">처방<br>수신</div></div>
+        <div class="pip-step" id="pip-1"><div class="pip-dot">2</div><div class="pip-label">로봇<br>집기</div></div>
+        <div class="pip-step" id="pip-2"><div class="pip-dot">3</div><div class="pip-label">OCR<br>검증</div></div>
+        <div class="pip-step" id="pip-3"><div class="pip-dot">4</div><div class="pip-label">적재<br>확인</div></div>
+        <div class="pip-step" id="pip-4"><div class="pip-dot">5</div><div class="pip-label">AMR<br>출발</div></div>
+        <div class="pip-step" id="pip-5"><div class="pip-dot">6</div><div class="pip-label">이동 중</div></div>
+        <div class="pip-step" id="pip-6"><div class="pip-dot">7</div><div class="pip-label">도착/<br>수령</div></div>
+      </div>
+
+      <div class="grid-2">
+        <!-- 현재 미션 + 적재 확인 -->
+        <div class="card">
+          <div class="card-title">현재 미션</div>
+          <div style="display:flex;gap:2rem;flex-wrap:wrap;align-items:flex-start;">
+            <div class="st-item"><div class="st-label">미션 ID</div><div class="st-val info" id="d-mission-id">—</div></div>
+            <div class="st-item"><div class="st-label">처방 ID</div><div class="st-val" id="d-presc-id">—</div></div>
+            <div class="st-item"><div class="st-label">목적지</div><div class="st-val" id="d-dest">—</div></div>
+            <div class="st-item"><div class="st-label">상태</div><div class="st-val warn" id="d-mission-status">IDLE</div></div>
+          </div>
+
+          <!-- 적재 확인 dual confirm -->
+          <div class="confirm-row" id="confirm-section">
+            <div class="confirm-box" id="confirm-pharmacist">
+              <div class="actor-lbl">약사</div>
+              <div class="confirm-indicator" id="confirm-pharmacist-icon"></div>
+              <div style="font-size:.8rem;color:var(--muted);" id="confirm-pharmacist-lbl">대기 중</div>
+            </div>
+            <div class="confirm-box" id="confirm-admin">
+              <div class="actor-lbl">관리자 (나)</div>
+              <div class="confirm-indicator" id="confirm-admin-icon"></div>
+              <button class="btn btn-blue" id="btn-confirm-admin" onclick="confirmLoading()" style="font-size:.8rem;padding:.4rem .9rem;">적재 확인</button>
+            </div>
+          </div>
+
+          <div style="margin-top:.9rem;">
+            <button id="dispatch-btn" class="not-ready" onclick="dispatchAMR()" disabled>
+              ▶ AMR 출발
+            </button>
+          </div>
+          <div class="feedback" id="mission-feedback"></div>
+
+          <div class="btn-group" style="margin-top:.75rem;">
+            <button class="btn btn-ghost" onclick="openNewMissionModal()" style="font-size:.92rem;">+ 새 미션</button>
+            <button class="btn btn-red" onclick="resetMission()" style="font-size:.92rem;">미션 초기화</button>
+          </div>
+        </div>
+
+        <!-- 시스템 KPI + 노드 요약 -->
+        <div>
+          <div class="grid-3" style="margin-bottom:1.25rem;">
+            <div class="kpi"><div class="kpi-val good" id="kpi-done">0</div><div class="kpi-lbl">금일 완료</div></div>
+            <div class="kpi"><div class="kpi-val warn" id="kpi-progress">0</div><div class="kpi-lbl">진행 중</div></div>
+            <div class="kpi"><div class="kpi-val bad"  id="kpi-error">0</div><div class="kpi-lbl">오류</div></div>
+          </div>
+          <div class="card" style="margin-bottom:0;">
+            <div class="card-title">노드 상태 요약</div>
+            <div style="display:flex;flex-direction:column;gap:.5rem;" id="node-summary"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 금일 배송 요청 목록 -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+          <div class="card-title" style="margin-bottom:0;">금일 배송 요청 목록</div>
+          <div style="display:flex;align-items:center;gap:.75rem;">
+            <span id="delivery-req-count" style="font-size:.78rem;color:var(--muted);"></span>
+            <button class="btn btn-ghost" onclick="loadTodayDeliveries()" style="font-size:.78rem;padding:.3rem .7rem;">새로고침</button>
+          </div>
+        </div>
+        <div id="today-delivery-list">
+          <div style="text-align:center;padding:1.5rem;color:var(--muted);font-size:.85rem;">로딩 중...</div>
+        </div>
+      </div>
+
+      <!-- 알림 피드 -->
+      <div class="card">
+        <div class="card-title">최근 이벤트</div>
+        <div class="alert-feed" id="alert-feed"></div>
+      </div>
+
+    </div><!-- /tab-dashboard -->
+
+
+    <!-- ═══════════════════════════ 로봇 암 ═══════════════════════════ -->
+    <div class="tab-panel" id="tab-robot">
+
+      <!-- 상태 + 컨트롤 -->
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:2rem;flex-wrap:wrap;">
+          <div style="flex:1;min-width:260px;">
+            <div class="card-title" style="margin-bottom:.75rem;">로봇 암 상태</div>
+            <div style="display:flex;gap:2rem;flex-wrap:wrap;">
+              <div class="st-item"><div class="st-label">State</div><div class="st-val" id="r-state">—</div></div>
+              <div class="st-item"><div class="st-label">Servo</div><div class="st-val" id="r-servo">—</div></div>
+              <div class="st-item"><div class="st-label">Motion</div><div class="st-val" id="r-moving">—</div></div>
+              <div class="st-item"><div class="st-label">Ready</div><div class="st-val" id="r-ready">—</div></div>
+            </div>
+            <div class="feedback" id="robot-feedback"></div>
+          </div>
+          <div class="btn-group" style="flex-shrink:0;">
+            <button id="btn-servo-on"  class="btn btn-green"  onclick="rPost('/api/robot/servo',{enable:true},'servo-on')">Servo ON</button>
+            <button id="btn-servo-off" class="btn btn-red"    onclick="rPost('/api/robot/servo',{enable:false},'servo-off')">Servo OFF</button>
+            <button id="btn-home"      class="btn btn-yellow" onclick="rPost('/api/robot/home',null,'home')">Home</button>
+            <button id="btn-teach"     class="btn btn-blue"   onclick="toggleTeaching()">직접 교시</button>
+            <button id="btn-recover"   class="btn btn-yellow" onclick="rPost('/api/robot/recover',null,'recover')" disabled>⚡ 복구</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TCP / Joints -->
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">TCP Pose <span style="color:var(--blue);font-weight:400;text-transform:none;letter-spacing:0">실시간</span></div>
+          <div class="pose-grid">
+            <div class="pose-item"><div class="pose-axis">X (mm)</div><div class="pose-val" id="tcp-x">—</div></div>
+            <div class="pose-item"><div class="pose-axis">Y (mm)</div><div class="pose-val" id="tcp-y">—</div></div>
+            <div class="pose-item"><div class="pose-axis">Z (mm)</div><div class="pose-val" id="tcp-z">—</div></div>
+            <div class="pose-item"><div class="pose-axis">Rx (°)</div><div class="pose-val" id="tcp-rx">—</div></div>
+            <div class="pose-item"><div class="pose-axis">Ry (°)</div><div class="pose-val" id="tcp-ry">—</div></div>
+            <div class="pose-item"><div class="pose-axis">Rz (°)</div><div class="pose-val" id="tcp-rz">—</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Joint Angles</div>
+          <div class="pose-grid">
+            <div class="pose-item"><div class="pose-axis">J1 (°)</div><div class="pose-val" id="j1">—</div></div>
+            <div class="pose-item"><div class="pose-axis">J2 (°)</div><div class="pose-val" id="j2">—</div></div>
+            <div class="pose-item"><div class="pose-axis">J3 (°)</div><div class="pose-val" id="j3">—</div></div>
+            <div class="pose-item"><div class="pose-axis">J4 (°)</div><div class="pose-val" id="j4">—</div></div>
+            <div class="pose-item"><div class="pose-axis">J5 (°)</div><div class="pose-val" id="j5">—</div></div>
+            <div class="pose-item"><div class="pose-axis">J6 (°)</div><div class="pose-val" id="j6">—</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Jog -->
+      <div class="card">
+        <div class="card-title">
+          Joint Jog Control
+          <span id="jog-badge" style="margin-left:.5rem;color:var(--red);display:none;"></span>
+        </div>
+        <div class="jog-row" id="jog-container"></div>
+        <div style="display:flex;align-items:center;gap:1rem;margin-top:1rem;">
+          <span class="st-label">속도</span>
+          <input type="range" id="jog-speed" min="1" max="50" value="5" style="flex:1;accent-color:var(--blue);">
+          <span id="jog-speed-val" class="st-val" style="width:2.5ch;">5</span>
+          <span class="st-label">%</span>
+        </div>
+      </div>
+
+      <!-- Direct Move -->
+      <div class="card">
+        <div class="card-title">Direct Move Control</div>
+        <div class="grid-2">
+          <div>
+            <div style="font-size:.92rem;color:var(--blue);margin-bottom:.6rem;font-weight:600;">Task Space (MoveL)</div>
+            <div class="pose-grid">
+              <div><div class="pose-axis">X</div><input type="number" id="in-x" step="1" class="num-in"></div>
+              <div><div class="pose-axis">Y</div><input type="number" id="in-y" step="1" class="num-in"></div>
+              <div><div class="pose-axis">Z</div><input type="number" id="in-z" step="1" class="num-in"></div>
+              <div><div class="pose-axis">Rx</div><input type="number" id="in-rx" step=".1" class="num-in"></div>
+              <div><div class="pose-axis">Ry</div><input type="number" id="in-ry" step=".1" class="num-in"></div>
+              <div><div class="pose-axis">Rz</div><input type="number" id="in-rz" step=".1" class="num-in"></div>
+            </div>
+            <div class="btn-group" style="margin-top:.75rem;">
+              <button class="btn btn-green move-btn" onclick="moveL()" style="flex:2;">MoveL</button>
+              <button class="btn btn-ghost sync-btn" onclick="syncTCP()" style="flex:1;font-size:.92rem;">현재값</button>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:.92rem;color:var(--green);margin-bottom:.6rem;font-weight:600;">Joint Space (MoveJ)</div>
+            <div class="pose-grid">
+              <div><div class="pose-axis">J1</div><input type="number" id="in-j1" step=".1" class="num-in"></div>
+              <div><div class="pose-axis">J2</div><input type="number" id="in-j2" step=".1" class="num-in"></div>
+              <div><div class="pose-axis">J3</div><input type="number" id="in-j3" step=".1" class="num-in"></div>
+              <div><div class="pose-axis">J4</div><input type="number" id="in-j4" step=".1" class="num-in"></div>
+              <div><div class="pose-axis">J5</div><input type="number" id="in-j5" step=".1" class="num-in"></div>
+              <div><div class="pose-axis">J6</div><input type="number" id="in-j6" step=".1" class="num-in"></div>
+            </div>
+            <div class="btn-group" style="margin-top:.75rem;">
+              <button class="btn btn-green move-btn" onclick="moveJ()" style="flex:2;color:var(--green);">MoveJ</button>
+              <button class="btn btn-ghost sync-btn" onclick="syncJoints()" style="flex:1;font-size:.92rem;">현재값</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /tab-robot -->
+
+
+    <!-- ═══════════════════════════ AMR 관제 ═══════════════════════════ -->
+    <div class="tab-panel" id="tab-amr">
+
+      <div class="grid-2">
+
+        <!-- AMR 상태 -->
+        <div class="card">
+          <div class="card-title">AMR 상태</div>
+          <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
+            <div id="amr-badge" class="amr-badge amr-IDLE">● IDLE</div>
+            <div style="font-size:.92rem;color:var(--muted);" id="amr-dest-lbl"></div>
+          </div>
+
+          <!-- Battery -->
+          <div class="st-label" style="margin-bottom:.4rem;">배터리</div>
+          <div class="battery-wrap" style="margin-bottom:1rem;">
+            <div class="battery-bar"><div id="amr-battery-fill" class="battery-fill" style="width:100%;background:var(--green);"></div></div>
+            <span id="amr-battery-val" class="st-val" style="width:3.5ch;">—%</span>
+          </div>
+
+          <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1rem;">
+            <div class="st-item"><div class="st-label">연결</div><div class="st-val" id="amr-online">—</div></div>
+            <div class="st-item"><div class="st-label">위치 X</div><div class="pose-val" id="amr-x">—</div></div>
+            <div class="st-item"><div class="st-label">위치 Y</div><div class="pose-val" id="amr-y">—</div></div>
+          </div>
+
+          <div class="btn-group">
+            <button class="btn btn-ghost" onclick="amrReturn()">복귀 명령</button>
+            <button class="btn btn-red"   onclick="amrCancel()">미션 취소</button>
+          </div>
+          <div class="feedback" id="amr-feedback"></div>
+        </div>
+
+        <!-- 출입 도어 -->
+        <div class="card">
+          <div class="card-title">출입 도어 제어</div>
+          <div style="display:flex;align-items:center;gap:.85rem;margin-bottom:1.25rem;padding:.75rem 1rem;background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;">
+            <div id="door-dot" style="width:12px;height:12px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background .3s;"></div>
+            <div>
+              <div class="st-label" style="margin-bottom:.15rem;">현재 도어 상태</div>
+              <div class="st-val" id="door-status" style="font-size:1rem;">—</div>
+            </div>
+          </div>
+
+          <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:.75rem;margin-bottom:1rem;font-size:.92rem;color:var(--muted);">
+            AMR 도착 후 자동 개방을 시도합니다.<br>
+            3초 내 개방 확인이 없으면 강제 개방 버튼이 활성화됩니다.
+          </div>
+
+          <div class="btn-group">
+            <button class="btn btn-green btn-full" id="btn-door-open" onclick="doorOpen()">강제 개방</button>
+            <button class="btn btn-ghost btn-full" onclick="doorClose()">강제 닫힘</button>
+          </div>
+          <div class="feedback" id="door-feedback"></div>
+        </div>
+
+      </div>
+
+      <!-- 출발 제어 -->
+      <div class="card">
+        <div class="card-title">AMR 출발 제어</div>
+        <div style="display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
+            <div class="st-label" style="margin-bottom:.4rem;">목적지</div>
+            <input type="text" id="amr-dest-input" placeholder="예: 3병동 나스 스테이션"
+              style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:.5rem .75rem;border-radius:.4rem;font-family:inherit;font-size:.9rem;">
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;">
+            <div class="st-label">적재 확인</div>
+            <div style="display:flex;gap:.75rem;align-items:center;">
+              <div style="display:flex;align-items:center;gap:.35rem;font-size:.8rem;color:var(--muted);">
+                <div id="amr-tab-pharmacist" class="confirm-indicator" style="width:20px;height:20px;"></div>
+                약사
+              </div>
+              <div style="display:flex;align-items:center;gap:.35rem;font-size:.8rem;color:var(--muted);">
+                <div id="amr-tab-admin" class="confirm-indicator" style="width:20px;height:20px;"></div>
+                관리자
+              </div>
+            </div>
+          </div>
+          <button id="amr-dispatch-btn" class="btn btn-green" onclick="dispatchAMR()" disabled
+            style="padding:.75rem 2rem;font-size:.9rem;font-weight:700;">
+            ▶ 출발
+          </button>
+        </div>
+        <div class="feedback" id="dispatch-feedback"></div>
+      </div>
+
+    </div><!-- /tab-amr -->
+
+
+    <!-- ═══════════════════════════ PLC ═══════════════════════════ -->
+    <div class="tab-panel" id="tab-plc">
+      <div class="card">
+        <div class="card-title">컨베이어 / PLC</div>
+        <div class="placeholder">
+          <div class="ph-icon"></div>
+          <div class="ph-title">PLC 연동 대기 중</div>
+          <div class="ph-sub">팀원이 PLC 노드 개발 완료 후 연결됩니다.<br>현재 상태: <span style="color:var(--red);">DISCONNECTED</span></div>
+        </div>
+        <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:1rem;font-size:.92rem;color:var(--muted);">
+          <div style="font-weight:600;color:var(--text);margin-bottom:.5rem;">구현 예정 기능</div>
+          <ul style="padding-left:1.2rem;display:flex;flex-direction:column;gap:.3rem;">
+            <li>컨베이어 구간별 On/Off</li>
+            <li>속도 슬라이더 (실시간)</li>
+            <li>PLC I/O 센서 상태 모니터링</li>
+            <li>하드웨어 E-Stop 상태 표시</li>
+            <li>자동/수동 모드 전환</li>
+          </ul>
+          <div style="margin-top:.75rem;font-size:.92rem;">
+            예상 ROS2 토픽: <code style="color:var(--blue)">/plc/status</code>, <code style="color:var(--blue)">/plc/conveyor_cmd</code>
+          </div>
+        </div>
+      </div>
+    </div><!-- /tab-plc -->
+
+
+    <!-- ═══════════════════════════ 온습도 센서 ═══════════════════════════ -->
+    <div class="tab-panel" id="tab-arduino">
+      <div class="card">
+        <div class="card-title">약품실 온습도 모니터링</div>
+
+        <!-- 현재값 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem;">
+          <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:1rem;text-align:center;">
+            <div class="st-label" style="margin-bottom:.35rem;">현재 온도</div>
+            <div style="font-size:2.5rem;font-weight:700;color:var(--blue);">
+              <span id="sensor-temp">—</span>°C
+            </div>
+            <div style="font-size:.8rem;color:var(--muted);margin-top:.35rem;">범위: 15~25°C</div>
+          </div>
+          <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:1rem;text-align:center;">
+            <div class="st-label" style="margin-bottom:.35rem;">현재 습도</div>
+            <div style="font-size:2.5rem;font-weight:700;color:var(--green);">
+              <span id="sensor-humi">—</span>%
+            </div>
+            <div style="font-size:.8rem;color:var(--muted);margin-top:.35rem;">범위: 40~70%</div>
+          </div>
+        </div>
+
+        <!-- 센서 상태 -->
+        <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:.85rem 1rem;margin-bottom:1.5rem;font-size:.9rem;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <div class="st-label">센서 상태</div>
+              <div style="margin-top:.2rem;"><span id="sensor-status" style="font-weight:600;">OFFLINE</span></div>
+            </div>
+            <div style="text-align:right;">
+              <div class="st-label">마지막 업데이트</div>
+              <div style="margin-top:.2rem;font-size:.8rem;color:var(--muted);" id="sensor-updated">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 24시간 히스토리 차트 -->
+        <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:1rem;margin-bottom:1rem;">
+          <div class="st-label" style="margin-bottom:.75rem;">24시간 온습도 추이</div>
+          <canvas id="sensor-chart" width="100%" height="200" style="display:block;margin:0 auto;"></canvas>
+        </div>
+
+        <!-- 경보 이력 -->
+        <div>
+          <div class="st-label" style="margin-bottom:.75rem;">
+            최근 경보 (<span id="alert-count">0</span>건)
+          </div>
+          <div id="alert-list" style="max-height:300px;overflow-y:auto;font-size:.85rem;">
+            <div style="color:var(--muted);text-align:center;padding:1rem;">경보 없음</div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /tab-arduino -->
+
+
+    <!-- ═══════════════════════════ 노드 상태 ═══════════════════════════ -->
+    <div class="tab-panel" id="tab-nodes">
+      <div class="card">
+        <div class="card-title">ROS2 노드 상태</div>
+        <div style="display:flex;flex-direction:column;gap:.6rem;" id="nodes-detail">
+          <div class="node-card" id="nc-arm_controller">
+            <div class="node-dot dot-UNKNOWN" id="nd-arm_controller"></div>
+            <div>
+              <div class="node-name">arm_controller</div>
+              <div class="node-seen" id="ns-arm_controller">마지막 수신: —</div>
+            </div>
+            <div style="margin-left:auto;font-size:.92rem;color:var(--muted)" id="nst-arm_controller">UNKNOWN</div>
+          </div>
+          <div class="node-card" id="nc-amr_controller">
+            <div class="node-dot dot-UNKNOWN" id="nd-amr_controller"></div>
+            <div>
+              <div class="node-name">amr_controller</div>
+              <div class="node-seen" id="ns-amr_controller">마지막 수신: —</div>
+            </div>
+            <div style="margin-left:auto;font-size:.92rem;color:var(--muted)" id="nst-amr_controller">UNKNOWN</div>
+          </div>
+          <div class="node-card" id="nc-vision_node">
+            <div class="node-dot dot-UNKNOWN" id="nd-vision_node"></div>
+            <div>
+              <div class="node-name">vision_node (Florence-2 / OCR)</div>
+              <div class="node-seen" id="ns-vision_node">마지막 수신: —</div>
+            </div>
+            <div style="margin-left:auto;font-size:.92rem;color:var(--muted)" id="nst-vision_node">UNKNOWN</div>
+          </div>
+          <div class="node-card" id="nc-web_gateway">
+            <div class="node-dot dot-ONLINE" id="nd-web_gateway"></div>
+            <div>
+              <div class="node-name">web_gateway (이 서버)</div>
+              <div class="node-seen" id="ns-web_gateway">—</div>
+            </div>
+            <div style="margin-left:auto;font-size:.92rem;color:var(--green)" id="nst-web_gateway">ONLINE</div>
+          </div>
+          <div class="node-card" id="nc-rotosy">
+            <div class="node-dot" id="nd-rotosy" style="background:var(--muted)"></div>
+            <div>
+              <div class="node-name">RoToSY (robot arm API · :8000)</div>
+              <div class="node-seen" id="ns-rotosy">—</div>
+            </div>
+            <div style="margin-left:auto;font-size:.92rem;color:var(--muted)" id="nst-rotosy">—</div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /tab-nodes -->
+
+
+    <!-- ═══════════════════════════ 감사 로그 ═══════════════════════════ -->
+    <div class="tab-panel" id="tab-audit">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+          <div class="card-title" style="margin-bottom:0;">감사 로그</div>
+          <button class="btn btn-ghost" onclick="loadAudit()" style="font-size:.92rem;padding:.35rem .75rem;">새로고침</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="audit-table">
+            <thead>
+              <tr><th>시각</th><th>행위자</th><th>액션</th><th>상세</th></tr>
+            </thead>
+            <tbody id="audit-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div><!-- /tab-audit -->
+
+  </div><!-- /content -->
+</div><!-- /layout -->
+
+
+<!-- ── New Mission Modal ── -->
+<div id="modal-bg" style="display:none;position:fixed;inset:0;background:#0008;z-index:200;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:.75rem;padding:1.5rem;width:360px;max-width:90vw;">
+    <div style="font-weight:700;margin-bottom:1rem;">새 미션 생성</div>
+    <div style="margin-bottom:.75rem;">
+      <div class="st-label" style="margin-bottom:.35rem;">목적지</div>
+      <input type="text" id="modal-dest" placeholder="예: 3병동 나스 스테이션"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:.5rem .75rem;border-radius:.4rem;font-family:inherit;">
+    </div>
+    <div style="margin-bottom:1rem;">
+      <div class="st-label" style="margin-bottom:.35rem;">처방 ID (선택)</div>
+      <input type="text" id="modal-presc" placeholder="예: P-0042"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:.5rem .75rem;border-radius:.4rem;font-family:inherit;">
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-blue btn-full" onclick="createMission()">생성</button>
+      <button class="btn btn-ghost btn-full" onclick="closeModal()">취소</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.num-in{
+  width:100%;background:var(--bg);border:1px solid var(--border);
+  color:var(--text);padding:.4rem;border-radius:.35rem;font-family:var(--mono);font-size:.92rem;
+}
+</style>
+
+<script>
+// ═══════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════
+let state = null;
+let latestRobot = null;
+const kpiDone = {count: 0};
+let prevMissionStatus = null;
+
+// ═══════════════════════════════════════════════
+// Tab navigation
+// ═══════════════════════════════════════════════
+function showTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('nav-' + name).classList.add('active');
+  if (name === 'audit')     loadAudit();
+  if (name === 'dashboard') loadTodayDeliveries();
+}
+
+// ═══════════════════════════════════════════════
+// WebSocket
+// ═══════════════════════════════════════════════
+function setWS(cls, label) {
+  const b = document.getElementById('ws-badge');
+  const l = document.getElementById('ws-label');
+  b.className = 'badge ' + cls;
+  l.textContent = {connected:'연결됨', disconnected:'연결 끊김', connecting:'연결 중...'}[cls];
+}
+
+function connect() {
+  setWS('connecting');
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen  = () => setWS('connected');
+  ws.onclose = () => { setWS('disconnected'); setTimeout(connect, 3000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = e => { try { applyState(JSON.parse(e.data)); } catch(_) {} };
+}
+
+// ═══════════════════════════════════════════════
+// Main state applicator
+// ═══════════════════════════════════════════════
+function applyState(s) {
+  state = s;
+  if (s.robot) { latestRobot = s.robot; applyRobot(s.robot); }
+  if (s.amr)   applyAMR(s.amr);
+  if (s.door)  applyDoor(s.door);
+  if (s.mission) applyMission(s.mission);
+  if (s.nodes)  applyNodes(s.nodes);
+  applyRoToSYOnline(s.robot_online);
+}
+
+// ── Robot ──
+function applyRobot(r) {
+  setText('r-state',  r.robot_state_str ?? '—');
+  setValColor('r-servo',  r.servo_on ? 'ON' : 'OFF',     r.servo_on ? 'good' : 'bad');
+  setValColor('r-moving', r.is_moving ? 'MOVING' : 'IDLE', r.is_moving ? 'warn' : '');
+  setValColor('r-ready',  r.arm_ready ? 'READY' : 'NOT READY', r.arm_ready ? 'good' : 'bad');
+
+  const tcp = (r.current_tcp_rt && r.current_tcp_rt.some(v=>v!==0)) ? r.current_tcp_rt : (r.current_tcp ?? []);
+  ['tcp-x','tcp-y','tcp-z','tcp-rx','tcp-ry','tcp-rz'].forEach((id,i) => setText(id, fmt(tcp[i])));
+
+  const j = r.current_joints_deg ?? [];
+  ['j1','j2','j3','j4','j5','j6'].forEach((id,i) => {
+    setText(id, fmt(j[i]));
+    const jv = document.getElementById(`jog-val-${i}`);
+    if (jv) jv.textContent = fmt(j[i]);
+  });
+
+  // Button interlocks
+  const teach = r.teaching_mode;
+  const servoOn = r.servo_on;
+  const recovering = [3,5,15].includes(r.robot_state) && !r.is_moving;
+  el('btn-servo-on').disabled  = servoOn || teach;
+  el('btn-servo-off').disabled = !servoOn;
+  el('btn-home').disabled      = !servoOn || teach;
+  el('btn-teach').textContent  = teach ? '교시 종료' : '직접 교시';
+  el('btn-teach').className    = teach ? 'btn btn-blue active' : 'btn btn-blue';
+  el('btn-recover').disabled   = !recovering;
+  document.querySelectorAll('.jog-btn').forEach(b => b.disabled = !servoOn || teach);
+  document.querySelectorAll('.move-btn').forEach(b => b.disabled = !servoOn || teach);
+  document.querySelectorAll('.sync-btn').forEach(b => b.disabled = false);
+  el('jog-badge').style.display = (!servoOn || teach) ? 'inline' : 'none';
+  el('jog-badge').textContent   = teach ? '[DISABLED: 교시 모드]' : '[DISABLED: SERVO OFF]';
+}
+
+// ── AMR ──
+function applyAMR(a) {
+  const status = a.status ?? 'IDLE';
+  el('amr-badge').className = 'amr-badge amr-' + status;
+  el('amr-badge').textContent = '● ' + status;
+  el('amr-dest-lbl').textContent = a.destination ? '→ ' + a.destination : '';
+
+  const bat = a.battery ?? 100;
+  el('amr-battery-val').textContent = bat.toFixed(0) + '%';
+  const fill = el('amr-battery-fill');
+  fill.style.width = bat + '%';
+  fill.style.background = bat > 40 ? 'var(--green)' : bat > 20 ? 'var(--yellow)' : 'var(--red)';
+
+  setValColor('amr-online', a.online ? 'ONLINE' : 'OFFLINE', a.online ? 'good' : 'bad');
+  setText('amr-x', a.pose ? a.pose.x.toFixed(2) : '—');
+  setText('amr-y', a.pose ? a.pose.y.toFixed(2) : '—');
+
+  // Node summary AMR
+  if(document.getElementById('amr-tab-admin')) {
+    // updated by applyMission
+  }
+}
+
+// ── Door ──
+function applyDoor(d) {
+  const status = d.status ?? 'UNKNOWN';
+  const label  = {OPEN:'열림', CLOSED:'닫힘', ERROR:'오류'}[status] || '—';
+  const color  = {OPEN:'var(--green)', CLOSED:'var(--muted)', ERROR:'var(--red)'}[status] || 'var(--border)';
+  const textCls = {OPEN:'good', CLOSED:'', ERROR:'bad'}[status] || '';
+  const dot = el('door-dot');
+  if (dot) dot.style.background = color;
+  el('door-status').className   = 'st-val ' + textCls;
+  el('door-status').textContent  = label;
+}
+
+// ── Mission ──
+const MISSION_PIPELINE = {
+  'IDLE':            -1,
+  'AWAITING_CONFIRM': 3,
+  'CONFIRMED':        3,
+  'DISPATCHED':       4,
+  'DELIVERING':       5,
+  'ARRIVED':          6,
+  'COMPLETED':        6,
+};
+
+function applyMission(m) {
+  setText('d-mission-id',     m.mission_id ?? '—');
+  setText('d-presc-id',       m.prescription_id ?? '—');
+  setText('d-dest',           m.destination || '—');
+  setValColor('d-mission-status', m.status, missionColor(m.status));
+
+  // Confirm boxes
+  applyConfirmBox('pharmacist', m.pharmacist_confirmed);
+  applyConfirmBox('admin',      m.admin_confirmed);
+
+  // AMR tab confirm badges
+  const atp = el('amr-tab-pharmacist');
+  const ata = el('amr-tab-admin');
+  if (atp) m.pharmacist_confirmed ? atp.classList.add('done') : atp.classList.remove('done');
+  if (ata) m.admin_confirmed      ? ata.classList.add('done') : ata.classList.remove('done');
+
+  // Dispatch buttons
+  const canDispatch = m.can_dispatch;
+  const dispBtn     = el('dispatch-btn');
+  const amrDispBtn  = el('amr-dispatch-btn');
+  dispBtn.className    = canDispatch ? 'ready' : 'not-ready';
+  dispBtn.disabled     = !canDispatch;
+  amrDispBtn.disabled  = !canDispatch;
+
+  // Admin confirm button: hide if already confirmed
+  el('btn-confirm-admin').style.display = m.admin_confirmed ? 'none' : 'inline-block';
+
+  // Pipeline steps
+  const activeStep = MISSION_PIPELINE[m.status] ?? -1;
+  for (let i = 0; i <= 6; i++) {
+    const pip = el('pip-' + i);
+    if (!pip) continue;
+    pip.className = 'pip-step';
+    if (i < activeStep) pip.classList.add('done');
+    else if (i === activeStep) pip.classList.add('active');
+  }
+  if (m.status === 'COMPLETED') {
+    for (let i = 0; i <= 6; i++) {
+      const pip = el('pip-' + i);
+      if (pip) { pip.className = 'pip-step done'; }
+    }
+  }
+
+  // KPI — 상태가 COMPLETED로 전환될 때만 카운트 (WebSocket 반복 수신으로 중복 방지)
+  if (m.status === 'COMPLETED' && prevMissionStatus !== 'COMPLETED') kpiDone.count++;
+  prevMissionStatus = m.status;
+  el('kpi-done').textContent     = kpiDone.count;
+  el('kpi-progress').textContent = ['AWAITING_CONFIRM','CONFIRMED','DISPATCHED','DELIVERING','ARRIVED'].includes(m.status) ? 1 : 0;
+}
+
+function applyConfirmBox(actor, confirmed) {
+  const box  = el('confirm-' + actor);
+  const icon = el('confirm-' + actor + '-icon');
+  const lbl  = el('confirm-' + actor + '-lbl');
+  if (confirmed) {
+    box.classList.add('confirmed');
+    if (icon) icon.classList.add('done');
+    if (lbl)  lbl.textContent = '확인 완료';
+    if (lbl)  lbl.style.color = 'var(--green)';
+  } else {
+    box.classList.remove('confirmed');
+    if (icon) icon.classList.remove('done');
+    if (lbl)  lbl.textContent = '대기 중';
+    if (lbl)  lbl.style.color = 'var(--muted)';
+  }
+}
+
+function missionColor(status) {
+  if (['DELIVERING','DISPATCHED'].includes(status)) return 'warn';
+  if (status === 'COMPLETED') return 'good';
+  if (status === 'IDLE') return '';
+  if (status === 'ARRIVED') return 'good';
+  return 'info';
+}
+
+// ── Nodes ──
+const NODE_NAMES = {arm_controller:'arm_controller', amr_controller:'amr_controller', vision_node:'vision_node'};
+
+function applyNodes(nodes) {
+  // Detail tab
+  Object.entries(nodes).forEach(([name, info]) => {
+    const dot = el('nd-' + name);
+    const seen = el('ns-' + name);
+    const stEl = el('nst-' + name);
+    if (!dot) return;
+    dot.className = 'node-dot dot-' + info.status;
+    const color = {ONLINE:'var(--green)',DEGRADED:'var(--yellow)',OFFLINE:'var(--red)',UNKNOWN:'var(--muted)'}[info.status] || 'var(--muted)';
+    if (stEl) { stEl.textContent = info.status; stEl.style.color = color; }
+    if (seen) seen.textContent = info.last_seen ? '마지막 수신: ' + info.last_seen.substring(11,19) : '마지막 수신: —';
+  });
+
+  // Dashboard summary
+  const summary = el('node-summary');
+  if (!summary) return;
+  summary.innerHTML = '';
+  const allNodes = {...nodes, 'web_gateway': {status:'ONLINE', last_seen: new Date().toISOString()}};
+  Object.entries(allNodes).forEach(([name, info]) => {
+    const color = {ONLINE:'var(--green)',DEGRADED:'var(--yellow)',OFFLINE:'var(--red)',UNKNOWN:'var(--muted)'}[info.status]||'var(--muted)';
+    summary.innerHTML += `<div style="display:flex;align-items:center;gap:.6rem;font-size:.92rem;">
+      <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+      <span>${name}</span>
+      <span style="margin-left:auto;color:${color};font-size:.92rem;font-family:var(--mono);">${info.status}</span>
+    </div>`;
+  });
+}
+
+function applyRoToSYOnline(online) {
+  const dot = el('nd-rotosy');
+  const stEl = el('nst-rotosy');
+  const seen = el('ns-rotosy');
+  if (!dot) return;
+  if (online) {
+    dot.style.background = 'var(--green)';
+    if (stEl) { stEl.textContent = 'ONLINE'; stEl.style.color = 'var(--green)'; }
+    if (seen) seen.textContent = '마지막 수신: ' + new Date().toISOString().substring(11,19);
+  } else {
+    dot.style.background = 'var(--red)';
+    if (stEl) { stEl.textContent = 'OFFLINE'; stEl.style.color = 'var(--red)'; }
+    if (seen) seen.textContent = 'RoToSY :8000 연결 불가';
+  }
+}
+
+// ═══════════════════════════════════════════════
+// API helpers
+// ═══════════════════════════════════════════════
+async function apiPost(url, body, feedbackId) {
+  const fb = feedbackId ? el(feedbackId) : null;
+  if (fb) { fb.style.color='var(--muted)'; fb.textContent='요청 중...'; }
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (fb) { fb.style.color='var(--red)'; fb.textContent = data.detail || '오류 발생'; }
+      addAlert('err', data.detail || url + ' 실패');
+      return null;
+    }
+    if (fb) {
+      fb.style.color='var(--green)';
+      fb.textContent = data.message || '완료';
+      setTimeout(() => { if(fb) fb.textContent=''; }, 4000);
+    }
+    return data;
+  } catch(e) {
+    if (fb) { fb.style.color='var(--red)'; fb.textContent=e.message; }
+    return null;
+  }
+}
+
+// Robot proxy shorthand
+async function rPost(path, body, tag) {
+  const fb = el('robot-feedback');
+  if(fb){ fb.style.color='var(--muted)'; fb.textContent='요청 중...'; }
+  const r = await apiPost(path, body, null);
+  if(fb){
+    if(r){ fb.style.color='var(--green)'; fb.textContent=r.message||'완료'; }
+    else { fb.style.color='var(--red)'; fb.textContent='명령 실패'; }
+    setTimeout(()=>{ if(fb) fb.textContent=''; }, 4000);
+  }
+}
+
+// ═══════════════════════════════════════════════
+// Actions
+// ═══════════════════════════════════════════════
+async function globalEstop() {
+  if (!confirm('[!] 전체 정지를 실행합니다.\n로봇 암과 AMR이 즉시 멈춥니다.\n계속하시겠습니까?')) return;
+  const r = await apiPost('/api/system/estop_all', null, null);
+  addAlert('err', '전체 비상정지 실행됨');
+}
+
+async function toggleTeaching() {
+  const isTeach = latestRobot && latestRobot.teaching_mode;
+  await rPost('/api/robot/teaching', {enable: !isTeach}, 'teaching');
+}
+
+async function moveJ() {
+  const joints = [1,2,3,4,5,6].map(i => parseFloat(el('in-j'+i).value)||0);
+  await rPost('/api/robot/move_j', {joints}, 'movej');
+}
+
+async function moveL() {
+  const pose = ['x','y','z','rx','ry','rz'].map(k => parseFloat(el('in-'+k).value)||0);
+  await rPost('/api/robot/move_l', {pose}, 'movel');
+}
+
+function syncTCP() {
+  if (!latestRobot) return;
+  const t = latestRobot.current_tcp ?? [];
+  ['x','y','z','rx','ry','rz'].forEach((k,i) => { const e=el('in-'+k); if(e) e.value=fmt(t[i]); });
+}
+
+function syncJoints() {
+  if (!latestRobot) return;
+  const j = latestRobot.current_joints_deg ?? [];
+  [1,2,3,4,5,6].forEach((n,i) => { const e=el('in-j'+n); if(e) e.value=fmt(j[i]); });
+}
+
+async function confirmLoading() {
+  const r = await apiPost('/api/system/mission/confirm', {actor:'admin'}, 'mission-feedback');
+  if (r) addAlert('ok', '관리자 적재 확인 완료');
+}
+
+async function dispatchAMR() {
+  const dest = el('amr-dest-input')?.value || el('modal-dest')?.value || '';
+  const r = await apiPost('/api/amr/dispatch', {destination: dest}, 'dispatch-feedback');
+  if (r) addAlert('ok', 'AMR 출발 명령 전송 완료');
+}
+
+async function amrCancel() {
+  if (!confirm('AMR 미션을 취소합니까?')) return;
+  await apiPost('/api/amr/cancel', null, 'amr-feedback');
+  addAlert('warn', 'AMR 미션 취소');
+}
+
+async function amrReturn() {
+  await apiPost('/api/amr/return', null, 'amr-feedback');
+  addAlert('info', 'AMR 복귀 명령 전송');
+}
+
+async function doorOpen() {
+  await apiPost('/api/amr/door/open', null, 'door-feedback');
+  addAlert('warn', '도어 강제 개방 명령 전송');
+}
+
+async function doorClose() {
+  await apiPost('/api/amr/door/close', null, 'door-feedback');
+  addAlert('info', '도어 닫힘 명령 전송');
+}
+
+async function resetMission() {
+  if (!confirm('현재 미션을 초기화합니까?')) return;
+  await apiPost('/api/system/mission/reset', null, 'mission-feedback');
+  addAlert('warn', '미션 초기화됨');
+}
+
+function openNewMissionModal() {
+  el('modal-bg').style.display = 'flex';
+  el('modal-dest').focus();
+}
+
+function closeModal() {
+  el('modal-bg').style.display = 'none';
+}
+
+async function createMission() {
+  const dest  = el('modal-dest').value.trim();
+  const presc = el('modal-presc').value.trim();
+  if (!dest) { alert('목적지를 입력하세요.'); return; }
+  const r = await apiPost('/api/system/mission/new', {destination:dest, prescription_id:presc}, 'mission-feedback');
+  if (r) {
+    addAlert('info', `새 미션 생성: ${r.mission_id} → ${dest}`);
+    closeModal();
+  }
+}
+
+async function loadTodayDeliveries() {
+  try {
+    const r = await fetch('/api/prescription');
+    const list = await r.json();
+    renderTodayDeliveries(list);
+  } catch(e) {}
+}
+
+function renderTodayDeliveries(list) {
+  const today = new Date().toISOString().substring(0, 10);
+  const todayItems = list.filter(p => p.created_at && p.created_at.startsWith(today));
+  const countEl = el('delivery-req-count');
+  const container = el('today-delivery-list');
+  if (!container) return;
+
+  const requested = todayItems.filter(p => p.delivery_requested);
+  const pending   = todayItems.filter(p => !p.delivery_requested && !['rejected','completed'].includes(p.status));
+
+  if (countEl) countEl.textContent = `금일 ${todayItems.length}건 (배송 요청 ${requested.length}건)`;
+
+  if (todayItems.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:1.5rem;color:var(--muted);font-size:.85rem;">금일 처방전 없음</div>';
+    return;
+  }
+
+  const statusLabel = {
+    pending: '검토 대기',
+    approved: '승인됨',
+    rejected: '반려됨',
+    awaiting_load_confirm: '적재 확인 중',
+    completed: '완료',
+  };
+  const statusColor = {
+    pending: 'var(--yellow)',
+    approved: 'var(--blue)',
+    rejected: 'var(--red)',
+    awaiting_load_confirm: 'var(--orange)',
+    completed: 'var(--green)',
+  };
+  const prioLabel = {emergency:'긴급',general:'일반',scheduled:'정기'};
+
+  const allItems = [...requested, ...pending, ...todayItems.filter(p => p.status === 'rejected' || p.status === 'completed')];
+  const seen = new Set();
+  const unique = allItems.filter(p => { if(seen.has(p.id)) return false; seen.add(p.id); return true; });
+
+  container.innerHTML = unique.map(p => {
+    const drugStr = p.drugs.map(d => `${d.name.split(' ')[0]} ×${d.quantity}`).join(', ');
+    const sColor  = statusColor[p.status] || 'var(--muted)';
+    const sLabel  = statusLabel[p.status] || p.status;
+    const reqBadge = p.delivery_requested
+      ? `<span style="font-size:.68rem;color:var(--green);background:#14532d22;border:1px solid var(--green);border-radius:9999px;padding:.1rem .5rem;"> 배송 요청</span>`
+      : `<span style="font-size:.68rem;color:var(--muted);background:var(--surf2);border:1px solid var(--border);border-radius:9999px;padding:.1rem .5rem;">미요청</span>`;
+    return `
+    <div style="display:flex;align-items:center;gap:.85rem;padding:.65rem .9rem;
+      background:var(--surf2);border:1px solid ${p.delivery_requested?'var(--green)33':'var(--border)'};
+      border-radius:.5rem;margin-bottom:.4rem;flex-wrap:wrap;">
+      <div style="flex:1;min-width:180px;">
+        <div style="font-size:.9rem;font-weight:600;">${p.patient_name}
+          <span style="font-size:.72rem;color:var(--muted);font-weight:400;"> ${p.ward}</span>
+          <span style="font-size:.68rem;color:var(--muted);font-weight:400;"> · ${p.doctor} 의사</span>
+        </div>
+        <div style="font-size:.75rem;color:var(--muted);margin-top:.15rem;">${p.id} · ${prioLabel[p.priority]||p.priority}</div>
+      </div>
+      <div style="font-size:.78rem;color:var(--muted);flex:1;min-width:140px;">${drugStr}</div>
+      <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
+        ${reqBadge}
+        <span style="font-size:.75rem;font-weight:700;color:${sColor};">${sLabel}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadAudit() {
+  try {
+    const r = await fetch('/api/system/audit?limit=100');
+    const rows = await r.json();
+    const tbody = el('audit-tbody');
+    tbody.innerHTML = rows.map(row => `
+      <tr>
+        <td>${row.timestamp}</td>
+        <td class="actor-${row.actor}">${row.actor}</td>
+        <td>${row.action}</td>
+        <td style="color:var(--muted)">${row.detail}</td>
+      </tr>
+    `).join('');
+  } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════
+// Alert feed
+// ═══════════════════════════════════════════════
+function addAlert(type, msg) {
+  const feed = el('alert-feed');
+  if (!feed) return;
+  const now = new Date().toTimeString().substring(0,8);
+  const cls = {ok:'alert-ok',warn:'alert-warn',err:'alert-err',info:'alert-info'}[type]||'alert-info';
+  const icon = {ok:'',warn:'[!]',err:'',info:'ℹ️'}[type]||'ℹ️';
+  const item = document.createElement('div');
+  item.className = 'alert-item ' + cls;
+  item.innerHTML = `<span class="alert-time">${now}</span><span>${icon} ${msg}</span>`;
+  feed.insertBefore(item, feed.firstChild);
+  while (feed.children.length > 30) feed.removeChild(feed.lastChild);
+}
+
+// ═══════════════════════════════════════════════
+// Jog controls
+// ═══════════════════════════════════════════════
+const jogSpeed = el => el.id === 'jog-speed' ? parseInt(el.value) : 5;
+
+function buildJog() {
+  const container = el('jog-container');
+  const speedEl   = el('jog-speed');
+  const speedVal  = el('jog-speed-val');
+  speedEl.oninput = () => { speedVal.textContent = speedEl.value; };
+
+  for (let i = 0; i < 6; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'jog-cell';
+    cell.innerHTML = `
+      <div class="jog-axis">
+        <span>J${i+1}</span>
+        <span id="jog-val-${i}" style="color:var(--text);font-family:var(--mono)">0.00°</span>
+      </div>
+      <div class="jog-btns">
+        <button class="btn btn-red jog-btn" data-joint="${i}" data-dir="-1">−</button>
+        <button class="btn btn-green jog-btn" data-joint="${i}" data-dir="1">+</button>
+      </div>`;
+    container.appendChild(cell);
+  }
+
+  container.addEventListener('pointerdown', async e => {
+    const btn = e.target.closest('.jog-btn');
+    if (!btn || btn.disabled) return;
+    const ji  = parseInt(btn.dataset.joint);
+    const dir = parseInt(btn.dataset.dir);
+    const spd = parseInt(el('jog-speed').value) * dir;
+    try { await fetch('/api/robot/jog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({joint_index:ji,speed:spd})}); } catch(_){}
+  });
+
+  const stopJog = async e => {
+    const btn = e.target.closest('.jog-btn');
+    if (!btn) return;
+    const ji = parseInt(btn.dataset.joint);
+    try { await fetch('/api/robot/jog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({joint_index:ji,speed:0})}); } catch(_){}
+  };
+  container.addEventListener('pointerup',    stopJog);
+  container.addEventListener('pointerleave', stopJog);
+}
+
+// ═══════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════
+function el(id) { return document.getElementById(id); }
+
+function setText(id, val) {
+  const e = el(id);
+  if (e) e.textContent = val;
+}
+
+function setValColor(id, val, cls) {
+  const e = el(id);
+  if (!e) return;
+  e.textContent = val;
+  e.className   = 'st-val ' + (cls || '');
+}
+
+function fmt(v, d=2) {
+  return typeof v === 'number' ? v.toFixed(d) : '—';
+}
+
+// ═══════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════
+buildJog();
+connect();
+loadTodayDeliveries();
+setInterval(loadTodayDeliveries, 15000);
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Demo mode
+// ════════════════════════════════════════════════════════════════════════════════
+
+const DEMO_STEPS = ['approve','robot_start','confirm_all','dispatch','amr_arrive','complete'];
+let demoMode    = false;
+let demoStepIdx = 0;   // 0 = approve is next
+
+function toggleDemoMode() {
+  demoMode = !demoMode;
+  const btn = el('demo-toggle-btn');
+  const bar = el('demo-bar');
+  btn.classList.toggle('active', demoMode);
+  bar.classList.toggle('visible', demoMode);
+  setDemoFeedback('idle', demoMode ? '단계 버튼을 순서대로 클릭하세요' : '데모 모드 종료');
+}
+
+function setDemoFeedback(type, msg) {
+  const fb = el('demo-feedback');
+  if (!fb) return;
+  fb.className = 'demo-feedback' + (type === 'ok' ? ' ok' : type === 'err' ? ' err' : '');
+  fb.textContent = msg;
+}
+
+function updateDemoStepBtns() {
+  DEMO_STEPS.forEach((key, i) => {
+    const btn = el(`dstep-${key}`);
+    if (!btn) return;
+    btn.className = 'demo-step-btn';
+    if (i < demoStepIdx)      btn.classList.add('done');
+    else if (i === demoStepIdx) btn.classList.add('active');
+  });
+}
+
+async function demoStep(step) {
+  const stepMsg = {
+    approve:     '①처방 자동 승인 중...',
+    robot_start: '②로봇 암 집기 시작 중...',
+    confirm_all: '③관리자·약사 적재 확인 중...',
+    dispatch:    '④AMR 출발 명령 중...',
+    amr_arrive:  '⑤AMR 도착 시뮬레이션 중...',
+    complete:    '⑥배송 완료 처리 중...',
+    sensor:      '온습도 값 갱신 중...',
+  };
+  setDemoFeedback('idle', stepMsg[step] || '처리 중...');
+
+  const btn = el(`dstep-${step}`);
+  if (btn) { btn.disabled = true; }
+
+  try {
+    const r = await fetch(`/api/demo/step/${step}`, {method: 'POST'});
+    const d = await r.json();
+    if (!r.ok) {
+      setDemoFeedback('err', d.detail || '오류 발생');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // Advance step index for pipeline steps
+    const idx = DEMO_STEPS.indexOf(step);
+    if (idx !== -1 && idx >= demoStepIdx) {
+      demoStepIdx = idx + 1;
+      updateDemoStepBtns();
+    }
+
+    const okMsg = {
+      approve:     `처방 승인 완료 — ${d.prescription?.patient_name ?? ''}`,
+      robot_start: d.message ?? '로봇 동작 시작',
+      confirm_all: '관리자·약사 적재 확인 완료 → AMR 출발 가능',
+      dispatch:    'AMR 출발!',
+      amr_arrive:  'AMR 목적지 도착 — 간호사 수령 대기 중',
+      complete:    '배송 완료 — 전체 파이프라인 완료',
+      sensor:      `온도 ${d.temperature}°C / 습도 ${d.humidity}% 갱신`,
+    };
+    setDemoFeedback('ok', okMsg[step] || '완료');
+    addAlert('ok', `[DEMO] ${okMsg[step] || step + ' 완료'}`);
+
+    // Reload today deliveries after state change
+    if (['approve','complete'].includes(step)) loadTodayDeliveries();
+
+  } catch(e) {
+    setDemoFeedback('err', e.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function demoReset() {
+  setDemoFeedback('idle', '초기화 중...');
+  try {
+    await fetch('/api/demo/reset', {method: 'POST'});
+    demoStepIdx = 0;
+    updateDemoStepBtns();
+    // Re-enable all step buttons
+    DEMO_STEPS.forEach(key => {
+      const btn = el(`dstep-${key}`);
+      if (btn) btn.disabled = false;
+    });
+    setDemoFeedback('ok', '초기화 완료 — ①처방 승인부터 다시 시작하세요');
+    addAlert('warn', '[DEMO] 데모 상태 초기화');
+    loadTodayDeliveries();
+  } catch(e) {
+    setDemoFeedback('err', e.message);
+  }
+}
+
+// Close modal on bg click
+el('modal-bg').addEventListener('click', e => { if(e.target===el('modal-bg')) closeModal(); });
+
+// Keyboard: Enter in modal inputs
+['modal-dest','modal-presc'].forEach(id => {
+  el(id)?.addEventListener('keydown', e => { if(e.key==='Enter') createMission(); });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Vision & Camera
+// ════════════════════════════════════════════════════════════════════════════════
+
+function renderDrawerMap() {
+  fetch('/api/vision/drawers')
+    .then(r => r.json())
+    .then(data => {
+      const container = el('drawer-map');
+      container.innerHTML = '';
+      data.drawers.forEach(d => {
+        const el_drawer = document.createElement('div');
+        el_drawer.style.cssText = `
+          background:var(--surface);border:1.5px solid var(--border);border-radius:.5rem;
+          padding:1rem;text-align:center;transition:all .2s;cursor:pointer;
+        `;
+        el_drawer.innerHTML = `
+          <div style="font-weight:700;font-size:.95rem;margin-bottom:.35rem;">${d.label}</div>
+          <div style="font-size:.75rem;color:var(--muted);">${d.id}</div>
+          <div style="font-size:.8rem;color:var(--blue);margin-top:.25rem;">ArUco #${d.aruco}</div>
+        `;
+        el_drawer.onmouseover = () => { el_drawer.style.borderColor = 'var(--blue)'; el_drawer.style.boxShadow = '0 2px 6px rgba(29,78,216,.15)'; };
+        el_drawer.onmouseout = () => { el_drawer.style.borderColor = 'var(--border)'; el_drawer.style.boxShadow = 'none'; };
+        container.appendChild(el_drawer);
+      });
+    })
+    .catch(e => console.log('drawer map error:', e));
+}
+
+function updateVisionResults() {
+  fetch('/api/vision/detections')
+    .then(r => r.json())
+    .then(data => {
+      const container = el('vision-results');
+      const detections = data.detections || {};
+      if (Object.keys(detections).length === 0) {
+        container.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:1rem;">감지 결과 없음</div>';
+        return;
+      }
+      container.innerHTML = '';
+      Object.entries(detections).forEach(([drawer_id, info]) => {
+        const el_item = document.createElement('div');
+        el_item.style.cssText = `
+          background:var(--surf2);border:1px solid var(--border);border-radius:.45rem;
+          padding:.6rem;text-align:center;
+        `;
+        const confidence = (info.confidence * 100).toFixed(0);
+        const conf_color = info.confidence > 0.9 ? 'var(--green)' : info.confidence > 0.7 ? 'var(--yellow)' : 'var(--red)';
+        el_item.innerHTML = `
+          <div style="font-weight:600;font-size:.8rem;color:var(--blue);">ArUco #${info.aruco}</div>
+          <div style="font-size:.75rem;color:${conf_color};margin-top:.25rem;font-weight:700;">${confidence}%</div>
+        `;
+        container.appendChild(el_item);
+      });
+    })
+    .catch(e => console.log('vision error:', e));
+}
+
+renderDrawerMap();
+setInterval(updateVisionResults, 2000);
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Sensor (온습도)
+// ════════════════════════════════════════════════════════════════════════════════
+
+let sensorChart = null;
+
+function updateSensorValues(state) {
+  const ard = state.arduino || {};
+  const temp = ard.temperature;
+  const humi = ard.humidity;
+  const status = ard.status || 'OFFLINE';
+  const last_seen = ard.last_seen;
+
+  el('sensor-temp').textContent = temp !== null ? temp : '—';
+  el('sensor-humi').textContent = humi !== null ? humi : '—';
+  el('sensor-status').textContent = status;
+  el('sensor-status').style.color = status === 'NORMAL' ? 'var(--green)' : status === 'WARNING' ? 'var(--red)' : 'var(--muted)';
+
+  if (last_seen) {
+    const t = new Date(last_seen + 'Z');
+    el('sensor-updated').textContent = t.toLocaleTimeString('ko-KR');
+  }
+}
+
+function drawSensorChart(history) {
+  const canvas = el('sensor-chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const w = canvas.offsetWidth;
+  const h = canvas.offsetHeight;
+  canvas.width = w; canvas.height = h;
+
+  if (history.length < 2) {
+    ctx.fillStyle = 'var(--muted)';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('데이터 수집 중...', w/2-50, h/2);
+    return;
+  }
+
+  const padding = 30;
+  const graph_w = w - 2*padding;
+  const graph_h = h - 2*padding;
+
+  // 온도 범위: 14~28
+  const temp_min = 14, temp_max = 28, humi_min = 30, humi_max = 80;
+
+  // 그리드 라인
+  ctx.strokeStyle = '#ddd';
+  ctx.lineWidth = 1;
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = '#999';
+
+  for (let i = 0; i <= 4; i++) {
+    const y = padding + (graph_h / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(w - padding, y);
+    ctx.stroke();
+  }
+
+  // 온도 선 (파란색)
+  ctx.strokeStyle = 'var(--blue)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  history.forEach((point, i) => {
+    const x = padding + (i / (history.length - 1)) * graph_w;
+    const normalized_temp = (point.temperature - temp_min) / (temp_max - temp_min);
+    const y = padding + graph_h - (normalized_temp * graph_h);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // 습도 선 (초록색)
+  ctx.strokeStyle = 'var(--green)';
+  ctx.beginPath();
+  history.forEach((point, i) => {
+    const x = padding + (i / (history.length - 1)) * graph_w;
+    const normalized_humi = (point.humidity - humi_min) / (humi_max - humi_min);
+    const y = padding + graph_h - (normalized_humi * graph_h);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // 범위 표시
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = 'var(--muted)';
+  ctx.textAlign = 'left';
+  ctx.fillText('28°C', padding - 25, padding + 5);
+  ctx.fillText('14°C', padding - 25, h - padding + 5);
+}
+
+function updateSensorHistory() {
+  fetch('/api/sensor/history?hours=24')
+    .then(r => r.json())
+    .then(hist => {
+      drawSensorChart(hist);
+    })
+    .catch(e => console.log('history error:', e));
+}
+
+function updateAlertList() {
+  fetch('/api/sensor/alerts?hours=24')
+    .then(r => r.json())
+    .then(data => {
+      el('alert-count').textContent = data.count;
+      const container = el('alert-list');
+      if (data.recent.length === 0) {
+        container.innerHTML = '<div style="color:var(--muted);text-align:center;padding:1rem;">경보 없음</div>';
+        return;
+      }
+      container.innerHTML = '';
+      data.recent.slice(-10).forEach(alert => {
+        const el_alert = document.createElement('div');
+        el_alert.style.cssText = `
+          background:var(--surf2);border-left:3px solid var(--red);
+          padding:.5rem .75rem;margin-bottom:.5rem;border-radius:.25rem;
+        `;
+        const t = new Date(alert.recorded_at + 'Z').toLocaleTimeString('ko-KR');
+        el_alert.innerHTML = `
+          <div style="font-weight:600;color:var(--red);margin-bottom:.15rem;">${t}</div>
+          <div style="font-size:.8rem;color:var(--muted);">
+            ${alert.temperature.toFixed(1)}°C / ${alert.humidity.toFixed(1)}%
+          </div>
+        `;
+        container.appendChild(el_alert);
+      });
+    })
+    .catch(e => console.log('alert error:', e));
+}
+
+updateSensorHistory();
+updateAlertList();
+setInterval(updateSensorHistory, 60000);  // 1분마다
+setInterval(updateAlertList, 60000);
+
+// WebSocket 업데이트 시 센서값 동기화
+const orig_onmessage = ws ? ws.onmessage : null;
+if (ws) {
+  ws.onmessage = (ev) => {
+    if (orig_onmessage) orig_onmessage(ev);
+    try {
+      const state = JSON.parse(ev.data);
+      updateSensorValues(state);
+    } catch (e) {}
+  };
+}
+</script>
+</body>
+</html>
