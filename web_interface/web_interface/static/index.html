@@ -670,6 +670,70 @@
     </div>
   </div>
 
+  <!-- Electromagnet Control -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">
+      전자석 제어
+      <span id="magnet-state-badge" style="margin-left:0.75rem; font-size:0.75rem; font-weight:600; padding:0.2rem 0.6rem; border-radius:999px; background:var(--surface); color:var(--muted); border:1px solid var(--border);">OFF</span>
+    </div>
+    <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+      <button id="btn-magnet-on" class="btn btn-on" onclick="magnetOn()" style="padding:0.7rem 2rem; font-size:1rem; font-weight:700; min-width:120px;">
+        ⚡ ON
+      </button>
+      <button id="btn-magnet-off" class="btn btn-off" onclick="magnetOff()" style="padding:0.7rem 2rem; font-size:1rem; font-weight:700; min-width:120px;">
+        ✕ OFF
+      </button>
+      <span id="magnet-feedback" style="font-family:var(--mono); font-size:0.8rem; color:var(--muted);"></span>
+    </div>
+    <div style="margin-top:0.6rem; font-size:0.72rem; color:var(--muted);">
+      ※ DART Flange I/O Supply Voltage가 <b style="color:var(--yellow);">12V</b>로 설정되어 있어야 합니다. (DO1 사용)
+    </div>
+  </div>
+
+  <!-- Motion Sequence Control -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">Motion Sequence Control</div>
+    <div style="display:flex; gap:1.5rem; align-items:center;">
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="status-label">Marker ID</span>
+        <input type="number" id="seq-marker-id" value="4" min="1" max="20"
+          style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+      <button id="btn-seq-start" class="btn btn-on" onclick="startMotionSeq()" style="flex:none; padding:0.6rem 1.2rem;">시퀀스 시작</button>
+      <button id="btn-seq-stop"  class="btn btn-off" onclick="stopMotionSeq()" style="flex:none; padding:0.6rem 1.2rem;" disabled>시퀀스 중지</button>
+      <button id="btn-seq-next"  class="btn btn-teach" onclick="nextMotionStep()" style="flex:none; padding:0.6rem 1.2rem;" disabled>▶ 다음 단계 (Next)</button>
+      <div style="flex:1; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem; display:flex; align-items:center; gap:1rem;">
+        <span class="status-label">현재 단계:</span>
+        <span id="st-seq-step" class="status-value plain" style="color:var(--yellow);">IDLE</span>
+      </div>
+    </div>
+    <div style="margin-top:0.75rem; font-size:0.72rem; color:var(--muted);">
+      ※ 시퀀스 시작 전 <b style="color:var(--green);">Servo ON</b> 상태여야 합니다. <code>motion_sequence_node</code>가 실행 중인지 확인하세요.
+    </div>
+  </div>
+
+  <!-- Temp Sequence Control -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">Temp Sequence Control</div>
+    <div style="display:flex; gap:1.5rem; align-items:center;">
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="status-label">Marker ID</span>
+        <input type="number" id="tmp-marker-id" value="0" min="0" max="5"
+          style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+      <button id="btn-tmp-start" class="btn btn-on" onclick="startTempSeq()" style="flex:none; padding:0.6rem 1.2rem;">시퀀스 시작</button>
+      <button id="btn-tmp-stop"  class="btn btn-off" onclick="stopTempSeq()" style="flex:none; padding:0.6rem 1.2rem;" disabled>시퀀스 중지</button>
+      <button id="btn-tmp-next"  class="btn btn-teach" onclick="nextTempStep()" style="flex:none; padding:0.6rem 1.2rem;" disabled>▶ 다음 단계 (Next)</button>
+      <div style="flex:1; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem; display:flex; align-items:center; gap:1rem;">
+        <span class="status-label">현재 단계:</span>
+        <span id="st-tmp-step" class="status-value plain" style="color:var(--yellow);">IDLE</span>
+      </div>
+    </div>
+    <div style="margin-top:0.75rem; font-size:0.72rem; color:var(--muted);">
+      ※ 시퀀스 시작 전 <b style="color:var(--green);">Servo ON</b> 상태여야 합니다. <code>temp_sequence_node</code>가 실행 중인지 확인하세요.
+    </div>
+  </div>
+
   <!-- Joint Jog Control -->
   <div class="card" style="grid-column: 1 / -1;">
     <div class="card-title">
@@ -937,6 +1001,44 @@
       if (jogVal) jogVal.textContent = val;
     });
 
+    // Motion Sequence
+    const seqStep = document.getElementById('st-seq-step');
+    const seqNextBtn = document.getElementById('btn-seq-next');
+    const seqStartBtn = document.getElementById('btn-seq-start');
+    const seqStopBtn = document.getElementById('btn-seq-stop');
+
+    if (s.seq_step) {
+      seqStep.textContent = s.seq_step;
+      const running = s.seq_step !== 'IDLE' && s.seq_step !== '완료' && s.seq_step !== '시퀀스 완료';
+      seqNextBtn.disabled = !running;
+      seqStartBtn.disabled = running;
+      seqStopBtn.disabled = !running;
+    }
+
+    // Electromagnet
+    const badge = document.getElementById('magnet-state-badge');
+    if (badge) {
+      const on = s.magnet_on === true;
+      badge.textContent = on ? 'ON' : 'OFF';
+      badge.style.background = on ? 'var(--green)' : 'var(--surface)';
+      badge.style.color      = on ? '#000'         : 'var(--muted)';
+      badge.style.border     = on ? '1px solid var(--green)' : '1px solid var(--border)';
+    }
+
+    // Temp Sequence
+    const tmpStep = document.getElementById('st-tmp-step');
+    const tmpNextBtn = document.getElementById('btn-tmp-next');
+    const tmpStartBtn = document.getElementById('btn-tmp-start');
+    const tmpStopBtn = document.getElementById('btn-tmp-stop');
+
+    if (s.tmp_step) {
+      tmpStep.textContent = s.tmp_step;
+      const running = s.tmp_step !== 'IDLE' && s.tmp_step !== '완료' && s.tmp_step !== '시퀀스 완료';
+      tmpNextBtn.disabled = !running;
+      tmpStartBtn.disabled = running;
+      tmpStopBtn.disabled = !running;
+    }
+
     // Error
     const banner = document.getElementById('error-banner');
     if (s.error_code && s.error_code !== 0) {
@@ -1126,6 +1228,124 @@
       }
     } catch (err) { showAlert(err.message); }
     finally { setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 5000); }
+  }
+
+  async function startMotionSeq() {
+    const markerId = parseInt(document.getElementById('seq-marker-id').value);
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = `시퀀스 시작 명령 전송 (마커 ${markerId})...`;
+    try {
+      const resp = await fetch('/api/motion/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marker_id: markerId })
+      });
+      if (resp.ok) {
+        feedback.style.color = 'var(--green)';
+        feedback.textContent = '시퀀스 시작됨. "다음 단계" 버튼을 눌러 진행하세요.';
+      } else {
+        const d = await resp.json();
+        showAlert(d.detail || '시퀀스 시작 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function nextMotionStep() {
+    try {
+      await fetch('/api/motion/next', { method: 'POST' });
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function stopMotionSeq() {
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = '시퀀스 중지 명령 전송...';
+    try {
+      const resp = await fetch('/api/motion/stop', { method: 'POST' });
+      if (resp.ok) {
+        feedback.style.color = 'var(--yellow)';
+        feedback.textContent = '시퀀스가 중지되었습니다.';
+      } else {
+        const d = await resp.json();
+        showAlert(d.detail || '시퀀스 중지 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function magnetOn() {
+    const fb = document.getElementById('magnet-feedback');
+    fb.style.color = 'var(--muted)';
+    fb.textContent = '전자석 ON 명령 전송...';
+    try {
+      const resp = await fetch('/api/gripper/on', { method: 'POST' });
+      if (resp.ok) {
+        fb.style.color = 'var(--green)';
+        fb.textContent = '전자석 ON';
+      } else {
+        const d = await resp.json();
+        fb.style.color = 'var(--red)';
+        fb.textContent = d.detail || '전자석 ON 실패';
+      }
+    } catch (err) { fb.style.color = 'var(--red)'; fb.textContent = err.message; }
+    setTimeout(() => { fb.textContent = ''; }, 4000);
+  }
+
+  async function magnetOff() {
+    const fb = document.getElementById('magnet-feedback');
+    fb.style.color = 'var(--muted)';
+    fb.textContent = '전자석 OFF 명령 전송...';
+    try {
+      const resp = await fetch('/api/gripper/off', { method: 'POST' });
+      if (resp.ok) {
+        fb.style.color = 'var(--yellow)';
+        fb.textContent = '전자석 OFF';
+      } else {
+        const d = await resp.json();
+        fb.style.color = 'var(--red)';
+        fb.textContent = d.detail || '전자석 OFF 실패';
+      }
+    } catch (err) { fb.style.color = 'var(--red)'; fb.textContent = err.message; }
+    setTimeout(() => { fb.textContent = ''; }, 4000);
+  }
+
+  async function startTempSeq() {
+    const markerId = Math.max(0, Math.min(5, parseInt(document.getElementById('tmp-marker-id').value)));
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = `Temp 시퀀스 시작 명령 전송 (마커 ${markerId})...`;
+    try {
+      const resp = await fetch('/api/temp_motion/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marker_id: markerId })
+      });
+      if (resp.ok) {
+        feedback.style.color = 'var(--green)';
+        feedback.textContent = 'Temp 시퀀스 시작됨. "다음 단계" 버튼을 눌러 진행하세요.';
+      } else {
+        const d = await resp.json();
+        showAlert(d.detail || 'Temp 시퀀스 시작 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function nextTempStep() {
+    try {
+      await fetch('/api/temp_motion/next', { method: 'POST' });
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function stopTempSeq() {
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = 'Temp 시퀀스 중지 명령 전송...';
+    try {
+      const resp = await fetch('/api/temp_motion/stop', { method: 'POST' });
+      if (resp.ok) {
+        feedback.style.color = 'var(--yellow)';
+        feedback.textContent = 'Temp 시퀀스가 중지되었습니다.';
+      } else {
+        const d = await resp.json();
+        showAlert(d.detail || 'Temp 시퀀스 중지 실패');
+      }
+    } catch (err) { showAlert(err.message); }
   }
 
   function connect() {

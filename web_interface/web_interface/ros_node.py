@@ -15,12 +15,13 @@ import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.action import ActionClient
-from std_msgs.msg import Bool, Float64MultiArray
+from std_msgs.msg import Bool, Float64MultiArray, String, Int32, Empty
 
 # Custom interfaces
 from robot_arm_interfaces.msg import RobotStatus
 from robot_arm_interfaces.srv import ServoOn, Jog, Home, Teaching, EStop, Recover
 from robot_arm_interfaces.action import MoveJ, MoveL
+from dsr_msgs2.srv import SetToolDigitalOutput, GetToolDigitalOutput
 
 
 class RobotBridgeNode(Node):
@@ -42,15 +43,30 @@ class RobotBridgeNode(Node):
             'current_tcp_rt':     [0.0] * 6,  # TF2-derived real-time — display only
             'error_code':         0,
             'error_message':      '',
+            'seq_step':           'IDLE',     # Current step of motion sequence
+            'tmp_step':           'IDLE',     # Current step of temp sequence
+            'magnet_on':          False,      # Electromagnet state
         }
 
         # ── Subscribers ──────────────────────────────────────────────────────
         self.create_subscription(RobotStatus,      '/arm/status',   self._status_cb,   10)
         self.create_subscription(Bool,             '/arm/ready',    self._ready_cb,    10)
         self.create_subscription(Float64MultiArray, '/arm/tcp_pose', self._tcp_pose_cb, 10)
+        self.create_subscription(String,           '/motion/step_info',      self._seq_step_cb, 10)
+        self.create_subscription(String,           '/temp_motion/step_info', self._tmp_step_cb, 10)
 
-        # ── Service Clients ──────────────────────────────────────────────────
+        # ── Publishers ───────────────────────────────────────────────────────
+        self._pub_seq_start = self.create_publisher(Int32, '/motion/start', 10)
+        self._pub_seq_next  = self.create_publisher(Empty, '/motion/next_step', 10)
+        self._pub_seq_stop  = self.create_publisher(Empty, '/motion/stop', 10)
+        self._pub_tmp_start = self.create_publisher(Int32, '/temp_motion/start', 10)
+        self._pub_tmp_next  = self.create_publisher(Empty, '/temp_motion/next_step', 10)
+        self._pub_tmp_stop  = self.create_publisher(Empty, '/temp_motion/stop', 10)
+        self._cli_magnet     = self.create_client(SetToolDigitalOutput, '/dsr01/io/set_tool_digital_output')
+        self._cli_magnet_get = self.create_client(GetToolDigitalOutput, '/dsr01/io/get_tool_digital_output')
         self._cli_servo    = self.create_client(ServoOn,  '/arm/servo_on')
+
+        self.create_timer(0.5, self._poll_magnet_state)
         self._cli_jog      = self.create_client(Jog,      '/arm/jog')
         self._cli_home     = self.create_client(Home,     '/arm/home')
         self._cli_teaching = self.create_client(Teaching, '/arm/teaching')
@@ -193,6 +209,62 @@ class RobotBridgeNode(Node):
         req = Recover.Request()
         req.go_to_teaching = False
         return await self._run_srv(self._cli_recover, req)
+
+    def start_sequence(self, marker_id: int) -> None:
+        msg = Int32()
+        msg.data = marker_id
+        self._pub_seq_start.publish(msg)
+
+    def next_step(self) -> None:
+        self._pub_seq_next.publish(Empty())
+
+    def stop_sequence(self) -> None:
+        self._pub_seq_stop.publish(Empty())
+
+    def start_temp_sequence(self, marker_id: int) -> None:
+        msg = Int32()
+        msg.data = marker_id
+        self._pub_tmp_start.publish(msg)
+
+    def next_temp_step(self) -> None:
+        self._pub_tmp_next.publish(Empty())
+
+    def stop_temp_sequence(self) -> None:
+        self._pub_tmp_stop.publish(Empty())
+
+    async def call_magnet(self, enabled: bool) -> dict:
+        """전자석 ON(True) / OFF(False)."""
+        req = SetToolDigitalOutput.Request()
+        req.index = 1
+        req.value = 1 if enabled else 0   # 실제 동작: 1=ON(자성 발생), 0=OFF(자성 없음)
+        return await self._run_srv(self._cli_magnet, req)
+
+    def _seq_step_cb(self, msg: String) -> None:
+        with self._lock:
+            self._state['seq_step'] = msg.data
+
+    def _tmp_step_cb(self, msg: String) -> None:
+        with self._lock:
+            self._state['tmp_step'] = msg.data
+
+    def _poll_magnet_state(self) -> None:
+        """DO1 실제 상태를 0.5s 주기로 읽어 _state에 반영."""
+        if not self._cli_magnet_get.service_is_ready():
+            return
+        req = GetToolDigitalOutput.Request()
+        req.index = 1
+        future = self._cli_magnet_get.call_async(req)
+        future.add_done_callback(self._magnet_poll_cb)
+
+    def _magnet_poll_cb(self, future) -> None:
+        try:
+            resp = future.result()
+            if resp is not None and resp.success:
+                # 실제 동작: value=1 → 자성 발생(ON), value=0 → 자성 없음(OFF)
+                with self._lock:
+                    self._state['magnet_on'] = (resp.value == 1)
+        except Exception:
+            pass
 
     async def _run_action(self, client, goal) -> dict:
         """Helper to run a ROS2 action and return the result."""

@@ -34,6 +34,7 @@ from . import camera as cam_module
 from .routers import status as status_router
 from .routers import control as control_router
 from .routers import manual_calib as manual_calib_router
+from .routers import gripper as gripper_router
 
 STATIC_DIR = Path(__file__).parent / 'static'
 BROADCAST_HZ = 10  # state push rate to WebSocket clients
@@ -104,6 +105,7 @@ app = FastAPI(title='RoToSY Web Interface', version='0.1.0', lifespan=lifespan)
 app.include_router(status_router.router, prefix='/api')
 app.include_router(control_router.router, prefix='/api')
 app.include_router(manual_calib_router.router)
+app.include_router(gripper_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')

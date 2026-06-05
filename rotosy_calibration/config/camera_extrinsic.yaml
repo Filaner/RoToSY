@@ -2,11 +2,10 @@ camera_extrinsic:
   ros__parameters:
     base_frame: "base_link"
     camera_frame: "camera_color_optical_frame"
-    translation_xyz: [0.61842028, 0.59430005, 0.75590720]
-    rotation_quat_xyzw: [0.69582617, 0.67791474, -0.16914462, 0.16627583]
+    translation_xyz: [0.62503726, 0.52145850, 0.82288344]
+    rotation_quat_xyzw: [0.71677963, 0.66398307, -0.15125726, 0.14991558]
 
-# manual_calib: samples=20  mean=2.83mm  max=4.39mm
-# new calib attempt reverted: mean=77mm (poor rotational diversity in poses)
+# manual_calib: samples=21  mean=4.17mm  max=8.04mm
 
 hand_eye_result:
   ros__parameters:

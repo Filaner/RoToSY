@@ -243,3 +243,62 @@ async def move_home() -> dict:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Internal Error: {str(e)}')
+
+
+class SequenceStartRequest(BaseModel):
+    marker_id: int
+
+@router.post('/motion/start')
+async def start_sequence(req: SequenceStartRequest) -> dict:
+    """Start motion sequence for a marker."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.start_sequence(req.marker_id)
+    return {'success': True}
+
+@router.post('/motion/next')
+async def next_step() -> dict:
+    """Trigger next step in the motion sequence."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.next_step()
+    return {'success': True}
+
+@router.post('/motion/stop')
+async def stop_sequence() -> dict:
+    """Stop the current motion sequence."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.stop_sequence()
+    return {'success': True}
+
+
+@router.post('/temp_motion/start')
+async def start_temp_sequence(req: SequenceStartRequest) -> dict:
+    """Start temp sequence for a marker."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.start_temp_sequence(req.marker_id)
+    return {'success': True}
+
+@router.post('/temp_motion/next')
+async def next_temp_step() -> dict:
+    """Trigger next step in the temp sequence."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.next_temp_step()
+    return {'success': True}
+
+@router.post('/temp_motion/stop')
+async def stop_temp_sequence() -> dict:
+    """Stop the current temp sequence."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.stop_temp_sequence()
+    return {'success': True}

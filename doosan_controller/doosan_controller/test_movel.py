@@ -203,24 +203,11 @@ class TestMoveToMarker(Node):
             f'ID {marker_id} 마커: ({mx:.1f}, {my:.1f}, {mz:.1f}) mm'
             f' → 목표: ({mx:.1f}, {ty:.1f}, {mz:.1f}) mm  (Y{Y_OFFSET_MM:+.0f}mm)'
         )
-
-        # 마커 5: J4=90, J5=-90 블렌드 이동
+        
         #   MoveJ(blend=30°) → 즉시 반환 → MoveL 전송
         #   DSR이 관절 회전과 직선 이동을 동시에 블렌딩
-        if marker_id == 4 or marker_id == 5:
-            self.get_logger().info('[3] 마커5 — J4=90°/J5=-90° 블렌드 + MoveL 동시 전송...')
-            rclpy.spin_once(self, timeout_sec=0.3)
-            joints = list(self._joints) if self._joints else [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]
-            joints[0] = 30.0
-            joints[3] = 90.0
-            joints[4] = -90.0
-            if not self._move_j(joints, blend_radius= 70.0):
-                return
-            # MoveJ가 비동기로 즉시 반환됨 → 바로 MoveL 전송
-            self._move_l(mx, ty, mz, 90.0, -90.0, -90.0)
-        else:
-            self.get_logger().info('[3] 목표 위치로 이동...')
-            self._move_l(mx, ty, mz, 90.0, -90.0, 0.0)
+        self.get_logger().info('[3] 목표 위치로 이동...')
+        self._move_l(mx, ty, mz, 90.0, -90.0, 0.0)
         self.get_logger().info(f'Y 좌표 차이 : {ty - my:.1f} mm')
 
 
