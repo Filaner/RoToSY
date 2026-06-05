@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RoToSY — 약사 패널</title>
+<style>
+:root {
+  --bg:      #f4f6fa;
+  --surface: #ffffff;
+  --surf2:   #eef1f7;
+  --border:  #dde2ed;
+  --text:    #1a2540;
+  --muted:   #6b7a99;
+  --green:   #16a34a;
+  --red:     #dc2626;
+  --yellow:  #b45309;
+  --blue:    #1d4ed8;
+  --cyan:    #16a34a;
+  --purple:  #7c3aed;
+  --teal:    #0f766e;
+  --orange:  #c2410c;
+  --mono:    'JetBrains Mono','Fira Code','Courier New',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{
+  font-size:16px;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── Topbar ── */
+#topbar{
+  height:56px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 1.5rem;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.logo{font-size:1.1rem;font-weight:800;letter-spacing:.06em;}
+.logo span{color:var(--green);}
+.topbar-right{display:flex;align-items:center;gap:1rem;}
+
+/* ── Alert bell ── */
+.notif-btn{
+  position:relative;background:var(--surf2);border:1px solid var(--border);
+  border-radius:.45rem;padding:.4rem .65rem;cursor:pointer;font-size:1rem;color:var(--muted);
+  transition:color .15s;
+}
+.notif-btn:hover{color:var(--text);}
+.notif-badge{
+  position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;
+  border-radius:9999px;font-size:.6rem;font-weight:800;padding:1px 5px;min-width:16px;text-align:center;
+}
+
+/* ── WS badge ── */
+.badge{display:inline-flex;align-items:center;gap:.4rem;padding:.28rem .75rem;
+  border-radius:9999px;font-size:.75rem;font-weight:600;border:1px solid transparent;}
+.badge-dot{width:7px;height:7px;border-radius:50%;}
+.badge.connected{background:#14532d33;border-color:var(--green);color:var(--green);}
+.badge.disconnected{background:#7f1d1d33;border-color:var(--red);color:var(--red);}
+.badge.connecting{background:#78350f33;border-color:var(--yellow);color:var(--yellow);}
+.badge.connected .badge-dot{background:var(--green);box-shadow:0 0 6px var(--green);}
+.badge.disconnected .badge-dot{background:var(--red);}
+.badge.connecting .badge-dot{background:var(--yellow);animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── Layout: left list + right detail ── */
+#layout{display:flex;flex:1;overflow:hidden;}
+
+/* ── Left panel: prescription queue ── */
+#left-panel{
+  width:300px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+#queue-header{
+  padding:.85rem 1rem;border-bottom:1px solid var(--border);flex-shrink:0;
+}
+#queue-header .title{font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);}
+#queue-filter{display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap;}
+.filter-chip{
+  padding:.2rem .6rem;border-radius:9999px;font-size:.7rem;font-weight:600;cursor:pointer;
+  border:1px solid var(--border);background:var(--surf2);color:var(--muted);transition:all .15s;
+}
+.filter-chip:hover{color:var(--text);}
+.filter-chip.active{border-color:var(--green);color:var(--green);background:#dcfce7;}
+
+#queue-list{flex:1;overflow-y:auto;padding:.5rem;}
+
+/* ── Prescription card (in list) ── */
+.presc-card{
+  padding:.75rem 1rem;border-radius:.5rem;border:1px solid var(--border);
+  background:var(--surf2);margin-bottom:.5rem;cursor:pointer;transition:all .15s;
+}
+.presc-card:hover{border-color:var(--cyan);background:#0e4f5914;}
+.presc-card.selected{border-color:var(--cyan);background:#0e4f5922;}
+.presc-card .pc-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:.35rem;}
+.presc-card .pc-name{font-size:.9rem;font-weight:600;}
+.presc-card .pc-ward{font-size:.72rem;color:var(--muted);}
+.presc-card .pc-drugs{font-size:.72rem;color:var(--muted);margin-top:.2rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+/* ── Priority badge ── */
+.prio{padding:.15rem .5rem;border-radius:9999px;font-size:.65rem;font-weight:700;letter-spacing:.04em;}
+.prio-emergency{background:#7f1d1d33;color:var(--red);border:1px solid var(--red);}
+.prio-general  {background:#1e3a8a22;color:var(--blue);border:1px solid var(--blue);}
+.prio-scheduled{background:#1f2d1a22;color:var(--muted);border:1px solid var(--border);}
+
+/* ── Status dot ── */
+.sdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:.35rem;flex-shrink:0;}
+.sdot-pending  {background:var(--yellow);}
+.sdot-approved {background:var(--green);}
+.sdot-rejected {background:var(--red);}
+.sdot-completed{background:var(--cyan);}
+.sdot-awaiting_load_confirm{background:var(--orange);}
+
+/* ── Right panel: detail ── */
+#right-panel{flex:1;overflow-y:auto;padding:1.5rem;display:flex;flex-direction:column;gap:1.25rem;}
+
+/* ── Card ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:.75rem;padding:1.25rem;box-shadow:0 1px 4px rgba(26,37,64,.06);}
+.card-title{font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:1rem;}
+
+/* ── Empty state ── */
+#empty-state{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:.75rem;color:var(--muted);text-align:center;
+}
+.empty-icon{font-size:3rem;opacity:.3;}
+.empty-title{font-size:1rem;font-weight:600;}
+.empty-sub{font-size:.82rem;opacity:.7;}
+
+/* ── Patient info ── */
+.info-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.75rem;}
+.info-item{display:flex;flex-direction:column;gap:.2rem;}
+.info-label{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
+.info-val{font-size:.95rem;font-weight:600;}
+
+/* ── Drug list ── */
+.drug-row{
+  display:flex;align-items:center;gap:1rem;padding:.7rem 1rem;
+  background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;margin-bottom:.5rem;
+}
+.drug-name{flex:1;font-size:.9rem;font-weight:500;}
+.drug-qty{font-size:.82rem;color:var(--muted);}
+.drug-freq{font-size:.75rem;color:var(--muted);font-style:italic;}
+
+/* ── OCR comparison ── */
+.ocr-bar{
+  display:flex;align-items:center;gap:.75rem;padding:.6rem 1rem;
+  border-radius:.45rem;background:var(--surf2);border:1px solid var(--border);margin-bottom:.4rem;
+}
+.ocr-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;width:60px;flex-shrink:0;}
+.ocr-val{flex:1;font-size:.82rem;font-family:var(--mono);}
+.ocr-match{font-size:.8rem;font-weight:700;}
+.ocr-ok{color:var(--green);}
+.ocr-ng{color:var(--red);}
+.ocr-confidence{font-size:.75rem;font-family:var(--mono);}
+
+/* ── Confidence bar ── */
+.conf-wrap{display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem;}
+.conf-bar{flex:1;height:6px;background:var(--surf2);border-radius:9999px;overflow:hidden;}
+.conf-fill{height:100%;border-radius:9999px;transition:width .4s;}
+.conf-pct{font-size:.78rem;font-family:var(--mono);width:3.5ch;text-align:right;flex-shrink:0;}
+.conf-name{font-size:.82rem;flex:1;}
+.conf-status{font-size:.75rem;font-weight:700;}
+
+/* ── Buttons ── */
+.btn{
+  padding:.65rem 1.25rem;border-radius:.5rem;font-size:.85rem;font-weight:600;cursor:pointer;
+  border:1px solid transparent;transition:all .15s;font-family:inherit;text-transform:uppercase;letter-spacing:.04em;
+}
+.btn:disabled{opacity:.4;cursor:not-allowed;}
+.btn-green{background:#dcfce7;color:#166534;border-color:#86efac;}
+.btn-green:hover:not(:disabled){background:var(--green);color:#fff;}
+.btn-red{background:#fee2e2;color:#991b1b;border-color:#fca5a5;}
+.btn-red:hover:not(:disabled){background:var(--red);color:#fff;}
+.btn-yellow{background:#fef3c7;color:#92400e;border-color:#fcd34d;}
+.btn-yellow:hover:not(:disabled){background:var(--yellow);color:#fff;}
+.btn-cyan{background:#dcfce7;color:#166534;border-color:#86efac;}
+.btn-cyan:hover:not(:disabled){background:var(--green);color:#fff;}
+.btn-ghost{background:var(--surf2);color:var(--muted);border-color:var(--border);}
+.btn-ghost:hover:not(:disabled){color:var(--text);}
+.btn-group{display:flex;gap:.65rem;flex-wrap:wrap;}
+
+/* ── Reject modal ── */
+#reject-modal-bg{
+  display:none;position:fixed;inset:0;background:#0009;z-index:200;
+  align-items:center;justify-content:center;
+}
+#reject-modal{
+  background:var(--surface);border:1px solid var(--border);border-radius:.75rem;
+  padding:1.5rem;width:380px;max-width:90vw;
+}
+
+/* ── Load confirm box ── */
+#load-confirm-section{
+  border:2px solid var(--orange);border-radius:.6rem;padding:1.25rem;
+  background:#78350f11;
+}
+#load-confirm-section .lc-title{font-size:.85rem;font-weight:700;color:var(--orange);margin-bottom:.5rem;}
+#load-confirm-section .lc-sub{font-size:.78rem;color:var(--muted);margin-bottom:.85rem;}
+.confirm-row{display:flex;gap:1rem;}
+.confirm-box{
+  flex:1;border:2px dashed var(--border);border-radius:.5rem;padding:.85rem;
+  display:flex;flex-direction:column;align-items:center;gap:.4rem;text-align:center;
+}
+.confirm-box.confirmed{border-color:var(--green);border-style:solid;background:#14532d1a;}
+.confirm-box .cb-actor{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
+.confirm-box .cb-icon{font-size:1.4rem;}
+
+/* ── Status badge ── */
+.status-badge{
+  display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .8rem;
+  border-radius:9999px;font-size:.78rem;font-weight:700;border:1px solid;
+}
+.sb-pending  {color:var(--yellow);border-color:var(--yellow);background:#78350f22;}
+.sb-approved {color:var(--green);border-color:var(--green);background:#14532d22;}
+.sb-rejected {color:var(--red);border-color:var(--red);background:#7f1d1d22;}
+.sb-completed{color:var(--cyan);border-color:var(--cyan);background:#0e4f5922;}
+.sb-awaiting_load_confirm{color:var(--orange);border-color:var(--orange);background:#78350f22;}
+
+/* ── Note textarea ── */
+textarea{
+  width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);
+  padding:.6rem .75rem;border-radius:.45rem;font-family:inherit;font-size:.85rem;
+  resize:vertical;min-height:60px;
+}
+textarea:focus{outline:none;border-color:var(--cyan);}
+input[type=text]{
+  width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);
+  padding:.5rem .75rem;border-radius:.4rem;font-family:inherit;font-size:.9rem;
+}
+input[type=text]:focus{outline:none;border-color:var(--cyan);}
+
+/* ── Feedback ── */
+.feedback{font-size:.75rem;color:var(--muted);font-family:var(--mono);min-height:1em;margin-top:.5rem;}
+
+/* ── Override section ── */
+.override-row{
+  display:flex;align-items:center;gap:.75rem;padding:.5rem .75rem;
+  background:var(--bg);border:1px solid var(--border);border-radius:.4rem;margin-bottom:.4rem;
+}
+.or-label{font-size:.78rem;flex:1;}
+input[type=number].or-input{
+  width:70px;background:var(--surf2);border:1px solid var(--border);color:var(--text);
+  padding:.3rem .5rem;border-radius:.35rem;font-family:var(--mono);font-size:.85rem;text-align:center;
+}
+</style>
+</head>
+<body>
+
+<!-- ── Topbar ── -->
+<div id="topbar">
+  <div class="logo">RoTo<span>SY</span> <span style="font-weight:400;color:var(--muted);font-size:.85rem;">약사 패널</span></div>
+  <div class="topbar-right">
+    <div style="display:flex;gap:.3rem;background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:.2rem;">
+      <button id="mode-review-btn" class="btn btn-ghost" style="font-size:.78rem;padding:.3rem .75rem;background:var(--surface);border-color:var(--border);" onclick="setMode('review')"> 처방 검토</button>
+      <button id="mode-load-btn"   class="btn btn-ghost" style="font-size:.78rem;padding:.3rem .75rem;" onclick="setMode('load')"><span id="load-count-badge" style="display:none;background:var(--orange);color:#fff;border-radius:9999px;font-size:.6rem;padding:1px 5px;margin-right:.25rem;">0</span> 적재 확인</button>
+    </div>
+    <button class="notif-btn" onclick="scrollToAlerts()" title="알림">
+      🔔 <span class="notif-badge" id="notif-count" style="display:none;">0</span>
+    </button>
+    <a href="/" style="text-decoration:none;">
+      <button class="btn btn-ghost" style="font-size:.75rem;padding:.35rem .75rem;">관리자 뷰</button>
+    </a>
+    <div id="ws-badge" class="badge connecting">
+      <div class="badge-dot"></div>
+      <span id="ws-label">연결 중...</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── 적재 확인 전용 뷰 ── -->
+<div id="load-confirm-view" style="display:none;flex:1;overflow-y:auto;padding:1.5rem;">
+  <div style="max-width:800px;margin:0 auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
+      <div>
+        <div style="font-size:1.1rem;font-weight:800;">AMR 적재 확인</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:.2rem;">로봇 암이 약품을 AMR에 적재 완료했습니다. 직접 확인 후 아래 버튼을 눌러주세요.</div>
+      </div>
+      <button class="btn btn-ghost" style="font-size:.78rem;" onclick="loadPrescriptions()">새로고침</button>
+    </div>
+    <div id="load-confirm-list">
+      <div style="text-align:center;padding:3rem;color:var(--muted);">
+        <div style="font-size:2rem;opacity:.3;margin-bottom:.5rem;"></div>
+        <div style="font-size:.9rem;font-weight:600;">적재 확인 대기 중인 처방전이 없습니다</div>
+        <div style="font-size:.78rem;margin-top:.25rem;">약사가 처방전을 승인하면 여기에 표시됩니다.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Layout ── -->
+<div id="layout">
+
+  <!-- Left: prescription queue -->
+  <div id="left-panel">
+    <div id="queue-header">
+      <div class="title">처방전 대기열</div>
+      <div id="queue-filter">
+        <div class="filter-chip active" data-filter="all" onclick="setFilter('all',this)">전체</div>
+        <div class="filter-chip" data-filter="pending"  onclick="setFilter('pending',this)">대기</div>
+        <div class="filter-chip" data-filter="approved" onclick="setFilter('approved',this)">승인</div>
+        <div class="filter-chip" data-filter="rejected" onclick="setFilter('rejected',this)">반려</div>
+        <div class="filter-chip" data-filter="awaiting_load_confirm" onclick="setFilter('awaiting_load_confirm',this)">적재확인</div>
+      </div>
+    </div>
+    <div id="queue-list"></div>
+  </div>
+
+  <!-- Right: detail panel -->
+  <div id="right-panel">
+    <!-- Empty state -->
+    <div id="empty-state">
+      <div class="empty-icon"></div>
+      <div class="empty-title">처방전을 선택하세요</div>
+      <div class="empty-sub">좌측 목록에서 처방전을 클릭하면<br>상세 내용과 검증 결과를 확인할 수 있습니다.</div>
+    </div>
+
+    <!-- Detail content (hidden until selected) -->
+    <div id="detail-content" style="display:none;">
+
+      <!-- Header -->
+      <div class="card" style="padding:1rem 1.25rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;">
+          <div>
+            <div style="font-size:1.1rem;font-weight:700;" id="d-patient-name">—</div>
+            <div style="font-size:.8rem;color:var(--muted);margin-top:.15rem;" id="d-patient-meta">—</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:.75rem;">
+            <span id="d-priority-badge"></span>
+            <span id="d-status-badge"></span>
+            <span style="font-size:.75rem;color:var(--muted);font-family:var(--mono);" id="d-created-at"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Patient & Drug info -->
+      <div class="card">
+        <div class="card-title">환자 정보</div>
+        <div class="info-grid" style="margin-bottom:1rem;">
+          <div class="info-item"><div class="info-label">환자 ID</div><div class="info-val" id="d-pid">—</div></div>
+          <div class="info-item"><div class="info-label">병동</div><div class="info-val" id="d-ward">—</div></div>
+          <div class="info-item"><div class="info-label">담당 의사</div><div class="info-val" id="d-doctor">—</div></div>
+          <div class="info-item"><div class="info-label">처방 ID</div><div class="info-val info-mono" id="d-id">—</div></div>
+        </div>
+
+        <div class="card-title">처방 약품</div>
+        <div id="d-drugs-list"></div>
+      </div>
+
+      <!-- OCR 검증 -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem;">
+          <div class="card-title" style="margin-bottom:0;">OCR 인식 결과</div>
+          <div style="font-size:.8rem;">
+            신뢰도: <span id="ocr-confidence" style="font-family:var(--mono);font-weight:700;">—%</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom:.75rem;">
+          <div style="font-size:.72rem;color:var(--muted);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.06em;">원문 인식</div>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:.4rem;padding:.6rem .85rem;font-family:var(--mono);font-size:.82rem;color:var(--text);" id="ocr-raw">—</div>
+        </div>
+
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.06em;">약품별 매칭</div>
+        <div id="ocr-parsed-list"></div>
+      </div>
+
+      <!-- Vision AI 결과 -->
+      <div class="card">
+        <div class="card-title">Vision AI 검증 (Florence-2)</div>
+        <div id="vision-list"></div>
+
+        <!-- 수량 수동 오버라이드 -->
+        <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+          <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.6rem;">수량 수동 수정 (AI 오류 시)</div>
+          <div id="override-list"></div>
+        </div>
+      </div>
+
+      <!-- 검토 노트 + 승인/반려 -->
+      <div class="card" id="action-card">
+        <div class="card-title">검토 및 처리</div>
+        <div style="margin-bottom:.75rem;">
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:.35rem;">검토 메모 (선택)</div>
+          <textarea id="pharmacist-note" placeholder="특이사항 또는 주의 내용을 입력하세요..."></textarea>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-green" id="btn-approve" onclick="approve()" style="flex:2;">V 승인 (조제 지시)</button>
+          <button class="btn btn-red"   id="btn-reject"  onclick="openRejectModal()">X 반려</button>
+        </div>
+        <div class="feedback" id="action-feedback"></div>
+        <div id="reject-reason-display" style="display:none;margin-top:.6rem;padding:.6rem .85rem;background:#7f1d1d22;border:1px solid var(--red);border-radius:.4rem;font-size:.8rem;color:var(--red);"></div>
+      </div>
+
+      <!-- AMR 적재 확인 -->
+      <div id="load-confirm-section" style="display:none;">
+        <div class="lc-title">[!] AMR 적재 확인 필요</div>
+        <div class="lc-sub">로봇 암이 약품을 AMR에 적재 완료했습니다.<br>직접 확인 후 아래 버튼을 눌러주세요.</div>
+        <div class="confirm-row" style="margin-bottom:.85rem;">
+          <div class="confirm-box" id="cb-pharmacist">
+            <div class="cb-actor">약사 (나)</div>
+            <div class="cb-icon" id="cb-pharmacist-icon">[ ]</div>
+            <button class="btn btn-cyan" id="btn-pharm-confirm" onclick="confirmLoading()" style="font-size:.75rem;padding:.4rem .8rem;">적재 확인</button>
+          </div>
+          <div class="confirm-box" id="cb-admin">
+            <div class="cb-actor">관리자</div>
+            <div class="cb-icon" id="cb-admin-icon">[ ]</div>
+            <div style="font-size:.72rem;color:var(--muted);" id="cb-admin-lbl">대기 중</div>
+          </div>
+        </div>
+        <div class="feedback" id="confirm-feedback"></div>
+      </div>
+
+    </div><!-- /detail-content -->
+  </div><!-- /right-panel -->
+</div><!-- /layout -->
+
+<!-- ── Reject Modal ── -->
+<div id="reject-modal-bg">
+  <div id="reject-modal">
+    <div style="font-weight:700;margin-bottom:.75rem;color:var(--red);">처방전 반려</div>
+    <div style="font-size:.82rem;color:var(--muted);margin-bottom:.75rem;">반려 사유를 입력하면 담당 간호사에게 알림이 전송됩니다.</div>
+    <textarea id="reject-reason-input" placeholder="반려 사유를 입력하세요..." style="margin-bottom:.85rem;"></textarea>
+    <div class="btn-group">
+      <button class="btn btn-red" onclick="reject()" style="flex:2;">반려 확정</button>
+      <button class="btn btn-ghost" onclick="closeRejectModal()">취소</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════
+let prescriptions = [];
+let selectedId    = null;
+let missionState  = null;
+let activeFilter  = 'all';
+let overrideQty   = {};   // drug index → override quantity
+let currentMode   = 'review';  // 'review' | 'load'
+
+// ═══════════════════════════════════════════════
+// Mode toggle (처방 검토 / 적재 확인)
+// ═══════════════════════════════════════════════
+function setMode(mode) {
+  currentMode = mode;
+  const layout   = document.getElementById('layout');
+  const loadView = document.getElementById('load-confirm-view');
+  const btnReview = document.getElementById('mode-review-btn');
+  const btnLoad   = document.getElementById('mode-load-btn');
+
+  if (mode === 'load') {
+    layout.style.display   = 'none';
+    loadView.style.display = 'flex';
+    loadView.style.flexDirection = 'column';
+    btnLoad.style.background   = 'var(--surface)';
+    btnLoad.style.borderColor  = 'var(--border)';
+    btnReview.style.background = 'transparent';
+    btnReview.style.borderColor = 'transparent';
+    renderLoadConfirmList();
+  } else {
+    layout.style.display   = 'flex';
+    loadView.style.display = 'none';
+    btnReview.style.background  = 'var(--surface)';
+    btnReview.style.borderColor = 'var(--border)';
+    btnLoad.style.background   = 'transparent';
+    btnLoad.style.borderColor  = 'transparent';
+  }
+}
+
+function renderLoadConfirmList() {
+  const container = document.getElementById('load-confirm-list');
+  const waiting = prescriptions.filter(p => p.status === 'awaiting_load_confirm');
+
+  if (waiting.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center;padding:3rem;color:var(--muted);">
+        <div style="font-size:2rem;opacity:.3;margin-bottom:.5rem;"></div>
+        <div style="font-size:.9rem;font-weight:600;">적재 확인 대기 중인 처방전이 없습니다</div>
+        <div style="font-size:.78rem;margin-top:.25rem;">약사가 처방전을 승인하면 여기에 표시됩니다.</div>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = waiting.map(p => {
+    const drugStr = p.drugs.map(d => `${d.name} ×${d.quantity}정`).join('<br>');
+    const prioMap = {emergency:'긴급',general:'일반',scheduled:'정기'};
+    const prioClsMap = {emergency:'prio-emergency',general:'prio-general',scheduled:'prio-scheduled'};
+    return `
+    <div style="background:var(--surface);border:2px solid var(--orange);border-radius:.75rem;padding:1.25rem;margin-bottom:1rem;box-shadow:0 2px 8px rgba(194,65,12,.12);">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:.85rem;">
+        <div>
+          <div style="font-size:1.05rem;font-weight:700;">${p.patient_name}
+            <span style="font-size:.75rem;font-weight:400;color:var(--muted);"> ${p.ward}</span>
+            <span class="prio ${prioClsMap[p.priority]||''}" style="margin-left:.4rem;">${prioMap[p.priority]||p.priority}</span>
+          </div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:.2rem;">${p.id} · ${p.doctor} 의사 · ${p.created_at.substring(0,16)}</div>
+        </div>
+        <span style="color:var(--orange);font-size:.78rem;font-weight:700;padding:.25rem .65rem;background:#78350f22;border:1px solid var(--orange);border-radius:9999px;">[!] 적재 확인 필요</span>
+      </div>
+
+      <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:.75rem;margin-bottom:.85rem;">
+        <div style="font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem;">처방 약품</div>
+        <div style="font-size:.85rem;line-height:1.7;">${drugStr}</div>
+      </div>
+
+      <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+        <div id="lc-pharm-status-${p.id}" style="font-size:.78rem;color:var(--muted);">약사 확인: 대기 중</div>
+        <button class="btn btn-cyan" id="lc-btn-${p.id}" onclick="confirmLoadingById('${p.id}',this)" style="flex:1;min-width:140px;padding:.65rem;">
+           적재 확인 완료
+        </button>
+        <div class="feedback" id="lc-fb-${p.id}" style="flex-basis:100%;"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Apply current mission state to confirm boxes
+  if (missionState) applyMissionStateToLoadView(missionState);
+}
+
+async function confirmLoadingById(pid, btn) {
+  const fb = document.getElementById(`lc-fb-${pid}`);
+  btn.disabled = true;
+  btn.textContent = '처리 중...';
+  try {
+    const r = await fetch(`/api/prescription/${pid}/confirm_loading`, {method: 'POST'});
+    const d = await r.json();
+    if (r.ok) {
+      const statusEl = document.getElementById(`lc-pharm-status-${pid}`);
+      if (statusEl) { statusEl.textContent = '약사 확인: 완료'; statusEl.style.color = 'var(--green)'; }
+      btn.style.display = 'none';
+      if (fb) { fb.style.color = 'var(--green)'; fb.textContent = 'V 약사 적재 확인 완료 — 관리자 확인 대기 중'; }
+    } else {
+      btn.disabled = false;
+      btn.textContent = ' 적재 확인 완료';
+      if (fb) { fb.style.color = 'var(--red)'; fb.textContent = d.detail || '오류'; }
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = ' 적재 확인 완료';
+    if (fb) { fb.style.color = 'var(--red)'; fb.textContent = e.message; }
+  }
+}
+
+function applyMissionStateToLoadView(m) {
+  // update pharmacy confirm status in load view cards
+  const pharmStatusEls = document.querySelectorAll('[id^="lc-pharm-status-"]');
+  pharmStatusEls.forEach(el => {
+    if (m.pharmacist_confirmed) {
+      el.textContent = '약사 확인: 완료';
+      el.style.color = 'var(--green)';
+      const pid = el.id.replace('lc-pharm-status-', '');
+      const btn = document.getElementById(`lc-btn-${pid}`);
+      if (btn) btn.style.display = 'none';
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════
+// WebSocket (mission state only)
+// ═══════════════════════════════════════════════
+function setWS(cls) {
+  const b = document.getElementById('ws-badge');
+  b.className = 'badge ' + cls;
+  document.getElementById('ws-label').textContent =
+    {connected:'연결됨',disconnected:'연결 끊김',connecting:'연결 중...'}[cls];
+}
+
+function connect() {
+  setWS('connecting');
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen  = () => setWS('connected');
+  ws.onclose = () => { setWS('disconnected'); setTimeout(connect, 3000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = e => {
+    try {
+      const s = JSON.parse(e.data);
+      if (s.mission) {
+        missionState = s.mission;
+        applyMissionState(s.mission);
+      }
+    } catch(_) {}
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Load prescriptions from API
+// ═══════════════════════════════════════════════
+async function loadPrescriptions() {
+  try {
+    const r = await fetch('/api/prescription');
+    prescriptions = await r.json();
+    renderQueue();
+    updateNotifBadge();
+    updateLoadCountBadge();
+    if (currentMode === 'load') renderLoadConfirmList();
+  } catch(e) {}
+}
+
+function updateLoadCountBadge() {
+  const cnt = prescriptions.filter(p => p.status === 'awaiting_load_confirm').length;
+  const badge = document.getElementById('load-count-badge');
+  if (!badge) return;
+  if (cnt > 0) { badge.style.display = 'inline'; badge.textContent = cnt; }
+  else         { badge.style.display = 'none'; }
+}
+
+setInterval(loadPrescriptions, 5000);   // auto-refresh every 5s
+
+// ═══════════════════════════════════════════════
+// Queue render
+// ═══════════════════════════════════════════════
+function setFilter(f, el) {
+  activeFilter = f;
+  document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  renderQueue();
+}
+
+function renderQueue() {
+  const list = document.getElementById('queue-list');
+  const filtered = activeFilter === 'all'
+    ? prescriptions
+    : prescriptions.filter(p => p.status === activeFilter);
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div style="padding:1.5rem;text-align:center;color:var(--muted);font-size:.82rem;">처방전 없음</div>';
+    return;
+  }
+
+  list.innerHTML = filtered.map(p => {
+    const drugNames = p.drugs.map(d => d.name.split(' ')[0]).join(', ');
+    const prioLabel = {emergency:'긴급',general:'일반',scheduled:'정기'}[p.priority] || p.priority;
+    const prioCls   = `prio prio-${p.priority}`;
+    const sdotCls   = `sdot sdot-${p.status}`;
+    const isOcr     = p.ocr && p.ocr.confidence < 85;
+    return `
+      <div class="presc-card${p.id === selectedId ? ' selected' : ''}" onclick="selectPrescription('${p.id}')">
+        <div class="pc-top">
+          <div style="display:flex;align-items:center;gap:.4rem;">
+            <span class="${sdotCls}"></span>
+            <span class="pc-name">${p.patient_name}</span>
+          </div>
+          <span class="${prioCls}">${prioLabel}</span>
+        </div>
+        <div class="pc-ward">${p.ward} · ${p.doctor} 의사${isOcr ? ' &nbsp;<span style="color:var(--red);font-size:.65rem;font-weight:700;">[!] OCR 낮음</span>' : ''}</div>
+        <div class="pc-drugs">${drugNames}</div>
+      </div>`;
+  }).join('');
+}
+
+function updateNotifBadge() {
+  const pending = prescriptions.filter(p => p.status === 'pending').length;
+  const badge   = document.getElementById('notif-count');
+  if (pending > 0) { badge.style.display='block'; badge.textContent=pending; }
+  else             { badge.style.display='none'; }
+}
+
+// ═══════════════════════════════════════════════
+// Select & render detail
+// ═══════════════════════════════════════════════
+async function selectPrescription(id) {
+  try {
+    const r = await fetch(`/api/prescription/${id}`);
+    const p = await r.json();
+    selectedId = id;
+    overrideQty = {};
+    renderDetail(p);
+    renderQueue();
+  } catch(e) {}
+}
+
+function renderDetail(p) {
+  document.getElementById('empty-state').style.display   = 'none';
+  document.getElementById('detail-content').style.display = 'flex';
+  document.getElementById('detail-content').style.flexDirection = 'column';
+  document.getElementById('detail-content').style.gap = '1.25rem';
+
+  // Header
+  document.getElementById('d-patient-name').textContent = p.patient_name;
+  document.getElementById('d-patient-meta').textContent =
+    `${p.patient_id}  ·  ${p.ward}  ·  ${p.doctor} 의사`;
+  document.getElementById('d-pid').textContent    = p.patient_id;
+  document.getElementById('d-ward').textContent   = p.ward;
+  document.getElementById('d-doctor').textContent = p.doctor;
+  document.getElementById('d-id').textContent     = p.id;
+  document.getElementById('d-created-at').textContent = p.created_at;
+
+  // Priority badge
+  const prioMap = {emergency:['긴급','prio-emergency'],general:['일반','prio-general'],scheduled:['정기','prio-scheduled']};
+  const [pl, pc] = prioMap[p.priority] || ['—',''];
+  document.getElementById('d-priority-badge').className = `prio ${pc}`;
+  document.getElementById('d-priority-badge').textContent = pl;
+
+  // Status badge
+  const stMap = {
+    pending:  ['검토 대기','sb-pending'],
+    approved: ['승인됨','sb-approved'],
+    rejected: ['반려됨','sb-rejected'],
+    completed:['완료','sb-completed'],
+    awaiting_load_confirm: ['적재 확인 중','sb-awaiting_load_confirm'],
+  };
+  const [sl, sc] = stMap[p.status] || [p.status,''];
+  document.getElementById('d-status-badge').className = `status-badge ${sc}`;
+  document.getElementById('d-status-badge').textContent = sl;
+
+  // Drug list
+  document.getElementById('d-drugs-list').innerHTML = p.drugs.map(d => `
+    <div class="drug-row">
+      <span class="drug-name"> ${d.name}</span>
+      <span class="drug-qty">× ${d.quantity}정</span>
+      <span class="drug-freq">${d.frequency}</span>
+    </div>`).join('');
+
+  // OCR
+  const ocr = p.ocr || {};
+  const confEl = document.getElementById('ocr-confidence');
+  const conf   = ocr.confidence ?? 0;
+  confEl.textContent = conf + '%';
+  confEl.style.color = conf >= 90 ? 'var(--green)' : conf >= 75 ? 'var(--yellow)' : 'var(--red)';
+  document.getElementById('ocr-raw').textContent = ocr.raw || '—';
+
+  const parsedEl = document.getElementById('ocr-parsed-list');
+  if (ocr.parsed && ocr.parsed.length) {
+    parsedEl.innerHTML = ocr.parsed.map((item, i) => {
+      const rx = p.drugs[i];
+      const qOk = rx && item.qty === rx.quantity;
+      return `
+      <div class="ocr-bar">
+        <span class="ocr-label" style="color:var(--muted);">약품 ${i+1}</span>
+        <span class="ocr-val">${item.name} × ${item.qty}</span>
+        <span class="ocr-match ${item.match && qOk ? 'ocr-ok' : 'ocr-ng'}">${item.match && qOk ? 'V 일치' : '✗ 불일치'}</span>
+      </div>`;
+    }).join('');
+  } else {
+    parsedEl.innerHTML = '<div style="color:var(--muted);font-size:.82rem;">OCR 데이터 없음</div>';
+  }
+
+  // Vision
+  const visionEl = document.getElementById('vision-list');
+  const overrideEl = document.getElementById('override-list');
+  if (p.vision && p.vision.length) {
+    visionEl.innerHTML = p.vision.map((v, i) => {
+      const pct  = v.confidence;
+      const color = pct >= 90 ? 'var(--green)' : pct >= 75 ? 'var(--yellow)' : 'var(--red)';
+      const qOk  = v.qty_detected === (p.drugs[i]?.quantity ?? v.qty_detected);
+      return `
+      <div class="conf-wrap">
+        <span class="conf-name"> ${v.name}</span>
+        <div class="conf-bar"><div class="conf-fill" style="width:${pct}%;background:${color};"></div></div>
+        <span class="conf-pct" style="color:${color};">${pct}%</span>
+        <span class="conf-status ${v.match ? 'ocr-ok' : 'ocr-ng'}">${v.match ? 'V' : '✗'}</span>
+        <span style="font-size:.75rem;color:${qOk?'var(--green)':'var(--red)'};">수량: ${v.qty_detected}</span>
+      </div>`;
+    }).join('');
+
+    overrideEl.innerHTML = p.vision.map((v, i) => `
+      <div class="override-row">
+        <span class="or-label">${v.name}</span>
+        <span style="font-size:.72rem;color:var(--muted);">검출: ${v.qty_detected} /</span>
+        <span style="font-size:.72rem;color:var(--muted);">처방: ${p.drugs[i]?.quantity ?? '?'}</span>
+        <input type="number" class="or-input" id="override-${i}" value="${p.drugs[i]?.quantity ?? v.qty_detected}"
+          min="0" max="99" title="수량 직접 수정">
+      </div>`).join('');
+  } else {
+    visionEl.innerHTML   = '<div style="color:var(--muted);font-size:.82rem;">Vision 데이터 없음</div>';
+    overrideEl.innerHTML = '';
+  }
+
+  // Action card: show/hide based on status
+  const actionCard = document.getElementById('action-card');
+  const rejectDisplay = document.getElementById('reject-reason-display');
+  const btnApprove = document.getElementById('btn-approve');
+  const btnReject  = document.getElementById('btn-reject');
+  document.getElementById('pharmacist-note').value = p.pharmacist_note || '';
+  document.getElementById('action-feedback').textContent = '';
+
+  if (p.status === 'pending') {
+    actionCard.style.display = 'block';
+    btnApprove.disabled = false;
+    btnReject.disabled  = false;
+    rejectDisplay.style.display = 'none';
+  } else if (p.status === 'rejected') {
+    actionCard.style.display = 'block';
+    btnApprove.disabled = true;
+    btnReject.disabled  = true;
+    rejectDisplay.style.display = 'block';
+    rejectDisplay.textContent = '반려 사유: ' + (p.reject_reason || '—');
+  } else {
+    actionCard.style.display = 'block';
+    btnApprove.disabled = true;
+    btnReject.disabled  = true;
+    rejectDisplay.style.display = 'none';
+  }
+
+  // AMR load confirm section
+  const lcSection = document.getElementById('load-confirm-section');
+  lcSection.style.display = p.status === 'awaiting_load_confirm' ? 'block' : 'none';
+  if (missionState) applyMissionState(missionState);
+}
+
+// ═══════════════════════════════════════════════
+// Mission state → update confirm boxes
+// ═══════════════════════════════════════════════
+function applyMissionState(m) {
+  missionState = m;
+  applyMissionStateToLoadView(m);
+  // Confirm boxes (if load-confirm section visible)
+  const lcSection = document.getElementById('load-confirm-section');
+  if (!lcSection || lcSection.style.display === 'none') return;
+
+  const pharmBox  = document.getElementById('cb-pharmacist');
+  const pharmIcon = document.getElementById('cb-pharmacist-icon');
+  const pharmBtn  = document.getElementById('btn-pharm-confirm');
+  const adminBox  = document.getElementById('cb-admin');
+  const adminIcon = document.getElementById('cb-admin-icon');
+  const adminLbl  = document.getElementById('cb-admin-lbl');
+
+  if (m.pharmacist_confirmed) {
+    pharmBox.classList.add('confirmed');
+    pharmIcon.textContent = '';
+    if (pharmBtn) pharmBtn.style.display = 'none';
+  }
+  if (m.admin_confirmed) {
+    adminBox.classList.add('confirmed');
+    adminIcon.textContent = '';
+    if (adminLbl) adminLbl.textContent = '확인 완료';
+  }
+}
+
+// ═══════════════════════════════════════════════
+// Actions
+// ═══════════════════════════════════════════════
+async function approve() {
+  if (!selectedId) return;
+  const note = document.getElementById('pharmacist-note').value.trim();
+  const fb   = document.getElementById('action-feedback');
+  fb.style.color = 'var(--muted)';
+  fb.textContent = '처리 중...';
+  try {
+    const r = await fetch(`/api/prescription/${selectedId}/approve`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({note})
+    });
+    const p = await r.json();
+    if (!r.ok) { fb.style.color='var(--red)'; fb.textContent = p.detail || '오류'; return; }
+    fb.style.color = 'var(--green)';
+    fb.textContent = 'V 승인 완료 — 로봇 조제 시작';
+    renderDetail(p);
+    await loadPrescriptions();
+  } catch(e) { fb.style.color='var(--red)'; fb.textContent=e.message; }
+}
+
+function openRejectModal() {
+  document.getElementById('reject-modal-bg').style.display = 'flex';
+  document.getElementById('reject-reason-input').focus();
+}
+function closeRejectModal() {
+  document.getElementById('reject-modal-bg').style.display = 'none';
+  document.getElementById('reject-reason-input').value = '';
+}
+
+async function reject() {
+  if (!selectedId) return;
+  const reason = document.getElementById('reject-reason-input').value.trim();
+  if (!reason) { alert('반려 사유를 입력하세요.'); return; }
+  try {
+    const r = await fetch(`/api/prescription/${selectedId}/reject`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({reason})
+    });
+    const p = await r.json();
+    closeRejectModal();
+    if (r.ok) {
+      renderDetail(p);
+      await loadPrescriptions();
+    }
+  } catch(e) {}
+}
+
+async function confirmLoading() {
+  if (!selectedId) return;
+  const fb = document.getElementById('confirm-feedback');
+  fb.style.color = 'var(--muted)';
+  fb.textContent = '적재 확인 전송 중...';
+  try {
+    const r = await fetch(`/api/prescription/${selectedId}/confirm_loading`, {method:'POST'});
+    const d = await r.json();
+    if (r.ok) {
+      fb.style.color = 'var(--green)';
+      fb.textContent = 'V 약사 적재 확인 완료';
+      document.getElementById('btn-pharm-confirm').style.display = 'none';
+      document.getElementById('cb-pharmacist').classList.add('confirmed');
+      document.getElementById('cb-pharmacist-icon').textContent = '';
+    } else {
+      fb.style.color = 'var(--red)';
+      fb.textContent = d.detail || '오류';
+    }
+  } catch(e) { fb.style.color='var(--red)'; fb.textContent=e.message; }
+}
+
+function scrollToAlerts() {
+  // Filter to pending
+  setFilter('pending', document.querySelector('[data-filter="pending"]'));
+}
+
+// ═══════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════
+connect();
+loadPrescriptions();
+
+// Modal close on bg click
+document.getElementById('reject-modal-bg').addEventListener('click', e => {
+  if (e.target === document.getElementById('reject-modal-bg')) closeRejectModal();
+});
+document.getElementById('reject-reason-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.ctrlKey) reject();
+});
+</script>
+</body>
+</html>

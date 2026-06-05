@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RoToSY Hospital Web — 사용 가이드</title>
+<style>
+:root {
+  --bg:      #f4f6fa;
+  --surface: #ffffff;
+  --surf2:   #eef1f7;
+  --border:  #dde2ed;
+  --text:    #1a2540;
+  --muted:   #6b7a99;
+  --blue:    #1d4ed8;
+  --green:   #16a34a;
+  --red:     #dc2626;
+  --yellow:  #b45309;
+  --cyan:    #0e7490;
+  --mono:    'JetBrains Mono','Fira Code','Courier New',monospace;
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  font-size:16px;line-height:1.6;
+}
+
+/* ── Nav ── */
+nav{
+  position:sticky;top:0;z-index:100;
+  background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:0;padding:0 2rem;
+  overflow-x:auto;
+}
+.nav-logo{font-weight:800;font-size:1rem;letter-spacing:.05em;padding:.9rem 1.5rem .9rem 0;border-right:1px solid var(--border);margin-right:1rem;white-space:nowrap;}
+.nav-logo span{color:var(--blue);}
+.nav-link{
+  padding:.9rem 1rem;font-size:.82rem;font-weight:600;color:var(--muted);
+  text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent;
+  transition:all .15s;
+}
+.nav-link:hover{color:var(--text);}
+.nav-link.active{color:var(--blue);border-bottom-color:var(--blue);}
+
+/* ── Hero ── */
+.hero{
+  background:linear-gradient(135deg,#1e3a8a 0%,#1d4ed8 50%,#0e7490 100%);
+  color:#fff;padding:4rem 2rem 3.5rem;text-align:center;
+}
+.hero-tag{
+  display:inline-block;background:rgba(255,255,255,.15);
+  border:1px solid rgba(255,255,255,.25);border-radius:9999px;
+  padding:.3rem 1rem;font-size:.78rem;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;margin-bottom:1.25rem;
+}
+.hero h1{font-size:2.4rem;font-weight:800;letter-spacing:-.02em;margin-bottom:.75rem;}
+.hero p{font-size:1.05rem;opacity:.85;max-width:600px;margin:0 auto 2rem;}
+.hero-badges{display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;}
+.hero-badge{
+  background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
+  border-radius:.5rem;padding:.5rem 1.1rem;font-size:.82rem;font-weight:600;
+}
+
+/* ── Section ── */
+section{max-width:1100px;margin:0 auto;padding:3rem 2rem;}
+.section-label{
+  font-size:.72rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--blue);margin-bottom:.5rem;
+}
+.section-title{font-size:1.8rem;font-weight:800;letter-spacing:-.02em;margin-bottom:.5rem;}
+.section-sub{font-size:1rem;color:var(--muted);margin-bottom:2.5rem;max-width:680px;}
+hr.section-sep{border:none;border-top:1px solid var(--border);margin:0;}
+
+/* ── Cards ── */
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:.85rem;padding:1.5rem;
+  box-shadow:0 1px 6px rgba(26,37,64,.06);
+}
+.card-title{font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:.85rem;}
+
+/* ── Grid ── */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;}
+@media(max-width:900px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr;}}
+@media(min-width:600px) and (max-width:900px){.grid-2{grid-template-columns:1fr 1fr;}.grid-4{grid-template-columns:1fr 1fr;}}
+
+/* ── Role cards ── */
+.role-card{
+  background:var(--surface);border:1.5px solid var(--border);border-radius:1rem;
+  padding:1.5rem;transition:all .2s;cursor:default;
+}
+.role-card:hover{box-shadow:0 4px 20px rgba(26,37,64,.1);transform:translateY(-2px);}
+.role-icon{
+  width:44px;height:44px;border-radius:.65rem;
+  display:flex;align-items:center;justify-content:center;
+  font-size:1.2rem;font-weight:800;margin-bottom:1rem;
+}
+.role-card .role-title{font-size:1.05rem;font-weight:700;margin-bottom:.25rem;}
+.role-card .role-url{
+  font-family:var(--mono);font-size:.75rem;color:var(--muted);
+  background:var(--surf2);padding:.2rem .55rem;border-radius:.35rem;
+  display:inline-block;margin-bottom:.85rem;
+}
+.role-card .role-desc{font-size:.88rem;color:var(--muted);line-height:1.6;margin-bottom:1rem;}
+.role-feature{
+  font-size:.8rem;padding:.25rem .6rem;border-radius:.35rem;
+  display:inline-block;margin:.2rem .2rem 0 0;font-weight:500;
+}
+
+/* admin */
+.role-admin .role-icon{background:#dbeafe;color:var(--blue);}
+.role-admin .role-title{color:var(--blue);}
+.role-admin .role-feature{background:#dbeafe;color:#1e40af;}
+/* pharmacist */
+.role-pharm .role-icon{background:#dcfce7;color:var(--green);}
+.role-pharm .role-title{color:var(--green);}
+.role-pharm .role-feature{background:#dcfce7;color:#166534;}
+/* nurse */
+.role-nurse .role-icon{background:#dcfce7;color:#0f766e;}
+.role-nurse .role-title{color:#0f766e;}
+.role-nurse .role-feature{background:#f0fdf4;color:#0f766e;}
+/* patient */
+.role-patient .role-icon{background:#fef3c7;color:var(--yellow);}
+.role-patient .role-title{color:var(--yellow);}
+.role-patient .role-feature{background:#fef3c7;color:#92400e;}
+
+/* ── Workflow ── */
+.wf-container{display:flex;flex-direction:column;gap:0;position:relative;}
+.wf-step{
+  display:grid;grid-template-columns:120px 1fr;gap:0;
+  position:relative;
+}
+.wf-left{
+  display:flex;flex-direction:column;align-items:center;padding:0 1.5rem 0 0;
+}
+.wf-num{
+  width:40px;height:40px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-weight:800;font-size:.95rem;flex-shrink:0;z-index:1;
+  position:relative;border:2px solid;
+}
+.wf-line{width:2px;flex:1;margin:4px 0;}
+.wf-right{padding:0 0 2.5rem 0;}
+.wf-actor{
+  font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  margin-bottom:.3rem;
+}
+.wf-title{font-size:1rem;font-weight:700;margin-bottom:.3rem;}
+.wf-desc{font-size:.875rem;color:var(--muted);line-height:1.6;margin-bottom:.5rem;}
+.wf-api{
+  font-family:var(--mono);font-size:.75rem;background:var(--surf2);
+  border:1px solid var(--border);border-radius:.35rem;
+  padding:.25rem .65rem;display:inline-block;color:var(--muted);
+}
+.wf-note{
+  font-size:.78rem;margin-top:.5rem;padding:.4rem .75rem;
+  border-radius:.35rem;border-left:3px solid;
+}
+
+/* Step colors */
+.step-nurse  .wf-num{background:#dcfce7;color:#0f766e;border-color:#0f766e;}
+.step-nurse  .wf-line{background:#0f766e;}
+.step-nurse  .wf-actor{color:#0f766e;}
+.step-pharm  .wf-num{background:#dcfce7;color:var(--green);border-color:var(--green);}
+.step-pharm  .wf-line{background:var(--green);}
+.step-pharm  .wf-actor{color:var(--green);}
+.step-robot  .wf-num{background:#dbeafe;color:var(--blue);border-color:var(--blue);}
+.step-robot  .wf-line{background:var(--blue);}
+.step-robot  .wf-actor{color:var(--blue);}
+.step-admin  .wf-num{background:#ede9fe;color:#7c3aed;border-color:#7c3aed;}
+.step-admin  .wf-line{background:#7c3aed;}
+.step-admin  .wf-actor{color:#7c3aed;}
+.step-amr    .wf-num{background:#fef3c7;color:var(--yellow);border-color:var(--yellow);}
+.step-amr    .wf-line{background:var(--yellow);}
+.step-amr    .wf-actor{color:var(--yellow);}
+.step-done   .wf-num{background:#f0fdf4;color:var(--green);border-color:var(--green);}
+.step-done   .wf-line{background:var(--border);}
+.step-done   .wf-actor{color:var(--green);}
+
+/* ── Data flow ── */
+.df-container{
+  display:grid;grid-template-columns:1fr auto 1fr;
+  gap:0;align-items:start;
+}
+.df-box{
+  background:var(--surface);border:1.5px solid var(--border);border-radius:.75rem;
+  padding:1.1rem 1.25rem;
+}
+.df-box-title{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.75rem;}
+.df-item{
+  display:flex;align-items:center;gap:.6rem;padding:.4rem .5rem;
+  border-radius:.4rem;margin-bottom:.3rem;font-size:.82rem;
+}
+.df-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.df-arrow-col{
+  display:flex;flex-direction:column;justify-content:center;
+  align-items:center;gap:.5rem;padding:1rem .5rem;
+}
+.df-arrow{
+  background:var(--blue);color:#fff;padding:.3rem .7rem;
+  border-radius:.4rem;font-size:.72rem;font-weight:700;
+  white-space:nowrap;text-align:center;
+}
+.df-arrow.green{background:var(--green);}
+.df-arrow.yellow{background:var(--yellow);}
+.df-arrow.muted{background:var(--muted);}
+
+/* ── Dual confirm diagram ── */
+.dc-diagram{
+  display:grid;grid-template-columns:1fr 60px 1fr;
+  gap:0;align-items:center;
+}
+.dc-box{
+  background:var(--surf2);border:1.5px solid var(--border);border-radius:.65rem;
+  padding:1rem;text-align:center;
+}
+.dc-box.confirmed{border-color:var(--green);background:#dcfce7;}
+.dc-center{display:flex;flex-direction:column;align-items:center;gap:.25rem;padding:.5rem;}
+.dc-lock{
+  width:36px;height:36px;border-radius:50%;background:var(--surf2);
+  border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
+  font-size:1rem;
+}
+.dc-lock.unlocked{background:#dcfce7;border-color:var(--green);}
+
+/* ── WS payload ── */
+.payload-tree{
+  background:#1a2540;border-radius:.65rem;padding:1.25rem;
+  font-family:var(--mono);font-size:.8rem;line-height:1.8;color:#e2e8f0;
+  overflow-x:auto;
+}
+.payload-key{color:#93c5fd;}
+.payload-val{color:#86efac;}
+.payload-src{color:#6b7a99;font-size:.72rem;}
+.payload-sep{color:#475569;}
+
+/* ── Tab preview ── */
+.tab-preview{
+  border:1.5px solid var(--border);border-radius:.65rem;overflow:hidden;
+}
+.tab-preview-header{
+  background:var(--surf2);border-bottom:1px solid var(--border);
+  display:flex;gap:.5rem;padding:.6rem 1rem;overflow-x:auto;
+}
+.tab-chip{
+  padding:.25rem .65rem;border-radius:.4rem;font-size:.75rem;font-weight:600;
+  white-space:nowrap;cursor:default;
+}
+.tab-chip.active{color:#fff;}
+.tab-chip.inactive{background:var(--surface);color:var(--muted);border:1px solid var(--border);}
+.tab-preview-body{padding:1.25rem;background:var(--surface);}
+
+/* ── Setup steps ── */
+.setup-step{
+  display:grid;grid-template-columns:36px 1fr;gap:1rem;
+  padding:1rem 0;border-bottom:1px solid var(--border);
+}
+.setup-step:last-child{border-bottom:none;}
+.setup-num{
+  width:32px;height:32px;border-radius:50%;background:var(--blue);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;flex-shrink:0;
+}
+.setup-title{font-weight:600;margin-bottom:.35rem;}
+.setup-desc{font-size:.875rem;color:var(--muted);}
+code.inline{
+  font-family:var(--mono);background:var(--surf2);border:1px solid var(--border);
+  border-radius:.3rem;padding:.05rem .45rem;font-size:.82rem;color:var(--text);
+}
+pre.code-block{
+  background:#1a2540;border-radius:.65rem;padding:1.25rem;
+  font-family:var(--mono);font-size:.82rem;color:#e2e8f0;
+  line-height:1.7;overflow-x:auto;margin-top:.6rem;
+}
+pre.code-block .comment{color:#475569;}
+pre.code-block .cmd{color:#93c5fd;}
+
+/* ── API table ── */
+.api-table{width:100%;border-collapse:collapse;font-size:.85rem;}
+.api-table th{
+  padding:.6rem .85rem;background:var(--surf2);color:var(--muted);
+  font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;
+  text-align:left;border-bottom:1px solid var(--border);
+}
+.api-table td{padding:.6rem .85rem;border-bottom:1px solid var(--border);}
+.api-table tr:last-child td{border-bottom:none;}
+.method{
+  font-family:var(--mono);font-size:.72rem;font-weight:700;
+  padding:.15rem .45rem;border-radius:.3rem;
+}
+.method-get{background:#dcfce7;color:#166534;}
+.method-post{background:#dbeafe;color:#1e40af;}
+.method-put{background:#fef3c7;color:#92400e;}
+.endpoint{font-family:var(--mono);font-size:.82rem;}
+
+/* ── Footer ── */
+footer{
+  background:var(--surface);border-top:1px solid var(--border);
+  padding:2rem;text-align:center;font-size:.82rem;color:var(--muted);
+}
+
+/* ── Misc ── */
+.pill{
+  display:inline-block;padding:.2rem .65rem;border-radius:9999px;
+  font-size:.72rem;font-weight:700;border:1px solid;
+}
+.pill-blue{background:#dbeafe;color:var(--blue);border-color:#93c5fd;}
+.pill-green{background:#dcfce7;color:var(--green);border-color:#86efac;}
+.pill-red{background:#fee2e2;color:var(--red);border-color:#fca5a5;}
+.pill-yellow{background:#fef3c7;color:var(--yellow);border-color:#fcd34d;}
+
+.note{
+  background:#eff6ff;border:1px solid #bfdbfe;border-radius:.5rem;
+  padding:.75rem 1rem;font-size:.85rem;color:#1e40af;
+  border-left:3px solid var(--blue);
+}
+.warn{
+  background:#fef9c3;border:1px solid #fde68a;border-radius:.5rem;
+  padding:.75rem 1rem;font-size:.85rem;color:#92400e;
+  border-left:3px solid var(--yellow);
+}
+</style>
+</head>
+<body>
+
+<!-- ── Nav ── -->
+<nav>
+  <div class="nav-logo">RoTo<span>SY</span></div>
+  <a class="nav-link active" href="#overview">개요</a>
+  <a class="nav-link" href="#roles">역할별 화면</a>
+  <a class="nav-link" href="#workflow">워크플로우</a>
+  <a class="nav-link" href="#dataflow">데이터 흐름</a>
+  <a class="nav-link" href="#api">API</a>
+  <a class="nav-link" href="#setup">세팅</a>
+</nav>
+
+<!-- ── Hero ── -->
+<div class="hero">
+  <div class="hero-tag">병원 약품 물류 자동화 시스템</div>
+  <h1>RoToSY Hospital Web</h1>
+  <p>Doosan E0509 로봇 암 · RealSense D455 · Florence-2 Vision AI를 통합 제어·모니터링하는 웹 인터페이스</p>
+  <div class="hero-badges">
+    <div class="hero-badge">FastAPI · WebSocket 10Hz</div>
+    <div class="hero-badge">4개 역할 화면</div>
+    <div class="hero-badge">ROS2 연동</div>
+    <div class="hero-badge">이중 적재 확인</div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     SECTION 1: 개요
+══════════════════════════════════════════ -->
+<hr class="section-sep"/>
+<section id="overview">
+  <div class="section-label">System Overview</div>
+  <div class="section-title">시스템 구성</div>
+  <div class="section-sub">한 서버(포트 8080)에서 4개의 역할 화면을 제공하며, 모든 화면은 단일 WebSocket을 통해 실시간으로 동기화됩니다.</div>
+
+  <div class="grid-3" style="margin-bottom:1.5rem;">
+    <div class="card" style="border-left:3px solid var(--blue);">
+      <div class="card-title">웹 게이트웨이</div>
+      <div style="font-size:1.5rem;font-weight:800;color:var(--blue);margin-bottom:.25rem;">:8080</div>
+      <div style="font-size:.85rem;color:var(--muted);">FastAPI + Uvicorn<br>WebSocket 10Hz 브로드캐스트<br>6개 REST 라우터</div>
+    </div>
+    <div class="card" style="border-left:3px solid var(--green);">
+      <div class="card-title">RoToSY 로봇 암 API</div>
+      <div style="font-size:1.5rem;font-weight:800;color:var(--green);margin-bottom:.25rem;">:8000</div>
+      <div style="font-size:.85rem;color:var(--muted);">기존 팀 패키지<br>HTTP Proxy로 연결<br>오프라인 시 자동 표시</div>
+    </div>
+    <div class="card" style="border-left:3px solid var(--yellow);">
+      <div class="card-title">ROS2 브릿지</div>
+      <div style="font-size:1.5rem;font-weight:800;color:var(--yellow);margin-bottom:.25rem;">Topics</div>
+      <div style="font-size:.85rem;color:var(--muted);">/amr/status · /amr/battery<br>/door/status<br>ROS2 없으면 Mock 자동 전환</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">배송 체인</div>
+    <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.85rem;">
+      <span style="padding:.4rem .85rem;background:#dcfce7;color:#0f766e;border-radius:.4rem;font-weight:600;">① 처방전 발행</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.4rem .85rem;background:#dcfce7;color:var(--green);border-radius:.4rem;font-weight:600;">② OCR·Vision 검증</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.4rem .85rem;background:#dbeafe;color:var(--blue);border-radius:.4rem;font-weight:600;">③ 로봇 암 집기</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.4rem .85rem;background:#ede9fe;color:#7c3aed;border-radius:.4rem;font-weight:600;">④ 이중 적재 확인</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.4rem .85rem;background:#fef3c7;color:var(--yellow);border-radius:.4rem;font-weight:600;">⑤ AMR 배송</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.4rem .85rem;background:#dcfce7;color:#0f766e;border-radius:.4rem;font-weight:600;">⑥ 수령 확인</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.4rem .85rem;background:#fef3c7;color:var(--yellow);border-radius:.4rem;font-weight:600;">⑦ 환자 복약</span>
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════
+     SECTION 2: 역할별 화면
+══════════════════════════════════════════ -->
+<hr class="section-sep"/>
+<section id="roles">
+  <div class="section-label">Pages</div>
+  <div class="section-title">역할별 화면 안내</div>
+  <div class="section-sub">각 역할은 독립된 URL로 접속합니다. 모든 화면은 동일한 WebSocket에 연결되어 실시간으로 상태가 동기화됩니다.</div>
+
+  <div class="grid-2" style="gap:1.5rem;">
+
+    <!-- Admin -->
+    <div class="role-card role-admin">
+      <div class="role-icon">A</div>
+      <div class="role-title">관리자 대시보드</div>
+      <div class="role-url">http://[서버]:8080/</div>
+      <div class="role-desc">
+        시스템 전체를 모니터링하고 제어하는 메인 화면입니다. 로봇 암·AMR·카메라·센서를 통합 관제합니다.
+        전체 정지(E-Stop) 버튼이 항상 상단에 고정됩니다.
+      </div>
+      <div style="margin-bottom:.85rem;">
+        <div class="tab-preview">
+          <div class="tab-preview-header">
+            <div class="tab-chip active" style="background:var(--blue);">카메라/비전</div>
+            <div class="tab-chip inactive">대시보드</div>
+            <div class="tab-chip inactive">로봇 암</div>
+            <div class="tab-chip inactive">AMR 관제</div>
+            <div class="tab-chip inactive">PLC</div>
+            <div class="tab-chip inactive">온습도</div>
+            <div class="tab-chip inactive">노드 상태</div>
+            <div class="tab-chip inactive">감사 로그</div>
+          </div>
+          <div class="tab-preview-body">
+            <div style="font-size:.82rem;color:var(--muted);margin-bottom:.5rem;">기본 탭 — 카메라/비전</div>
+            <ul style="padding-left:1.1rem;font-size:.82rem;display:flex;flex-direction:column;gap:.3rem;color:var(--muted);">
+              <li>RealSense D455 MJPEG 스트림</li>
+              <li>ArUco 마커 인식 결과 + 신뢰도 %</li>
+              <li>약품 서랍 2×3 위치 맵</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <span class="role-feature">8탭 대시보드</span>
+      <span class="role-feature">이중 적재 확인</span>
+      <span class="role-feature">Joint Jog Control</span>
+      <span class="role-feature">TCP/Joint 실시간</span>
+      <span class="role-feature">온습도 24h 차트</span>
+      <span class="role-feature">감사 로그</span>
+    </div>
+
+    <!-- Pharmacist -->
+    <div class="role-card role-pharm">
+      <div class="role-icon">P</div>
+      <div class="role-title">약사 패널</div>
+      <div class="role-url">http://[서버]:8080/pharmacist</div>
+      <div class="role-desc">
+        좌측 처방전 대기열 + 우측 상세 검증 패널로 구성된 split 화면입니다.
+        OCR 인식 결과와 Vision AI 신뢰도를 확인하고 승인/반려를 처리합니다.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.85rem;font-size:.82rem;">
+        <div style="display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;background:var(--surf2);border-radius:.4rem;">
+          <div style="width:8px;height:8px;border-radius:50%;background:var(--yellow);flex-shrink:0;"></div>
+          <span style="color:var(--muted);">대기</span>
+          <span style="margin-left:auto;color:var(--muted);">5초 자동 갱신</span>
+        </div>
+        <div style="padding:.5rem .75rem;background:var(--surf2);border-radius:.4rem;color:var(--muted);">
+          OCR 신뢰도: <span style="color:var(--green);font-weight:700;">≥90%</span> 초록 · <span style="color:var(--yellow);font-weight:700;">≥75%</span> 노랑 · <span style="color:var(--red);font-weight:700;">&lt;75%</span> 빨강
+        </div>
+        <div style="padding:.5rem .75rem;background:var(--surf2);border-radius:.4rem;color:var(--muted);">
+          반려 시 사유 입력 → 간호사 화면에 표시됨
+        </div>
+      </div>
+      <span class="role-feature">처방전 대기열 필터</span>
+      <span class="role-feature">OCR 약품명 매칭</span>
+      <span class="role-feature">Vision AI 신뢰도 바</span>
+      <span class="role-feature">수량 수동 수정</span>
+      <span class="role-feature">적재 확인 (약사 측)</span>
+    </div>
+
+    <!-- Nurse -->
+    <div class="role-card role-nurse">
+      <div class="role-icon">N</div>
+      <div class="role-title">간호사 패널</div>
+      <div class="role-url">http://[서버]:8080/nurse</div>
+      <div class="role-desc">
+        처방전 발행부터 약품 수령 확인까지의 워크플로우를 담당합니다.
+        AMR이 도착하면 화면 상단에 초록색 배너가 자동으로 나타납니다.
+      </div>
+      <div style="margin-bottom:.85rem;">
+        <div class="tab-preview">
+          <div class="tab-preview-header">
+            <div class="tab-chip active" style="background:#0f766e;">처방전 발행</div>
+            <div class="tab-chip inactive">내 처방전</div>
+            <div class="tab-chip inactive">물류 현황</div>
+            <div class="tab-chip inactive">약품 수령</div>
+            <div class="tab-chip inactive">병동 투약</div>
+          </div>
+          <div class="tab-preview-body">
+            <div style="font-size:.82rem;color:var(--muted);">
+              AMR 도착 시: 화면 최상단에 고정 배너 자동 표시<br>
+              → "수령 확인하러 가기" 버튼으로 이동
+            </div>
+          </div>
+        </div>
+      </div>
+      <span class="role-feature">처방전 발행 폼</span>
+      <span class="role-feature">우선순위 선택 (긴급·일반·정기)</span>
+      <span class="role-feature">AMR 도착 배너</span>
+      <span class="role-feature">바코드 스캔</span>
+      <span class="role-feature">병동 투약 일정</span>
+      <span class="role-feature">이상 신고</span>
+    </div>
+
+    <!-- Patient -->
+    <div class="role-card role-patient">
+      <div class="role-icon">Pt</div>
+      <div class="role-title">환자 현황</div>
+      <div class="role-url">http://[서버]:8080/patient</div>
+      <div class="role-desc">
+        환자가 자신의 약품 배송 상태를 확인하는 모바일 친화적인 화면입니다.
+        복잡한 제어 없이 배송 상태와 복약 일정만 표시합니다.
+      </div>
+      <div style="padding:.85rem;background:var(--surf2);border-radius:.55rem;margin-bottom:.85rem;font-size:.82rem;">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem;">
+          <div style="width:22px;height:22px;border-radius:50%;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;flex-shrink:0;">1</div>
+          <div style="flex:1;height:2px;background:var(--green);border-radius:1px;"></div>
+          <div style="width:22px;height:22px;border-radius:50%;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;flex-shrink:0;">2</div>
+          <div style="flex:1;height:2px;background:var(--border);border-radius:1px;"></div>
+          <div style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);color:var(--muted);display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;flex-shrink:0;">3</div>
+          <div style="flex:1;height:2px;background:var(--border);border-radius:1px;"></div>
+          <div style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);color:var(--muted);display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;flex-shrink:0;">4</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:.68rem;padding:0 .25rem;">
+          <span>처방접수</span><span>조제중</span><span>배송중</span><span>도착</span>
+        </div>
+      </div>
+      <span class="role-feature">4단계 배송 상태 바</span>
+      <span class="role-feature">복약 일정</span>
+      <span class="role-feature">간호사 호출 버튼</span>
+      <span class="role-feature">모바일 최적화</span>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════
+     SECTION 3: 워크플로우
+══════════════════════════════════════════ -->
+<hr class="section-sep"/>
+<section id="workflow">
+  <div class="section-label">Workflow</div>
+  <div class="section-title">약품 배송 워크플로우</div>
+  <div class="section-sub">처방전 발행부터 환자 복약까지 7단계로 진행됩니다. 각 단계는 담당 역할이 명확히 분리되어 있습니다.</div>
+
+  <div class="grid-2" style="align-items:start;gap:2rem;">
+    <div class="wf-container">
+
+      <div class="wf-step step-nurse">
+        <div class="wf-left">
+          <div class="wf-num">1</div>
+          <div class="wf-line"></div>
+        </div>
+        <div class="wf-right">
+          <div class="wf-actor">간호사 · /nurse</div>
+          <div class="wf-title">처방전 발행</div>
+          <div class="wf-desc">환자 선택, 담당 의사, 우선순위(긴급/일반/정기), 약품 목록을 입력하고 처방전을 제출합니다.</div>
+          <code class="wf-api">POST /api/prescription</code>
+          <div class="wf-note" style="background:#f0fdf4;border-color:#0f766e;color:#065f46;">
+            긴급 처방은 약사 대기열 최상단에 배치됩니다.
+          </div>
+        </div>
+      </div>
+
+      <div class="wf-step step-pharm">
+        <div class="wf-left">
+          <div class="wf-num">2</div>
+          <div class="wf-line"></div>
+        </div>
+        <div class="wf-right">
+          <div class="wf-actor">약사 · /pharmacist</div>
+          <div class="wf-title">OCR·Vision AI 검증 후 승인</div>
+          <div class="wf-desc">대기열에서 처방전을 선택합니다. OCR 인식 결과와 Florence-2 Vision AI 신뢰도를 확인하고 약품명·수량 일치 여부를 검토합니다. 이상 시 수량 수동 수정 가능. 반려 시 사유를 입력하면 간호사 화면에 표시됩니다.</div>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+            <code class="wf-api">POST /api/prescription/{id}/approve</code>
+            <code class="wf-api">POST /api/prescription/{id}/reject</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="wf-step step-robot">
+        <div class="wf-left">
+          <div class="wf-num">3</div>
+          <div class="wf-line"></div>
+        </div>
+        <div class="wf-right">
+          <div class="wf-actor">로봇 암 (자동) · 관리자 감시</div>
+          <div class="wf-title">로봇 암 약품 집기</div>
+          <div class="wf-desc">Doosan E0509가 ArUco 마커로 서랍 위치를 인식하고 약품을 집어 AMR에 적재합니다. 관리자는 카메라/비전 탭에서 실시간으로 감시합니다.</div>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+            <code class="wf-api">GET /api/vision/stream</code>
+            <code class="wf-api">GET /api/vision/detections</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="wf-step step-admin" style="margin-bottom:0;">
+        <div class="wf-left">
+          <div class="wf-num">4</div>
+          <div class="wf-line" style="background:transparent;"></div>
+        </div>
+        <div class="wf-right">
+          <div class="wf-actor">약사 + 관리자 · 이중 확인</div>
+          <div class="wf-title">이중 적재 확인</div>
+          <div class="wf-desc">약사와 관리자가 각각 독립적으로 "적재 확인" 버튼을 눌러야 합니다. 둘 중 하나라도 미확인이면 AMR 출발 버튼이 비활성화됩니다. 서버가 강제 검증하므로 UI 우회 불가입니다.</div>
+          <code class="wf-api">POST /api/system/mission/confirm {actor: "admin"|"pharmacist"}</code>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="wf-container">
+
+      <div class="wf-step step-amr">
+        <div class="wf-left">
+          <div class="wf-num">5</div>
+          <div class="wf-line"></div>
+        </div>
+        <div class="wf-right">
+          <div class="wf-actor">관리자 → AMR</div>
+          <div class="wf-title">AMR 출발 및 배송</div>
+          <div class="wf-desc">두 확인이 완료되면 관리자 화면의 AMR 출발 버튼이 활성화됩니다. 출발 후 AMR 상태(DELIVERING)가 모든 화면에 실시간 전파됩니다.</div>
+          <code class="wf-api">POST /api/amr/dispatch {destination: "3병동"}</code>
+          <div class="wf-note" style="background:#fefce8;border-color:var(--yellow);color:#92400e;">
+            도착 후 도어가 자동 개방되지 않으면 관리자가 강제 개방 명령을 보낼 수 있습니다.
+          </div>
+        </div>
+      </div>
+
+      <div class="wf-step step-nurse">
+        <div class="wf-left">
+          <div class="wf-num">6</div>
+          <div class="wf-line"></div>
+        </div>
+        <div class="wf-right">
+          <div class="wf-actor">간호사 · /nurse</div>
+          <div class="wf-title">약품 수령 확인</div>
+          <div class="wf-desc">AMR이 도착하면 간호사 화면 최상단에 초록색 배너가 자동 표시됩니다. "약품 수령" 탭에서 도착 약품 목록을 확인하고 수령 버튼을 클릭합니다. 이상이 있으면 이상 신고를 입력합니다.</div>
+          <code class="wf-api">POST /api/system/mission/complete</code>
+        </div>
+      </div>
+
+      <div class="wf-step step-done" style="margin-bottom:0;">
+        <div class="wf-left">
+          <div class="wf-num">7</div>
+          <div class="wf-line" style="background:transparent;"></div>
+        </div>
+        <div class="wf-right">
+          <div class="wf-actor">간호사 → 환자</div>
+          <div class="wf-title">환자 복약</div>
+          <div class="wf-desc">간호사가 환자에게 약을 전달합니다. 환자 화면의 배송 상태 바가 "도착 완료"로 업데이트되고, 간호사의 병동 투약 일정에서 완료 체크를 합니다.</div>
+          <div style="margin-top:.35rem;">
+            <span class="pill pill-green">미션 COMPLETED</span>
+            <span class="pill pill-green" style="margin-left:.35rem;">관리자 KPI +1</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 이중 확인 다이어그램 -->
+  <div class="card" style="margin-top:2rem;">
+    <div class="card-title">이중 적재 확인 — 안전 잠금 구조</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;align-items:center;margin-bottom:1.25rem;">
+      <div class="dc-box confirmed">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--green);margin-bottom:.5rem;">약사</div>
+        <div style="font-size:.82rem;margin-bottom:.5rem;">/pharmacist에서<br>적재 확인 클릭</div>
+        <div style="font-size:.72rem;background:#dcfce7;color:var(--green);padding:.25rem .65rem;border-radius:9999px;font-weight:700;">확인 완료</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:.5rem;">pharmacist_confirmed<br>AND<br>admin_confirmed</div>
+        <div style="font-size:1.5rem;color:var(--green);font-weight:800;">→</div>
+        <div style="font-size:.72rem;color:var(--green);font-weight:700;margin-top:.5rem;">can_dispatch = true</div>
+      </div>
+      <div class="dc-box confirmed">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#7c3aed;margin-bottom:.5rem;">관리자</div>
+        <div style="font-size:.82rem;margin-bottom:.5rem;">/admin 대시보드에서<br>적재 확인 클릭</div>
+        <div style="font-size:.72rem;background:#ede9fe;color:#7c3aed;padding:.25rem .65rem;border-radius:9999px;font-weight:700;">확인 완료</div>
+      </div>
+    </div>
+    <div class="note" style="font-size:.82rem;">
+      서버는 <code class="inline">can_dispatch = pharmacist_confirmed AND admin_confirmed AND status == 'CONFIRMED'</code>를 강제 검증합니다.
+      프론트엔드 우회 시에도 API가 400 오류를 반환합니다. WebSocket으로 두 화면이 동시에 업데이트됩니다.
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════
+     SECTION 4: 데이터 흐름
+══════════════════════════════════════════ -->
+<hr class="section-sep"/>
+<section id="dataflow">
+  <div class="section-label">Data Flow</div>
+  <div class="section-title">실시간 데이터 흐름</div>
+  <div class="section-sub">모든 화면은 하나의 WebSocket에 연결하고, 서버가 10Hz로 전체 시스템 상태를 브로드캐스트합니다.</div>
+
+  <!-- WebSocket payload -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-title">WebSocket 브로드캐스트 페이로드 구조 (10Hz)</div>
+    <div class="payload-tree">
+<span class="payload-sep">{</span>
+  <span class="payload-key">"robot"</span><span class="payload-sep">: {</span>  <span class="payload-src">← RoToSY :8000 HTTP 폴링</span>
+    <span class="payload-key">  "robot_state_str"</span><span class="payload-sep">:</span> <span class="payload-val">"STANDBY"</span><span class="payload-sep">,</span>  <span class="payload-src">← STANDBY | MOVING | ERROR | ...</span>
+    <span class="payload-key">  "servo_on"</span><span class="payload-sep">:</span> <span class="payload-val">true</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "is_moving"</span><span class="payload-sep">:</span> <span class="payload-val">false</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "current_tcp"</span><span class="payload-sep">:</span> <span class="payload-val">[x, y, z, rx, ry, rz]</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "current_joints_deg"</span><span class="payload-sep">:</span> <span class="payload-val">[j1, j2, j3, j4, j5, j6]</span>
+  <span class="payload-sep">},</span>
+  <span class="payload-key">"robot_online"</span><span class="payload-sep">:</span> <span class="payload-val">true</span><span class="payload-sep">,</span>  <span class="payload-src">← RoToSY 연결 여부</span>
+
+  <span class="payload-key">"amr"</span><span class="payload-sep">: {</span>  <span class="payload-src">← ROS2 /amr/* 토픽</span>
+    <span class="payload-key">  "status"</span><span class="payload-sep">:</span> <span class="payload-val">"IDLE"</span><span class="payload-sep">,</span>  <span class="payload-src">← IDLE|DELIVERING|ARRIVED|RETURNING|CHARGING|ERROR</span>
+    <span class="payload-key">  "battery"</span><span class="payload-sep">:</span> <span class="payload-val">85.0</span><span class="payload-sep">,</span>  <span class="payload-src">← 0~100</span>
+    <span class="payload-key">  "pose"</span><span class="payload-sep">:</span> <span class="payload-val">{"x": 0.0, "y": 0.0, "theta": 0.0}</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "destination"</span><span class="payload-sep">:</span> <span class="payload-val">"3병동"</span>
+  <span class="payload-sep">},</span>
+
+  <span class="payload-key">"door"</span><span class="payload-sep">: {</span>  <span class="payload-src">← ROS2 /door/status 토픽</span>
+    <span class="payload-key">  "status"</span><span class="payload-sep">:</span> <span class="payload-val">"CLOSED"</span>  <span class="payload-src">← OPEN|CLOSED|ERROR</span>
+  <span class="payload-sep">},</span>
+
+  <span class="payload-key">"mission"</span><span class="payload-sep">: {</span>  <span class="payload-src">← 서버 in-memory 미션 상태</span>
+    <span class="payload-key">  "status"</span><span class="payload-sep">:</span> <span class="payload-val">"IDLE"</span><span class="payload-sep">,</span>  <span class="payload-src">← IDLE|AWAITING_CONFIRM|CONFIRMED|DISPATCHED|DELIVERING|ARRIVED|COMPLETED</span>
+    <span class="payload-key">  "pharmacist_confirmed"</span><span class="payload-sep">:</span> <span class="payload-val">false</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "admin_confirmed"</span><span class="payload-sep">:</span> <span class="payload-val">false</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "can_dispatch"</span><span class="payload-sep">:</span> <span class="payload-val">false</span>
+  <span class="payload-sep">},</span>
+
+  <span class="payload-key">"nodes"</span><span class="payload-sep">: {</span>  <span class="payload-src">← ROS2 노드 헬스 (3s/10s 기준)</span>
+    <span class="payload-key">  "arm_controller"</span><span class="payload-sep">:</span> <span class="payload-val">{"status": "ONLINE", "last_seen": "14:30:15"}</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "amr_controller"</span><span class="payload-sep">:</span> <span class="payload-val">{"status": "UNKNOWN", "last_seen": null}</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "vision_node"</span><span class="payload-sep">:</span>    <span class="payload-val">{"status": "UNKNOWN", "last_seen": null}</span>
+  <span class="payload-sep">},</span>
+
+  <span class="payload-key">"arduino"</span><span class="payload-sep">: {</span>  <span class="payload-src">← ROS2 mock 또는 아두이노 HTTP push</span>
+    <span class="payload-key">  "temperature"</span><span class="payload-sep">:</span> <span class="payload-val">22.5</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "humidity"</span><span class="payload-sep">:</span> <span class="payload-val">58.0</span><span class="payload-sep">,</span>
+    <span class="payload-key">  "status"</span><span class="payload-sep">:</span> <span class="payload-val">"NORMAL"</span>  <span class="payload-src">← NORMAL|WARNING|OFFLINE</span>
+  <span class="payload-sep">}</span>
+<span class="payload-sep">}</span>
+    </div>
+  </div>
+
+  <!-- 페이지별 구독 -->
+  <div class="card">
+    <div class="card-title">페이지별 WebSocket 구독 필드</div>
+    <table class="api-table">
+      <thead>
+        <tr><th>페이지</th><th>구독 필드</th><th>사용 목적</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="pill pill-blue">관리자</span></td>
+          <td><code class="inline">robot, amr, door, mission, nodes, arduino</code></td>
+          <td style="font-size:.82rem;color:var(--muted);">모든 필드 — TCP/Joint 실시간, AMR 상태, 이중 확인 인디케이터, 온도·습도</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-green">약사</span></td>
+          <td><code class="inline">mission</code></td>
+          <td style="font-size:.82rem;color:var(--muted);">적재 확인 인디케이터 동기화 (관리자 확인 여부 표시)</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-green">간호사</span></td>
+          <td><code class="inline">amr, mission</code></td>
+          <td style="font-size:.82rem;color:var(--muted);">AMR 도착 배너(status=ARRIVED), 배송 파이프라인 타임라인</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-yellow">환자</span></td>
+          <td><code class="inline">mission</code></td>
+          <td style="font-size:.82rem;color:var(--muted);">4단계 배송 상태 바 업데이트</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 미션 상태 기계 -->
+  <div class="card" style="margin-top:1.25rem;">
+    <div class="card-title">미션 상태 기계</div>
+    <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;font-size:.8rem;">
+      <span style="padding:.35rem .8rem;background:var(--surf2);border:1px solid var(--border);border-radius:.4rem;font-family:var(--mono);">IDLE</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.35rem .8rem;background:#fef3c7;border:1px solid var(--yellow);border-radius:.4rem;font-family:var(--mono);">AWAITING_CONFIRM</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.35rem .8rem;background:#ede9fe;border:1px solid #7c3aed;border-radius:.4rem;font-family:var(--mono);">CONFIRMED</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.35rem .8rem;background:#dbeafe;border:1px solid var(--blue);border-radius:.4rem;font-family:var(--mono);">DISPATCHED</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.35rem .8rem;background:#fef3c7;border:1px solid var(--yellow);border-radius:.4rem;font-family:var(--mono);">DELIVERING</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.35rem .8rem;background:#dcfce7;border:1px solid var(--green);border-radius:.4rem;font-family:var(--mono);">ARRIVED</span>
+      <span style="color:var(--muted);">→</span>
+      <span style="padding:.35rem .8rem;background:#dcfce7;border:1px solid var(--green);border-radius:.4rem;font-family:var(--mono);font-weight:700;">COMPLETED</span>
+    </div>
+    <div style="margin-top:1rem;overflow-x:auto;">
+      <table class="api-table">
+        <thead>
+          <tr><th>미션 상태</th><th>파이프라인 단계</th><th>환자 화면 단계</th><th>AMR 출발 버튼</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code class="inline">IDLE</code></td><td>—</td><td>1 처방접수</td><td style="color:var(--red);">비활성</td></tr>
+          <tr><td><code class="inline">AWAITING_CONFIRM</code></td><td>4 적재확인</td><td>2 조제중</td><td style="color:var(--red);">비활성</td></tr>
+          <tr><td><code class="inline">CONFIRMED</code></td><td>4 적재확인</td><td>2 조제중</td><td style="color:var(--green);">활성 (양쪽 확인 시)</td></tr>
+          <tr><td><code class="inline">DISPATCHED</code></td><td>5 AMR출발</td><td>3 배송중</td><td style="color:var(--muted);">—</td></tr>
+          <tr><td><code class="inline">DELIVERING</code></td><td>6 이동중</td><td>3 배송중</td><td style="color:var(--muted);">—</td></tr>
+          <tr><td><code class="inline">ARRIVED</code></td><td>7 도착</td><td>4 도착</td><td style="color:var(--muted);">—</td></tr>
+          <tr><td><code class="inline">COMPLETED</code></td><td>전체 완료</td><td>4 도착</td><td style="color:var(--muted);">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════
+     SECTION 5: API
+══════════════════════════════════════════ -->
+<hr class="section-sep"/>
+<section id="api">
+  <div class="section-label">API Reference</div>
+  <div class="section-title">주요 API 엔드포인트</div>
+  <div class="section-sub">전체 목록은 서버 실행 후 <code class="inline">http://localhost:8080/docs</code> (Swagger UI)에서 확인하고 직접 테스트할 수 있습니다.</div>
+
+  <div class="grid-2" style="gap:1.25rem;">
+
+    <div class="card">
+      <div class="card-title">처방전</div>
+      <table class="api-table">
+        <thead><tr><th>메서드</th><th>경로</th><th>설명</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-get">GET</span></td><td class="endpoint">/api/prescription</td><td>전체 목록 (우선순위 정렬)</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="endpoint">/api/prescription/{id}</td><td>상세 조회</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/prescription</td><td>발행 (간호사)</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">…/{id}/approve</td><td>승인 (약사)</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">…/{id}/reject</td><td>반려 (약사)</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">…/{id}/confirm_loading</td><td>약사 적재 확인</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">미션 / 시스템</div>
+      <table class="api-table">
+        <thead><tr><th>메서드</th><th>경로</th><th>설명</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/system/mission/new</td><td>새 미션 생성</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/system/mission/confirm</td><td>적재 확인 (actor 지정)</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/system/mission/complete</td><td>미션 완료</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/system/mission/reset</td><td>초기화</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/system/estop_all</td><td>전체 비상 정지</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="endpoint">/api/system/audit</td><td>감사 로그</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">AMR / 도어</div>
+      <table class="api-table">
+        <thead><tr><th>메서드</th><th>경로</th><th>설명</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/amr/dispatch</td><td>AMR 출발</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/amr/cancel</td><td>미션 취소</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/amr/return</td><td>복귀 명령</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/amr/door/open</td><td>도어 강제 개방</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/amr/door/close</td><td>도어 강제 닫힘</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Vision AI / 온습도 센서</div>
+      <table class="api-table">
+        <thead><tr><th>메서드</th><th>경로</th><th>설명</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method method-get">GET</span></td><td class="endpoint">/api/vision/stream</td><td>MJPEG 카메라 스트림</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="endpoint">/api/vision/detections</td><td>ArUco 인식 결과</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/vision/detections/update</td><td>비전 노드 결과 push</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="endpoint">/api/sensor/current</td><td>현재 온습도</td></tr>
+          <tr><td><span class="method method-get">GET</span></td><td class="endpoint">/api/sensor/history</td><td>24시간 이력</td></tr>
+          <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/sensor/reading</td><td>아두이노 → 서버 push</td></tr>
+          <tr><td><span class="method method-put">PUT</span></td><td class="endpoint">/api/sensor/thresholds</td><td>임계값 변경</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <div class="card" style="margin-top:1.25rem;">
+    <div class="card-title">로봇 암 (RoToSY :8000 프록시)</div>
+    <table class="api-table">
+      <thead><tr><th>메서드</th><th>경로</th><th>설명</th><th>주요 파라미터</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/robot/servo</td><td>서보 ON/OFF</td><td><code class="inline">{enable: true}</code></td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/robot/jog</td><td>관절 조그</td><td><code class="inline">{joint_index: 0, speed: 5}</code></td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/robot/move_j</td><td>MoveJ</td><td><code class="inline">{joints: [j1,...,j6]}</code></td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/robot/move_l</td><td>MoveL</td><td><code class="inline">{pose: [x,y,z,rx,ry,rz]}</code></td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/robot/home</td><td>홈 포지션</td><td>—</td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td class="endpoint">/api/robot/estop</td><td>비상 정지</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════
+     SECTION 6: 세팅
+══════════════════════════════════════════ -->
+<hr class="section-sep"/>
+<section id="setup">
+  <div class="section-label">Setup Guide</div>
+  <div class="section-title">빠른 시작</div>
+  <div class="section-sub">ROS2 없이도 데모 모드로 바로 실행됩니다. 실제 하드웨어 연동은 팀별 포인트를 참조하세요.</div>
+
+  <div class="grid-2" style="gap:2rem;align-items:start;">
+    <div>
+      <div class="card">
+        <div class="card-title">데모 모드 (ROS2 없음)</div>
+        <div class="setup-step">
+          <div class="setup-num">1</div>
+          <div>
+            <div class="setup-title">저장소 이동</div>
+            <pre class="code-block"><span class="cmd">cd /home/vboxuser/final_project/hospital_web</span></pre>
+          </div>
+        </div>
+        <div class="setup-step">
+          <div class="setup-num">2</div>
+          <div>
+            <div class="setup-title">서버 실행</div>
+            <pre class="code-block"><span class="cmd">bash run.sh</span>
+<span class="comment"># 또는 직접 실행</span>
+<span class="cmd">pip install -r backend/requirements.txt</span>
+<span class="cmd">python -m uvicorn backend.main:app \
+  --host 0.0.0.0 --port 8080 --reload</span></pre>
+          </div>
+        </div>
+        <div class="setup-step">
+          <div class="setup-num">3</div>
+          <div>
+            <div class="setup-title">브라우저 접속</div>
+            <div class="setup-desc" style="margin-top:.35rem;">
+              <div style="display:flex;flex-direction:column;gap:.35rem;font-size:.85rem;">
+                <div><code class="inline">localhost:8080/</code> — 관리자</div>
+                <div><code class="inline">localhost:8080/pharmacist</code> — 약사</div>
+                <div><code class="inline">localhost:8080/nurse</code> — 간호사</div>
+                <div><code class="inline">localhost:8080/patient</code> — 환자</div>
+                <div><code class="inline">localhost:8080/docs</code> — Swagger UI</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:1.25rem;">
+      <div class="card">
+        <div class="card-title">실제 로봇 연동 순서</div>
+        <div style="font-size:.85rem;display:flex;flex-direction:column;gap:.6rem;">
+          <div style="padding:.6rem .85rem;background:var(--surf2);border-radius:.45rem;border-left:3px solid var(--blue);">
+            <div style="font-weight:600;margin-bottom:.15rem;">터미널 1 — RoToSY (포트 8000)</div>
+            <div style="color:var(--muted);font-size:.8rem;">ros2 launch doosan_controller robot_controller.launch.py mode:=real</div>
+          </div>
+          <div style="padding:.6rem .85rem;background:var(--surf2);border-radius:.45rem;border-left:3px solid var(--green);">
+            <div style="font-weight:600;margin-bottom:.15rem;">터미널 2 — 병원 웹 게이트웨이 (포트 8080)</div>
+            <div style="color:var(--muted);font-size:.8rem;">ROS2 소싱 후 bash run.sh</div>
+          </div>
+          <div class="note" style="font-size:.8rem;">
+            RoToSY(:8000)가 없어도 웹 서버는 실행됩니다. 관리자 화면에 OFFLINE으로 표시됩니다.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">팀별 연동 포인트</div>
+        <div style="font-size:.85rem;display:flex;flex-direction:column;gap:.5rem;">
+          <div style="display:flex;gap:.75rem;padding:.5rem .75rem;background:var(--surf2);border-radius:.4rem;">
+            <span style="font-weight:700;color:var(--blue);width:50px;flex-shrink:0;">비전팀</span>
+            <span style="color:var(--muted);">routers/vision.py — MJPEG 스트림, detections POST</span>
+          </div>
+          <div style="display:flex;gap:.75rem;padding:.5rem .75rem;background:var(--surf2);border-radius:.4rem;">
+            <span style="font-weight:700;color:var(--yellow);width:50px;flex-shrink:0;">AMR팀</span>
+            <span style="color:var(--muted);">ros_bridge.py — /amr/* 토픽 이름 확인</span>
+          </div>
+          <div style="display:flex;gap:.75rem;padding:.5rem .75rem;background:var(--surf2);border-radius:.4rem;">
+            <span style="font-weight:700;color:var(--green);width:50px;flex-shrink:0;">로봇팀</span>
+            <span style="color:var(--muted);">drawer_metadata.py — ArUco ID·위치 재교정</span>
+          </div>
+          <div style="display:flex;gap:.75rem;padding:.5rem .75rem;background:var(--surf2);border-radius:.4rem;">
+            <span style="font-weight:700;color:var(--muted);width:50px;flex-shrink:0;">전기팀</span>
+            <span style="color:var(--muted);">routers/plc.py 추가 — 컨베이어 연동</span>
+          </div>
+          <div style="display:flex;gap:.75rem;padding:.5rem .75rem;background:var(--surf2);border-radius:.4rem;">
+            <span style="font-weight:700;color:var(--red);width:50px;flex-shrink:0;">아두이노</span>
+            <span style="color:var(--muted);">POST /api/sensor/reading — 온습도 push</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="warn" style="margin-top:1.25rem;font-size:.85rem;">
+    <strong>주의:</strong> <code class="inline">hospital_web/</code> 디렉토리에서 실행해야 합니다.
+    <code class="inline">backend/</code> 안에서 실행하면 <code class="inline">ModuleNotFoundError: No module named 'backend'</code> 오류가 발생합니다.
+  </div>
+</section>
+
+<hr class="section-sep"/>
+<footer>
+  <div style="font-weight:700;margin-bottom:.35rem;">RoToSY Hospital Web — 팀원 가이드</div>
+  <div>Doosan E0509 · RealSense D455 · Florence-2 Vision AI</div>
+  <div style="margin-top:.5rem;opacity:.6;">FastAPI · WebSocket · ROS2 · SQLite</div>
+</footer>
+
+<script>
+// Active nav link on scroll
+const sections = document.querySelectorAll('section[id]');
+const navLinks  = document.querySelectorAll('.nav-link');
+const observer  = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      navLinks.forEach(l => l.classList.remove('active'));
+      const link = document.querySelector(`.nav-link[href="#${e.target.id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, {rootMargin:'-40% 0px -55% 0px'});
+sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
