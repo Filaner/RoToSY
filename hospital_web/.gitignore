@@ -32,4 +32,4 @@ Thumbs.db
 *.log
 uvicorn.log
 
-# sensor_data.db 는 의도적으로 포함 (시드 데이터 포함)
+# hospital.db 는 의도적으로 포함 (스키마 + 시드 데이터)

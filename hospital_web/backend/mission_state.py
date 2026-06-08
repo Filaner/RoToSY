@@ -1,10 +1,26 @@
 """
-In-memory shared state: mission lifecycle, dual-confirmation, audit log.
+Mission + Audit log — DB-backed (was in-memory).
 
-Mission flow:
-  IDLE → AWAITING_CONFIRM → CONFIRMED → DISPATCHED → DELIVERING → ARRIVED → COMPLETED
-                                ↑
-              pharmacist_confirmed AND admin_confirmed
+Public 시그니처는 기존 in-memory 모듈과 동일:
+  get_mission(), get_audit_log(limit),
+  new_mission(destination, prescription_id),
+  confirm_loading(actor),
+  update_status(status, actor='system', detail=''),
+  add_audit(actor, action, detail='')
+
+반환 dict는 _snapshot() 그대로:
+  {
+    'mission_id': 'M-XXXXXX' or None,
+    'prescription_id': 'P-XXXXXX' or None,
+    'status': 'IDLE'|'AWAITING_CONFIRM'|...,
+    'destination': str,
+    'pharmacist_confirmed': bool, 'admin_confirmed': bool,
+    'can_dispatch': bool,
+    'created_at': iso or None, 'dispatched_at': iso or None
+  }
+
+"현재 미션" = mission 테이블의 가장 최근 row (created_at DESC).
+없으면 IDLE 스냅샷.
 """
 
 import threading
@@ -12,117 +28,193 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+from .db_schema import get_conn
 
-class _MissionState:
-    def __init__(self):
-        self.mission_id:           Optional[str]      = None
-        self.prescription_id:      Optional[str]      = None
-        self.status:               str                = 'IDLE'
-        self.destination:          str                = ''
-        self.pharmacist_confirmed: bool               = False
-        self.admin_confirmed:      bool               = False
-        self.created_at:           Optional[datetime] = None
-        self.dispatched_at:        Optional[datetime] = None
+_lock = threading.Lock()
 
 
-_lock   = threading.Lock()
-_m      = _MissionState()
-_audit: list = []
+def _now() -> str:
+    return datetime.now().isoformat(timespec='seconds')
 
 
-# ── Read ─────────────────────────────────────────────────────────────────────
+def _gen_code() -> str:
+    return f'M-{uuid.uuid4().hex[:6].upper()}'
+
+
+def _idle_snapshot() -> dict:
+    return {
+        'mission_id':           None,
+        'prescription_id':      None,
+        'status':               'IDLE',
+        'destination':          '',
+        'pharmacist_confirmed': False,
+        'admin_confirmed':      False,
+        'can_dispatch':         False,
+        'created_at':           None,
+        'dispatched_at':        None,
+    }
+
+
+def _row_to_snapshot(c, row) -> dict:
+    pres_code = None
+    if row['prescription_id']:
+        p = c.execute('SELECT code FROM prescription WHERE id=?',
+                      (row['prescription_id'],)).fetchone()
+        if p:
+            pres_code = p['code']
+    pharm = bool(row['pharmacist_confirmed'])
+    admin = bool(row['admin_confirmed'])
+    status = row['status']
+    return {
+        'mission_id':           row['code'],
+        'prescription_id':      pres_code,
+        'status':               status,
+        'destination':          row['destination'] or '',
+        'pharmacist_confirmed': pharm,
+        'admin_confirmed':      admin,
+        'can_dispatch':         pharm and admin and status == 'CONFIRMED',
+        'created_at':           row['created_at'],
+        'dispatched_at':        row['dispatched_at'],
+    }
+
+
+def _latest_row(c):
+    return c.execute(
+        'SELECT * FROM mission ORDER BY created_at DESC, id DESC LIMIT 1'
+    ).fetchone()
+
+
+# ── Read ──────────────────────────────────────────────────────────────────────
 
 def get_mission() -> dict:
-    with _lock:
-        return _snapshot()
+    with _lock, get_conn() as c:
+        row = _latest_row(c)
+        if not row:
+            return _idle_snapshot()
+        return _row_to_snapshot(c, row)
 
 
 def get_audit_log(limit: int = 100) -> list:
-    with _lock:
-        return list(reversed(_audit[-limit:]))
+    with _lock, get_conn() as c:
+        rows = c.execute(
+            '''SELECT created_at, actor, action, detail
+               FROM audit_log
+               ORDER BY id DESC
+               LIMIT ?''',
+            (limit,)
+        ).fetchall()
+    return [
+        {'timestamp': r['created_at'],
+         'actor':     r['actor'],
+         'action':    r['action'],
+         'detail':    r['detail'] or ''}
+        for r in rows
+    ]
 
 
 # ── Write ─────────────────────────────────────────────────────────────────────
 
 def new_mission(destination: str, prescription_id: str = '') -> dict:
-    with _lock:
-        _m.mission_id          = f'M-{uuid.uuid4().hex[:6].upper()}'
-        _m.prescription_id     = prescription_id or None
-        _m.status              = 'AWAITING_CONFIRM'
-        _m.destination         = destination
-        _m.pharmacist_confirmed = False
-        _m.admin_confirmed     = False
-        _m.created_at          = datetime.now()
-        _m.dispatched_at       = None
-        _log('system', 'MISSION_CREATED', f'{_m.mission_id} → {destination}')
-        return _snapshot()
+    code = _gen_code()
+    now = _now()
+    with _lock, get_conn() as c:
+        pres_int_id: Optional[int] = None
+        if prescription_id:
+            r = c.execute('SELECT id FROM prescription WHERE code=?',
+                          (prescription_id,)).fetchone()
+            if r:
+                pres_int_id = r['id']
+
+        c.execute(
+            '''INSERT INTO mission
+               (code, prescription_id, destination, status, created_at)
+               VALUES (?, ?, ?, 'AWAITING_CONFIRM', ?)''',
+            (code, pres_int_id, destination, now)
+        )
+        mission_int_id = c.execute('SELECT id FROM mission WHERE code=?',
+                                   (code,)).fetchone()['id']
+        _insert_audit(c, mission_int_id, 'system', 'MISSION_CREATED',
+                      f'{code} → {destination}')
+        row = c.execute('SELECT * FROM mission WHERE id=?',
+                        (mission_int_id,)).fetchone()
+        return _row_to_snapshot(c, row)
 
 
 def confirm_loading(actor: str) -> dict:
     """actor: 'pharmacist' | 'admin'"""
-    with _lock:
+    now = _now()
+    with _lock, get_conn() as c:
+        row = _latest_row(c)
+        if not row:
+            return _idle_snapshot()
+        mission_int_id = row['id']
+
         if actor == 'pharmacist':
-            _m.pharmacist_confirmed = True
+            c.execute('UPDATE mission SET pharmacist_confirmed=1 WHERE id=?',
+                      (mission_int_id,))
         elif actor == 'admin':
-            _m.admin_confirmed = True
-        _log(actor, 'CONFIRM_LOADING', f'{_m.mission_id} 적재 확인')
-        if _m.pharmacist_confirmed and _m.admin_confirmed and _m.status == 'AWAITING_CONFIRM':
-            _m.status = 'CONFIRMED'
-            _log('system', 'BOTH_CONFIRMED', f'{_m.mission_id} 출발 가능')
-        return _snapshot()
+            c.execute('UPDATE mission SET admin_confirmed=1 WHERE id=?',
+                      (mission_int_id,))
+
+        _insert_audit(c, mission_int_id, actor, 'CONFIRM_LOADING',
+                      f"{row['code']} 적재 확인")
+
+        row = c.execute('SELECT * FROM mission WHERE id=?',
+                        (mission_int_id,)).fetchone()
+        if (row['pharmacist_confirmed'] and row['admin_confirmed']
+                and row['status'] == 'AWAITING_CONFIRM'):
+            c.execute(
+                'UPDATE mission SET status=?, confirmed_at=? WHERE id=?',
+                ('CONFIRMED', now, mission_int_id)
+            )
+            _insert_audit(c, mission_int_id, 'system', 'BOTH_CONFIRMED',
+                          f"{row['code']} 출발 가능")
+            row = c.execute('SELECT * FROM mission WHERE id=?',
+                            (mission_int_id,)).fetchone()
+        return _row_to_snapshot(c, row)
 
 
 def update_status(status: str, actor: str = 'system', detail: str = '') -> dict:
-    with _lock:
-        prev = _m.status
-        _m.status = status
+    now = _now()
+    with _lock, get_conn() as c:
+        row = _latest_row(c)
+        if not row:
+            return _idle_snapshot()
+        mission_int_id = row['id']
+        prev = row['status']
+
+        fields = ['status=?']
+        params = [status]
         if status == 'DISPATCHED':
-            _m.dispatched_at = datetime.now()
-        if status == 'IDLE':
-            _reset()
-        _log(actor, f'STATUS_{status}', detail or f'{prev} → {status}')
-        return _snapshot()
+            fields.append('dispatched_at=?'); params.append(now)
+        elif status == 'ARRIVED':
+            fields.append('arrived_at=?'); params.append(now)
+        elif status == 'COMPLETED':
+            fields.append('completed_at=?'); params.append(now)
+        params.append(mission_int_id)
+        c.execute(f'UPDATE mission SET {", ".join(fields)} WHERE id=?', params)
+
+        _insert_audit(c, mission_int_id, actor, f'STATUS_{status}',
+                      detail or f'{prev} → {status}')
+
+        row = c.execute('SELECT * FROM mission WHERE id=?',
+                        (mission_int_id,)).fetchone()
+        return _row_to_snapshot(c, row)
 
 
 def add_audit(actor: str, action: str, detail: str = '') -> None:
-    with _lock:
-        _log(actor, action, detail)
+    with _lock, get_conn() as c:
+        row = _latest_row(c)
+        mid = row['id'] if row else None
+        _insert_audit(c, mid, actor, action, detail)
 
 
-# ── Internal ──────────────────────────────────────────────────────────────────
+# ── internal ─────────────────────────────────────────────────────────────────
 
-def _snapshot() -> dict:
-    return {
-        'mission_id':           _m.mission_id,
-        'prescription_id':      _m.prescription_id,
-        'status':               _m.status,
-        'destination':          _m.destination,
-        'pharmacist_confirmed': _m.pharmacist_confirmed,
-        'admin_confirmed':      _m.admin_confirmed,
-        'can_dispatch': (
-            _m.pharmacist_confirmed and _m.admin_confirmed
-            and _m.status == 'CONFIRMED'
-        ),
-        'created_at':    _m.created_at.isoformat()    if _m.created_at    else None,
-        'dispatched_at': _m.dispatched_at.isoformat() if _m.dispatched_at else None,
-    }
-
-
-def _log(actor: str, action: str, detail: str) -> None:
-    _audit.append({
-        'timestamp': datetime.now().isoformat(timespec='seconds'),
-        'actor':     actor,
-        'action':    action,
-        'detail':    detail,
-    })
-
-
-def _reset() -> None:
-    _m.mission_id           = None
-    _m.prescription_id      = None
-    _m.status               = 'IDLE'
-    _m.destination          = ''
-    _m.pharmacist_confirmed  = False
-    _m.admin_confirmed      = False
-    _m.created_at           = None
-    _m.dispatched_at        = None
+def _insert_audit(c, mission_id: Optional[int], actor: str,
+                  action: str, detail: str) -> None:
+    c.execute(
+        '''INSERT INTO audit_log (mission_id, actor, action, detail, created_at)
+           VALUES (?, ?, ?, ?, ?)''',
+        (mission_id, actor, action, detail, _now())
+    )

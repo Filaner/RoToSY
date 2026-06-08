@@ -21,7 +21,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / 'sensor_data.db'
+DB_PATH = Path(__file__).parent / 'hospital.db'
 
 TEMP_MIN, TEMP_MAX = 15.0, 25.0
 HUMI_MIN, HUMI_MAX = 40.0, 70.0

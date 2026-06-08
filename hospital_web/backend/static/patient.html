@@ -195,20 +195,8 @@ main{max-width:520px;margin:0 auto;padding:1.25rem 1rem 3rem;}
   <div class="section-heading">오늘 복약 일정</div>
   <div class="card">
     <div id="med-schedule">
-      <div class="med-item">
-        <div class="med-name">아세트아미노펜 500mg</div>
-        <div class="med-time-badge">08:00</div>
-        <div class="med-done">완료</div>
-      </div>
-      <div class="med-item">
-        <div class="med-name">이부프로펜 400mg</div>
-        <div class="med-time-badge">14:00</div>
-        <div class="med-pending">예정</div>
-      </div>
-      <div class="med-item">
-        <div class="med-name">아세트아미노펜 500mg</div>
-        <div class="med-time-badge">20:00</div>
-        <div class="med-pending">예정</div>
+      <div style="text-align:center;color:var(--muted);font-size:.85rem;padding:1rem 0;">
+        복약 일정 불러오는 중...
       </div>
     </div>
     <div style="margin-top:.85rem;font-size:.8rem;color:var(--muted);">
@@ -331,8 +319,51 @@ function callHelp() {
   alert('복약 안내\n\n- 식후 30분 이내 복용\n- 물과 함께 복용\n- 복용 중 이상 증상 시 즉시 담당 간호사에게 알리세요');
 }
 
+// ── 복약 일정 (환자별) ─────────────────────────────────────────────────
+// URL ?chart_no=PT-XXXX-XXXX 로 환자 지정. 없으면 첫 번째 환자 자동 선택.
+async function loadMedSchedule() {
+  try {
+    const params = new URLSearchParams(location.search);
+    let chartNo = params.get('chart_no');
+    if (!chartNo) {
+      // 데모용 fallback — 환자 목록 첫 번째
+      const plist = await (await fetch('/api/patient')).json();
+      if (plist && plist.length) chartNo = plist[0].chart_no;
+    }
+    const container = document.getElementById('med-schedule');
+    if (!chartNo) {
+      container.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:.85rem;padding:1rem 0;">환자 정보를 찾을 수 없습니다</div>';
+      return;
+    }
+    const list = await (await fetch(`/api/patient/${chartNo}/prescriptions`)).json();
+    if (!list || list.length === 0) {
+      container.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:.85rem;padding:1rem 0;">오늘 복약 일정 없음</div>';
+      return;
+    }
+    // 처방 → 약품별 row 펼치기
+    const items = list.flatMap(p =>
+      (p.drugs || []).map(d => ({
+        name: d.name,
+        time: (p.created_at || '').slice(11, 16),
+        done: p.status === 'completed',
+      }))
+    );
+    container.innerHTML = items.map(it => `
+      <div class="med-item">
+        <div class="med-name">${it.name}</div>
+        <div class="med-time-badge">${it.time}</div>
+        <div class="${it.done ? 'med-done' : 'med-pending'}">${it.done ? '완료' : '예정'}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    console.error('복약 일정 로드 실패', e);
+  }
+}
+
 connect();
 loadPrescriptions();
+loadMedSchedule();
+setInterval(loadMedSchedule, 30000);
 </script>
 </body>
 </html>

@@ -305,12 +305,7 @@ textarea.form-input{resize:vertical;min-height:70px;}
           <div class="form-group">
             <label class="form-label">환자 선택 *</label>
             <select class="form-input" id="f-patient">
-              <option value="">-- 환자를 선택하세요 --</option>
-              <option value="PT-2026-0044|박영수|3병동|301호">박영수 (301호 · PT-2026-0044)</option>
-              <option value="PT-2026-0055|정가은|3병동|302호">정가은 (302호 · PT-2026-0055)</option>
-              <option value="PT-2026-0061|임도훈|3병동|303호">임도훈 (303호 · PT-2026-0061)</option>
-              <option value="PT-2026-0067|신민아|3병동|304호">신민아 (304호 · PT-2026-0067)</option>
-              <option value="PT-2026-0073|오현석|3병동|305호">오현석 (305호 · PT-2026-0073)</option>
+              <option value="">-- 환자 목록 불러오는 중... --</option>
             </select>
           </div>
           <div class="form-group">
@@ -529,29 +524,57 @@ textarea.form-input{resize:vertical;min-height:70px;}
 // ═══════════════════════════════════════════════
 // 기초 데이터
 // ═══════════════════════════════════════════════
-const DRUGS = [
-  '아세트아미노펜 500mg','이부프로펜 400mg','오메프라졸 20mg','메트포르민 500mg',
-  '암로디핀 5mg','로수바스타틴 10mg','레보티록신 50mcg','아스피린 100mg',
-  '세티리진 10mg','덱사메타손 4mg','클로피도그렐 75mg','에소메프라졸 40mg',
-  '글리메피리드 2mg','리시노프릴 10mg','아토르바스타틴 20mg',
-];
+// 약품 목록 / 병동 일정은 API로 채움 (loadMedicines / loadWardSchedule).
+// 페이지 로드 직후 실패해도 안전하게 빈 배열로 시작.
+let DRUGS = [];
+let WARD_SCHEDULE = [];
 
 const FREQ_OPTIONS = ['1일 1회 아침','1일 1회 저녁','1일 2회 식후','1일 3회 식후','필요시','취침 전','공복'];
 
-// 병동 투약 일정 (mock)
-const now = new Date();
-const fmtTime = h => `${String(h).padStart(2,'0')}:00`;
-let WARD_SCHEDULE = [
-  {id:'w1', patient:'박영수', bed:'301호', time:'08:00', drugs:['아세트아미노펜 500mg','암로디핀 5mg'], done:true,  doneAt:'08:12'},
-  {id:'w2', patient:'정가은', bed:'302호', time:'08:00', drugs:['레보티록신 50mcg'],                   done:true,  doneAt:'08:15'},
-  {id:'w3', patient:'임도훈', bed:'303호', time:'10:00', drugs:['이부프로펜 400mg','오메프라졸 20mg'], done:false, doneAt:null},
-  {id:'w4', patient:'신민아', bed:'304호', time:'12:00', drugs:['메트포르민 500mg'],                   done:false, doneAt:null},
-  {id:'w5', patient:'오현석', bed:'305호', time:'12:00', drugs:['아스피린 100mg','클로피도그렐 75mg'], done:false, doneAt:null},
-  {id:'w6', patient:'박영수', bed:'301호', time:'14:00', drugs:['아세트아미노펜 500mg'],               done:false, doneAt:null},
-  {id:'w7', patient:'정가은', bed:'302호', time:'18:00', drugs:['에소메프라졸 40mg'],                  done:false, doneAt:null},
-  {id:'w8', patient:'임도훈', bed:'303호', time:'20:00', drugs:['이부프로펜 400mg'],                   done:false, doneAt:null},
-  {id:'w9', patient:'박영수', bed:'301호', time:'22:00', drugs:['암로디핀 5mg','로수바스타틴 10mg'],   done:false, doneAt:null},
-];
+async function loadPatients() {
+  try {
+    const list = await (await fetch('/api/patient')).json();
+    const sel = el('f-patient');
+    sel.innerHTML = '<option value="">-- 환자를 선택하세요 --</option>' +
+      list.map(p =>
+        `<option value="${p.chart_no}|${p.name}|${p.ward}|${p.bed_no}">${p.name}${p.bed_no ? ' (' + p.bed_no + ' · ' + p.chart_no + ')' : ' (' + p.chart_no + ')'}</option>`
+      ).join('');
+  } catch (e) {
+    console.error('환자 목록 로드 실패', e);
+  }
+}
+
+async function loadMedicines() {
+  try {
+    const list = await (await fetch('/api/medicine')).json();
+    DRUGS = list.map(m => m.name);
+  } catch (e) {
+    console.error('약품 목록 로드 실패', e);
+  }
+}
+
+async function loadWardSchedule() {
+  try {
+    const list = await (await fetch('/api/prescription')).json();
+    WARD_SCHEDULE = list.map(p => ({
+      id:      p.id,
+      patient: p.patient_name || '',
+      bed:     p.bed_no || '',
+      time:    (p.created_at || '').slice(11, 16),
+      drugs:   (p.drugs || []).map(d => d.name),
+      done:    p.status === 'completed',
+      doneAt:  p.status === 'completed' ? (p.updated_at || '').slice(11, 16) : null,
+    }));
+    if (typeof renderWardSchedule === 'function') renderWardSchedule();
+  } catch (e) {
+    console.error('투약 일정 로드 실패', e);
+  }
+}
+
+loadPatients();
+loadMedicines();
+loadWardSchedule();
+setInterval(loadWardSchedule, 30000);
 
 let selectedPrio = 'general';
 let drugRowCount  = 0;
@@ -736,7 +759,7 @@ function resetForm() {
 async function submitPrescription() {
   const patientRaw = el('f-patient').value;
   if (!patientRaw) { alert('환자를 선택하세요.'); return; }
-  const [pid, pname, ward] = patientRaw.split('|');
+  const [pid, pname, ward] = patientRaw.split('|');  // bed_no는 4번째 토큰 (서버 전송엔 미포함)
 
   const rows  = document.querySelectorAll('.drug-row');
   const drugs = [];
@@ -917,11 +940,16 @@ async function requestDelivery(pid, btn) {
 // ═══════════════════════════════════════════════
 // Scan simulation
 // ═══════════════════════════════════════════════
-const MOCK_DRUGS_FOR_SCAN = ['아세트아미노펜 500mg #LOT2026-A','이부프로펜 400mg #LOT2026-B','오메프라졸 20mg #LOT2026-C'];
+// 스캔 시뮬용 약품 목록은 DRUGS(API) 로부터 파생 — 별도 하드코딩 X.
+function _scanCandidates() {
+  if (!DRUGS.length) return ['샘플약 #LOT2026-X'];
+  return DRUGS.slice(0, 3).map((d, i) => `${d} #LOT2026-${String.fromCharCode(65 + i)}`);
+}
 let scanIdx = 0;
 
 function simulateScan() {
-  const drug = MOCK_DRUGS_FOR_SCAN[scanIdx % MOCK_DRUGS_FOR_SCAN.length];
+  const candidates = _scanCandidates();
+  const drug = candidates[scanIdx % candidates.length];
   scanIdx++;
   const now = new Date().toTimeString().substring(0,8);
   scanLog.unshift({time: now, drug});

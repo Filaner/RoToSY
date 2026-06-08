@@ -19,8 +19,9 @@ from fastapi.staticfiles import StaticFiles
 from . import robot_proxy as proxy
 from . import ros_bridge   as ros
 from . import mission_state as ms
-from .routers import robot, amr, system as sys_router, prescription as presc_router, sensor as sensor_router, vision as vision_router, demo as demo_router
+from .routers import robot, amr, system as sys_router, prescription as presc_router, sensor as sensor_router, vision as vision_router, demo as demo_router, patient as patient_router, medicine as medicine_router
 from . import sensor_db
+from . import db_schema
 
 STATIC_DIR   = Path(__file__).parent / 'static'
 BROADCAST_HZ = 10
@@ -87,6 +88,7 @@ async def _broadcast_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    db_schema.init_schema()
     sensor_db.init_db()
     sensor_db.start_serial_reader()
     ros.init()
@@ -110,6 +112,8 @@ app.include_router(presc_router.router)
 app.include_router(sensor_router.router)
 app.include_router(vision_router.router)
 app.include_router(demo_router.router)
+app.include_router(patient_router.router)
+app.include_router(medicine_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')
