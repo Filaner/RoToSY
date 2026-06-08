@@ -769,7 +769,7 @@ body{
         <!-- 24시간 히스토리 차트 -->
         <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:1rem;margin-bottom:1rem;">
           <div class="st-label" style="margin-bottom:.75rem;">24시간 온습도 추이</div>
-          <canvas id="sensor-chart" width="100%" height="200" style="display:block;margin:0 auto;"></canvas>
+          <canvas id="sensor-chart" height="200" style="display:block;width:100%;height:200px;"></canvas>
         </div>
 
         <!-- 경보 이력 -->
@@ -904,6 +904,7 @@ function showTab(name) {
   document.getElementById('nav-' + name).classList.add('active');
   if (name === 'audit')     loadAudit();
   if (name === 'dashboard') loadTodayDeliveries();
+  if (name === 'arduino')   updateSensorHistory();
 }
 
 // ═══════════════════════════════════════════════
@@ -936,6 +937,7 @@ function applyState(s) {
   if (s.mission) applyMission(s.mission);
   if (s.nodes)  applyNodes(s.nodes);
   applyRoToSYOnline(s.robot_online);
+  if (typeof updateSensorValues === 'function') updateSensorValues(s);
 }
 
 // ── Robot ──
@@ -1663,7 +1665,7 @@ function drawSensorChart(history) {
   canvas.width = w; canvas.height = h;
 
   if (history.length < 2) {
-    ctx.fillStyle = 'var(--muted)';
+    ctx.fillStyle = '#6b7a99';
     ctx.font = '14px sans-serif';
     ctx.fillText('데이터 수집 중...', w/2-50, h/2);
     return;
@@ -1691,7 +1693,7 @@ function drawSensorChart(history) {
   }
 
   // 온도 선 (파란색)
-  ctx.strokeStyle = 'var(--blue)';
+  ctx.strokeStyle = '#1d4ed8';
   ctx.lineWidth = 2;
   ctx.beginPath();
   history.forEach((point, i) => {
@@ -1704,7 +1706,7 @@ function drawSensorChart(history) {
   ctx.stroke();
 
   // 습도 선 (초록색)
-  ctx.strokeStyle = 'var(--green)';
+  ctx.strokeStyle = '#16a34a';
   ctx.beginPath();
   history.forEach((point, i) => {
     const x = padding + (i / (history.length - 1)) * graph_w;
@@ -1717,7 +1719,7 @@ function drawSensorChart(history) {
 
   // 범위 표시
   ctx.font = '10px sans-serif';
-  ctx.fillStyle = 'var(--muted)';
+  ctx.fillStyle = '#6b7a99';
   ctx.textAlign = 'left';
   ctx.fillText('28°C', padding - 25, padding + 5);
   ctx.fillText('14°C', padding - 25, h - padding + 5);

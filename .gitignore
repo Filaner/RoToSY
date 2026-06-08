@@ -31,3 +31,6 @@ Thumbs.db
 
 # Project Specific
 doosan-robot2/
+
+# Local
+hopital_web/.venv/
