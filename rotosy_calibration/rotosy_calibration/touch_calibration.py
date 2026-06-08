@@ -22,6 +22,7 @@ ros2 run rotosy_calibration touch_calibration [marker_id...]
 """
 
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -29,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import rclpy
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
@@ -37,9 +39,27 @@ from robot_arm_interfaces.srv import Teaching
 
 # ── 설정 ─────────────────────────────────────────────────────────────────────
 CAMERA_API    = 'http://localhost:8000/camera/markers'
+
+
+def _calib_candidates() -> list[Path]:
+    candidates = []
+    env_dir = os.environ.get('ROTOSY_CALIBRATION_CONFIG_DIR')
+    if env_dir:
+        candidates.append(Path(env_dir).expanduser() / 'camera_extrinsic.yaml')
+
+    candidates.append(Path.cwd() / 'rotosy_calibration' / 'config' / 'camera_extrinsic.yaml')
+
+    try:
+        candidates.append(Path(get_package_share_directory('rotosy_calibration')) / 'config' / 'camera_extrinsic.yaml')
+    except PackageNotFoundError:
+        pass
+
+    candidates.append(Path.home() / 'ros2_ws' / 'src' / 'RoToSY' / 'rotosy_calibration' / 'config' / 'camera_extrinsic.yaml')
+    return candidates
+
+
 RESULT_PATHS  = [
-    Path('/home/cheol/RoToSY_ws/src/rotosy_calibration/config/camera_extrinsic.yaml'),
-    Path('/home/cheol/RoToSY_ws/install/rotosy_calibration/share/rotosy_calibration/config/camera_extrinsic.yaml'),
+    path for path in _calib_candidates()
 ]
 N_CAM_AVG = 20   # 카메라 위치 평균 샘플 수 (노이즈 감소)
 N_TCP_AVG = 10   # TCP 위치 평균 샘플 수

@@ -1,5 +1,3 @@
-import os
-
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription, RegisterEventHandler, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
@@ -12,9 +10,11 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description() -> LaunchDescription:
-    default_motion_path = '/home/cheol/RoToSY_ws/src/rotosy_calibration/config/calibration_motion.yaml'
-    optimized_motion_path = '/home/cheol/RoToSY_ws/src/rotosy_calibration/config/optimized_calibration_motion.yaml'
-    selected_motion_path = optimized_motion_path if os.path.exists(optimized_motion_path) else default_motion_path
+    selected_motion_path = PathJoinSubstitution([
+        FindPackageShare('rotosy_calibration'),
+        'config',
+        'optimized_calibration_motion.yaml',
+    ])
 
     args = [
         DeclareLaunchArgument('host', default_value='110.120.1.52'),

@@ -28,4 +28,4 @@ aruco_camera_calibrator:
     publish_marker_tf: true
     publish_static_tf_on_complete: true
     save_result: true
-    result_path: "/home/cheol/RoToSY_ws/src/rotosy_calibration/config/camera_extrinsic.yaml"
+    result_path: ""

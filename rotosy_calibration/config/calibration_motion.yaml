@@ -9,7 +9,7 @@ calibration_motion_runner:
     sample_service_timeout_sec: 45.0
     home_service: "/arm/home"
     return_home_on_finish: true
-    optimized_motion_path: "/home/cheol/RoToSY_ws/src/rotosy_calibration/config/optimized_calibration_motion.yaml"
+    optimized_motion_path: ""
     loop: false
     auto_start: true
 

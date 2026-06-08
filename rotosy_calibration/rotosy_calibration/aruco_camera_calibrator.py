@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import rclpy
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image
 from std_srvs.srv import Trigger
@@ -22,6 +23,21 @@ from rotosy_calibration.transform_math import (
     transform_from_rvec_tvec,
     transform_from_msg,
 )
+
+
+def _default_config_path(filename: str) -> Path:
+    env_dir = os.environ.get('ROTOSY_CALIBRATION_CONFIG_DIR')
+    if env_dir:
+        return Path(env_dir).expanduser() / filename
+
+    workspace_path = Path.cwd() / 'rotosy_calibration' / 'config' / filename
+    if workspace_path.parent.exists():
+        return workspace_path
+
+    try:
+        return Path(get_package_share_directory('rotosy_calibration')) / 'config' / filename
+    except PackageNotFoundError:
+        return Path.home() / 'ros2_ws' / 'src' / 'RoToSY' / 'rotosy_calibration' / 'config' / filename
 
 
 ARUCO_DICTIONARIES = {
@@ -59,7 +75,7 @@ class ArucoCameraCalibrator(Node):
         self.declare_parameter('save_result', True)
         self.declare_parameter(
             'result_path',
-            str(Path.home() / 'ros2_ws/src/RoToSY/rotosy_calibration/config/camera_extrinsic.yaml'),
+            '',
         )
 
         self.image_topic = self.get_parameter('image_topic').value
@@ -82,6 +98,8 @@ class ArucoCameraCalibrator(Node):
         self.publish_static_tf_on_complete = bool(self.get_parameter('publish_static_tf_on_complete').value)
         self.save_result = bool(self.get_parameter('save_result').value)
         self.result_path = self.get_parameter('result_path').value
+        if not self.result_path:
+            self.result_path = str(_default_config_path('camera_extrinsic.yaml'))
 
         self.camera_matrix = None
         self.dist_coeffs = None

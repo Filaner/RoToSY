@@ -8,10 +8,12 @@ RealSense camera manager.
 - camera_extrinsic.yaml (T_base_camera) → 로봇 베이스 좌표 (mm)
 """
 
+import os
 import threading
 from pathlib import Path
 from typing import Optional
 
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 import cv2
 import numpy as np
 import yaml
@@ -23,13 +25,24 @@ except ImportError:
     _RS_AVAILABLE = False
 
 # ── calibration YAML 경로 ────────────────────────────────────────────────────
-_CALIB_CANDIDATES = [
-    Path('/home/cheol/RoToSY_ws/install/rotosy_calibration/share/rotosy_calibration/config/camera_extrinsic.yaml'),
-    Path('/home/cheol/RoToSY_ws/src/rotosy_calibration/config/camera_extrinsic.yaml'),
-]
+def _calib_candidates() -> list[Path]:
+    candidates = []
+    env_dir = os.environ.get('ROTOSY_CALIBRATION_CONFIG_DIR')
+    if env_dir:
+        candidates.append(Path(env_dir).expanduser() / 'camera_extrinsic.yaml')
+
+    candidates.append(Path.cwd() / 'rotosy_calibration' / 'config' / 'camera_extrinsic.yaml')
+
+    try:
+        candidates.append(Path(get_package_share_directory('rotosy_calibration')) / 'config' / 'camera_extrinsic.yaml')
+    except PackageNotFoundError:
+        pass
+
+    candidates.append(Path.home() / 'ros2_ws' / 'src' / 'RoToSY' / 'rotosy_calibration' / 'config' / 'camera_extrinsic.yaml')
+    return candidates
 
 def _find_calib_yaml() -> Optional[Path]:
-    for p in _CALIB_CANDIDATES:
+    for p in _calib_candidates():
         if p.exists():
             return p
     return None

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import os
+from pathlib import Path
 import time
 
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.executors import ExternalShutdownException
@@ -11,6 +13,21 @@ from std_srvs.srv import Trigger
 
 from robot_arm_interfaces.action import MoveJ
 from robot_arm_interfaces.srv import Home
+
+
+def _default_config_path(filename: str) -> Path:
+    env_dir = os.environ.get('ROTOSY_CALIBRATION_CONFIG_DIR')
+    if env_dir:
+        return Path(env_dir).expanduser() / filename
+
+    workspace_path = Path.cwd() / 'rotosy_calibration' / 'config' / filename
+    if workspace_path.parent.exists():
+        return workspace_path
+
+    try:
+        return Path(get_package_share_directory('rotosy_calibration')) / 'config' / filename
+    except PackageNotFoundError:
+        return Path.home() / 'ros2_ws' / 'src' / 'RoToSY' / 'rotosy_calibration' / 'config' / filename
 
 
 class CalibrationMotionRunner(Node):
@@ -33,7 +50,7 @@ class CalibrationMotionRunner(Node):
         self.declare_parameter('return_home_on_finish', True)
         self.declare_parameter(
             'optimized_motion_path',
-            '/home/cheol/RoToSY_ws/src/rotosy_calibration/config/optimized_calibration_motion.yaml',
+            '',
         )
         self.declare_parameter('loop', False)
         self.declare_parameter('auto_start', True)
@@ -49,6 +66,8 @@ class CalibrationMotionRunner(Node):
         self.home_service = self.get_parameter('home_service').value
         self.return_home_on_finish = bool(self.get_parameter('return_home_on_finish').value)
         self.optimized_motion_path = self.get_parameter('optimized_motion_path').value
+        if not self.optimized_motion_path:
+            self.optimized_motion_path = str(_default_config_path('optimized_calibration_motion.yaml'))
         self.loop = bool(self.get_parameter('loop').value)
         self.auto_start = bool(self.get_parameter('auto_start').value)
 

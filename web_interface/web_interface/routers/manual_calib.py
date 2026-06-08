@@ -12,10 +12,12 @@ P_base_marker = TCP_xyz + gripper_to_marker_xyz (yaml에서 자동 로드, 근�
 """
 
 import asyncio
+import os
 import random
 import threading
 from pathlib import Path
 
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 import cv2
 import numpy as np
 import yaml
@@ -27,7 +29,23 @@ from .. import ros_node as ros
 
 router = APIRouter(tags=['manual_calib'], prefix='/api/manual_calib')
 
-_CALIB_PATH = Path('/home/cheol/RoToSY_ws/src/rotosy_calibration/config/camera_extrinsic.yaml')
+
+def _calib_path() -> Path:
+    env_dir = os.environ.get('ROTOSY_CALIBRATION_CONFIG_DIR')
+    if env_dir:
+        return Path(env_dir).expanduser() / 'camera_extrinsic.yaml'
+
+    workspace_path = Path.cwd() / 'rotosy_calibration' / 'config' / 'camera_extrinsic.yaml'
+    if workspace_path.parent.exists():
+        return workspace_path
+
+    try:
+        return Path(get_package_share_directory('rotosy_calibration')) / 'config' / 'camera_extrinsic.yaml'
+    except PackageNotFoundError:
+        return Path.home() / 'ros2_ws' / 'src' / 'RoToSY' / 'rotosy_calibration' / 'config' / 'camera_extrinsic.yaml'
+
+
+_CALIB_PATH = _calib_path()
 _MIN_POINTS = 4
 
 _lock   = threading.Lock()
