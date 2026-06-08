@@ -1,11 +1,13 @@
 """
-Motion Sequence Node with Interactive (Step-by-Step) Control.
+Temp Sequence Node with Interactive (Step-by-Step) Control.
+
+motion_sequence와 동일한 시퀀스이며, 토픽 네임스페이스만 /temp_motion/* 으로 분리됨.
 
 Usage:
   1. Persistent Node:
-     ros2 run doosan_controller motion_sequence
+     ros2 run doosan_controller temp_sequence
   2. One-shot CLI:
-     ros2 run doosan_controller motion_sequence <marker_id> [--step]
+     ros2 run doosan_controller temp_sequence <marker_id> [--step]
 """
 
 import json
@@ -26,6 +28,7 @@ from dsr_msgs2.srv import MoveCircle
 from robot_arm_interfaces.action import MoveJ, MoveL
 from robot_arm_interfaces.msg import RobotStatus
 from robot_arm_interfaces.srv import Home
+from rotosy_gripper_control.keyboard_electromagnet_gripper import KeyboardElectromagnetGripper
 
 # ── 공통 파라미터 ────────────────────────────────────────────────────────────
 
@@ -37,23 +40,17 @@ ACC_MM           = 60.0
 VEL_DEG          = 30.0
 ACC_DEG          = 60.0
 
-DEFAULT_RADIUS   = 100.0   # MoveC 기본 반지름 (mm)
+DEFAULT_RADIUS   = 180.0   # MoveC 기본 반지름 (mm)
 
-# 마커 4·5: J1=30, J4=90, J5=-90, blend=70°, rz=-90
-SPECIAL_MARKERS  = {4, 5}
-SPECIAL_JOINTS   = [30.0, None, None, 90.0, -90.0, None]  # None → 현재 관절값 유지
-SPECIAL_BLEND    = 70.0
-SPECIAL_RZ       = -90.0
-
-# 일반 마커: rz=0
 DEFAULT_RZ       = 0.0
 
 
-class MotionSequenceNode(Node):
-    """실시간 시퀀스 제어가 가능한 동작 시퀀스 노드."""
+
+class TempSequenceNode(Node):
+    """실시간 시퀀스 제어가 가능한 임시 시퀀스 노드 (/temp_motion/* 토픽 사용)."""
 
     def __init__(self):
-        super().__init__('motion_sequence_node')
+        super().__init__('temp_sequence_node')
         self._cb_group = ReentrantCallbackGroup()
 
         # Clients
@@ -63,23 +60,24 @@ class MotionSequenceNode(Node):
         self._cli_circle = self.create_client(
             MoveCircle, f'/{ROBOT_NS}/motion/move_circle', callback_group=self._cb_group
         )
+        self._gripper = KeyboardElectromagnetGripper()
 
         # Subscribers
         self._status_sub = self.create_subscription(
             RobotStatus, '/arm/status', self._status_cb, 10
         )
         self._next_sub = self.create_subscription(
-            Empty, '/motion/next_step', self._next_step_cb, 10, callback_group=self._cb_group
+            Empty, '/temp_motion/next_step', self._next_step_cb, 10, callback_group=self._cb_group
         )
         self._start_sub = self.create_subscription(
-            Int32, '/motion/start', self._start_cb, 10, callback_group=self._cb_group
+            Int32, '/temp_motion/start', self._start_cb, 10, callback_group=self._cb_group
         )
         self._stop_sub = self.create_subscription(
-            Empty, '/motion/stop', self._stop_cb, 10, callback_group=self._cb_group
+            Empty, '/temp_motion/stop', self._stop_cb, 10, callback_group=self._cb_group
         )
 
         # Publishers
-        self._step_info_pub = self.create_publisher(String, '/motion/step_info', 10)
+        self._step_info_pub = self.create_publisher(String, '/temp_motion/step_info', 10)
 
         # State
         self._tcp    = None   # [x, y, z, rx, ry, rz] mm / deg
@@ -246,6 +244,10 @@ class MotionSequenceNode(Node):
         self.get_logger().error(f'MoveJ 실패: {result.message}')
         return False
 
+    def _set_magnet(self, enabled: bool) -> bool:
+        """전자석 ON(enabled=True) / OFF(enabled=False) — rotosy_gripper_control 패키지 사용."""
+        return self._gripper.set_gripper(enabled)
+
     def _move_circle(self, via: list, end: list) -> bool:
         if not self._cli_circle.wait_for_service(timeout_sec=5.0):
             self.get_logger().error('move_circle 서비스 없음')
@@ -259,7 +261,7 @@ class MotionSequenceNode(Node):
         req.time     = 0.0
         req.radius   = 0.0
         req.ref      = 0
-        req.mode     = 0
+        req.mode     = 0   # MOVE_MODE_ABSOLUTE: via/end가 절대 좌표
         req.angle1   = 0.0
         req.angle2   = 0.0
         req.blend_type = 0
@@ -274,32 +276,39 @@ class MotionSequenceNode(Node):
             return False
         return bool(resp.success)
 
-    def _move_c(self, radius: float, direction: int,
-                start: tuple = None) -> tuple | None:
-        """구면 호(90°) 이동."""
-        if start is not None:
-            x0, y0, z0 = start
-        else:
-            if not self._tcp:
-                self.get_logger().error('MoveC: TCP 위치 미수신')
-                return None
-            x0, y0, z0 = self._tcp[0], self._tcp[1], self._tcp[2]
+    def _move_c(self, radius: float, direction: int) -> tuple | None:
+        """현재 TCP 위치 기준 90° 호 이동 (test_moveC와 동일한 방향값 사용).
 
+        direction= 1: 구 중심 = 현재 TCP 아래(-Z), +Y 방향, Z 감소
+        direction=-1: 구 중심 = 현재 TCP의 -Y,     -Y 방향, Z 증가 (복귀)
+        """
+        if not self._tcp:
+            self.get_logger().error('MoveC: TCP 위치 미수신')
+            return None
+
+        x0, y0, z0 = self._tcp[0], self._tcp[1], self._tcp[2]
         r   = float(radius)
         a45 = math.radians(45)
 
         if direction >= 0:
             Cx, Cy_c, Cz_c = x0, y0, z0 - r
-            via = [Cx, Cy_c + r * math.sin(a45), Cz_c + r * math.cos(a45), -90.0, 135.0, 0.0]
-            end = [Cx, Cy_c + r,                  Cz_c,                      -90.0,  90.0, 0.0]
+            via = [Cx, Cy_c + r * math.sin(a45), Cz_c + r * math.cos(a45),
+                   -90.0, 135.0, 0.0]
+            end = [Cx, Cy_c + r,                  Cz_c,
+                   -90.0,  90.0, 0.0]
             desc = f'+Y Z감소  r={r:.0f}mm'
         else:
             Cx, Cy_c, Cz_c = x0, y0 - r, z0
-            via = [Cx, Cy_c + r * math.sin(a45), Cz_c + r * math.cos(a45), -90.0, 135.0, 0.0]
-            end = [Cx, Cy_c,                      Cz_c + r,                  -90.0, 180.0, 0.0]
-            desc = f'-Y Z증가  r={r:.0f}mm (복귀)'
+            via = [Cx, Cy_c + r * math.sin(a45), Cz_c + r * math.cos(a45),
+                   -90.0, 135.0, 0.0]
+            end = [Cx, Cy_c,                      Cz_c + r,
+                   -90.0, 180.0, 0.0]
+            desc = f'-Y Z증가  r={r:.0f}mm'
 
-        self.get_logger().info(f'MoveC {desc}  시작({x0:.1f},{y0:.1f},{z0:.1f})')
+        self.get_logger().info(
+            f'MoveC {desc}  시작({x0:.1f},{y0:.1f},{z0:.1f})'
+            f'  end({end[0]:.1f},{end[1]:.1f},{end[2]:.1f})'
+        )
         if not self._move_circle(via, end):
             self.get_logger().error('MoveC 실패')
             return None
@@ -323,29 +332,18 @@ class MotionSequenceNode(Node):
     # ── 시퀀스 ───────────────────────────────────────────────────────────────
 
     def _goto_marker(self, marker_id: int) -> tuple | None:
-        """지정 마커로 이동."""
+        """지정 마커 위치 + Y +30mm 로 이동 (마커 0~5 공통)."""
         self.get_logger().info(f'[마커{marker_id}] 좌표 취득 중...')
         pos = self._get_marker(marker_id)
         if pos is None:
             self.get_logger().error(f'ID {marker_id} 마커 미감지')
             return None
         mx, my, mz = pos
-        self.get_logger().info(f'마커 위치: ({mx:.1f}, {my:.1f}, {mz:.1f}) mm')
-
-        if marker_id in SPECIAL_MARKERS:
-            joints = list(self._joints) if self._joints else [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]
-            for idx, val in enumerate(SPECIAL_JOINTS):
-                if val is not None:
-                    joints[idx] = val
-            if not self._move_j(joints, blend_radius=SPECIAL_BLEND):
-                return None
-            if not self._move_l(mx, my, mz, 90.0, -90.0, SPECIAL_RZ):
-                return None
-        else:
-            if not self._move_l(mx, my, mz, 90.0, -90.0, DEFAULT_RZ):
-                return None
-
-        return mx, my, mz
+        ty = my + 30.0
+        self.get_logger().info(f'마커 위치: ({mx:.1f}, {my:.1f}, {mz:.1f}) mm → 목표 Y: {ty:.1f} mm')
+        if not self._move_l(mx, ty, mz, 90.0, -90.0, 0.0):
+            return None
+        return mx, ty, mz
 
     def run_sequence(self, marker_id: int, radius_mm: float):
         self._is_running = True
@@ -365,62 +363,112 @@ class MotionSequenceNode(Node):
             mx, my, mz = result
             cx, cy, cz = mx, my, mz
 
+            # 2-1. Y -2.5cm 상대 이동
+            if not self._wait_for_step('Y -25mm 상대 이동'): return
+            if not self._move_l(0, -25, 0, relative=True): return
+            cy -= 25
+
+            # 2-2. 전자석 ON
+            if not self._wait_for_step('전자석 ON'): return
+            if not self._set_magnet(True): return
+
             # 3. Y +15cm 상대 이동
             if not self._wait_for_step('Y +150mm 상대 이동'): return
             if not self._move_l(0, 150, 0, relative=True): return
             cy += 150
+
+            # 3-1. 전자석 OFF
+            if not self._wait_for_step('전자석 OFF'): return
+            if not self._set_magnet(False): return
 
             # 4. Y +3cm 상대 이동
             if not self._wait_for_step('Y +30mm 상대 이동'): return
             if not self._move_l(0, 30, 0, relative=True): return
             cy += 30
 
-            # 5번 MoveC 시작 전 위치 기억
-            pre_movec_pos = (cx, cy, cz)
+            # 5번 MoveC 시작 전 실제 TCP 전체(위치+자세) 기억
+            if not self._wait_tcp():
+                self.get_logger().error('MoveC 전 TCP 위치 미수신')
+                return
+            pre_movec_pos = tuple(self._tcp[:6])  # (x, y, z, rx, ry, rz)
+            cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
 
             # 5. MoveC r=200 direction=-1 (복귀 호)
             if not self._wait_for_step('MoveC r=200 복귀 호'): return
-            end_pos = self._move_c(200, -1, start=(cx, cy, cz))
+            end_pos = self._move_c(200, -1)
             if end_pos is None: return
             cx, cy, cz = end_pos
 
-            # 5-1. MoveL 상대이동 (Y+50, Z+50)
+            # 5-1. MoveL 상대이동 (Z-100)
+            if not self._wait_for_step('MoveL 상대 (Z-100)'): return
+            if not self._move_l(0, 0, -100, relative=True): return
+            cz -= 100
+
+
+            # 5-2. 전자석 ON
+            if not self._wait_for_step('전자석 ON'): return
+            if not self._set_magnet(True): return
+
+            # 5-1. MoveL 상대이동 (Z+100)
+            if not self._wait_for_step('MoveL 상대 (Z+100)'): return
+            if not self._move_l(0, 0, 100, relative=True): return
+            cz += 100
+
+
+            # 5-3. MoveL 상대이동 (Y+50, Z+50)
             if not self._wait_for_step('MoveL 상대 (Y+50, Z+50)'): return
             if not self._move_l(0, 50, 50, relative=True): return
             cy += 50
             cz += 50
 
-            # 5-2. MoveJ 특정 포즈
+            # 5-4. MoveJ 특정 포즈
             if not self._wait_for_step('MoveJ 특정 포즈1'): return
             target_joints = [20.44, 53.45, 49.27, 158.82, 97.28, -205.62]
             if not self._move_j(target_joints): return
 
-            # 5-3. MoveJ 특정 포즈
+            # 5-5. MoveJ 특정 포즈
             if not self._wait_for_step('MoveJ 특정 포즈2'): return
             target_joints = [34.01, 53.55, 29.86, -2.98, 97.34, -238.46]
             if not self._move_j(target_joints): return
 
-            # 5-4. MoveJ 특정 포즈
+            # 5-5. 전자석 OFF (배치)
+            if not self._wait_for_step('전자석 OFF'): return
+            if not self._set_magnet(False): return
+
+
+            # 5-5-1. MoveJ 특정 포즈
             if not self._wait_for_step('MoveJ 특정 포즈3'): return
             target_joints = [36.69, 29.17, 87.29, -75.19, 117.19, -59.94]
             if not self._move_j(target_joints): return
 
 
-            # 5-5. MoveC 복귀 호 전 위치로 복귀
+            # 5-5. MoveC 복귀 호 전 위치로 복귀 (저장된 위치+자세 그대로 복귀)
             if not self._wait_for_step('5-5. 복귀 전 위치로 이동'): return
-            if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2], 
-                               rx=90.0, ry=-90.0, rz=DEFAULT_RZ): return
-            cx, cy, cz = pre_movec_pos
+            if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
+                               rx=pre_movec_pos[3], ry=pre_movec_pos[4], rz=pre_movec_pos[5]): return
+            cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
 
             # 6. Y -3cm 상대 이동
             if not self._wait_for_step('Y -30mm 상대 이동'): return
             if not self._move_l(0, -30, 0, relative=True): return
             cy -= 30
 
+            if not self._wait_for_step('전자석 ON'): return
+            if not self._set_magnet(True): return
+
+
             # 7. Y -15cm 상대 이동
             if not self._wait_for_step('Y -150mm 상대 이동'): return
             if not self._move_l(0, -150, 0, relative=True): return
             cy -= 150
+
+
+            if not self._wait_for_step('전자석 OFF'): return
+            if not self._set_magnet(False): return
+
+            if not self._wait_for_step('MoveL 상대 (Y+50)'): return
+            if not self._move_l(0, 50, 0, relative=True): return
+            cy += 50
 
             self.get_logger().info('시퀀스 완료')
             self._wait_for_step('시퀀스 완료')
@@ -433,7 +481,7 @@ class MotionSequenceNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MotionSequenceNode()
+    node = TempSequenceNode()
     executor = MultiThreadedExecutor()
     executor.add_node(node)
 

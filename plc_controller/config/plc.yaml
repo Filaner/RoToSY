@@ -1,0 +1,18 @@
+plc_bridge:
+  ros__parameters:
+    # XBC-DR10E 네트워크 설정 (XG5000에서 확인/설정)
+    plc_ip:   "192.168.1.10"
+    plc_port: 502
+
+    # DI: 센서 2개 (P00000~P00001 → Modbus 비트 주소 0~1)
+    di_start_addr: 0
+    di_count:      2
+
+    # DO: 출력 2개
+    #   do[0] = 컨베이어 (P00040, Modbus 주소 64)
+    #   do[1] = 추가 출력 (P00041, Modbus 주소 65)
+    do_start_addr: 64
+    do_count:      2
+
+    poll_rate_hz:   10.0   # DI 폴링 주기
+    reconnect_sec:   3.0   # 연결 끊김 시 재시도 간격

@@ -10,6 +10,9 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/web_interface']),
         ('share/' + package_name, ['package.xml']),
     ],
+    package_data={
+        'web_interface': ['static/*'],
+    },
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='cheol',

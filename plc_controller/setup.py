@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 import os
 from glob import glob
 
-package_name = 'doosan_controller'
+package_name = 'plc_controller'
 
 setup(
     name=package_name,
@@ -17,21 +17,16 @@ setup(
         (os.path.join('share', package_name, 'config'),
             glob('config/*.yaml')),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'pymodbus'],
     zip_safe=True,
     maintainer='RoToSY',
     maintainer_email='cjfgml0221@naver.com',
-    description='Doosan E0509 arm controller node',
+    description='LS ELECTRIC XBC-DR10E PLC bridge (Modbus TCP)',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'arm_controller  = doosan_controller.arm_controller_node:main',
-            'test_movel      = doosan_controller.test_movel:main',
-            'test_moveC      = doosan_controller.test_moveC:main',
-            'motion_sequence = doosan_controller.motion_sequence:main',
-            'temp_sequence   = doosan_controller.temp_sequence:main',
-            'tcp_monitor     = doosan_controller.tcp_monitor:main',
+            'plc_bridge = plc_controller.plc_bridge_node:main',
         ],
     },
 )

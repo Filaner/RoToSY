@@ -2,6 +2,7 @@
 Control endpoints — write commands to the robot.
 """
 
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -108,15 +109,36 @@ async def move_l(req: MoveLRequest) -> dict:
 
 @router.post('/recover')
 async def recover() -> dict:
-    """Safety recovery: attempt SAFE_STOP/SAFE_OFF → STANDBY → teaching mode."""
+    """Safety recovery: fault state → STANDBY → Servo ON."""
     node = ros.get_node()
     if node is None:
         raise HTTPException(status_code=503, detail='ROS2 node not initialized')
     try:
+        # 1단계: 안전 상태 해제 (SAFE_STOP/SAFE_OFF → STANDBY)
         result = await node.call_recover()
         if not result.get('success'):
             raise HTTPException(status_code=500, detail=result.get('message', 'Recovery failed'))
-        return result
+
+        # 2단계: fault 상태 벗어날 때까지 폴링 (최대 10초)
+        _FAULT_STATES = {3, 5, 6, 15}  # SAFE_OFF, SAFE_STOP, EMERGENCY_STOP, NOT_READY
+        for _ in range(20):
+            await asyncio.sleep(0.5)
+            if node.get_state().get('robot_state', -1) not in _FAULT_STATES:
+                break
+        else:
+            raise HTTPException(status_code=500,
+                                detail='복구 타임아웃 — 로봇 상태 확인 필요 (티치펜던트 또는 E-Stop 버튼 확인)')
+
+        # 3단계: 안정화 후 서보 ON
+        await asyncio.sleep(0.5)
+        servo_result = await node.call_servo(True)
+        servo_ok = servo_result.get('success', False)
+
+        return {
+            'success': True,
+            'message': f"안전모드 해제 완료 → 서보 {'ON' if servo_ok else 'ON 실패 (수동으로 Servo ON 버튼 누르세요)'}",
+            'servo_enabled': servo_ok,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -154,6 +176,55 @@ async def set_teaching(req: TeachingRequest) -> dict:
         raise HTTPException(status_code=500, detail=f'Internal Error: {str(e)}')
 
 
+class CartJogRequest(BaseModel):
+    axis: int    # 0=x 1=y 2=z 3=rx 4=ry 5=rz
+    speed: float # 양수=+ 방향, 음수=- 방향, 크기=스텝(mm 또는 deg), 0=정지
+
+_cart_jog: dict = {'active': False, 'axis': -1, 'direction': 0, 'step': 0.0}
+
+
+async def _cart_jog_worker(node) -> None:
+    try:
+        while _cart_jog['active']:
+            ok = await node.call_jog_cart_step(
+                _cart_jog['axis'],
+                _cart_jog['direction'],
+                _cart_jog['step'],
+            )
+            if not ok:
+                break
+    finally:
+        _cart_jog['active'] = False
+
+
+@router.post('/jog_cart')
+async def jog_cart(req: CartJogRequest) -> dict:
+    """Cartesian TCP jog: 한 번 호출마다 step 크기만큼 이동 반복."""
+    global _cart_jog
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+
+    if req.speed == 0:
+        _cart_jog['active'] = False
+        return {'success': True, 'message': 'stopped'}
+
+    if not 0 <= req.axis <= 5:
+        raise HTTPException(status_code=422, detail='axis must be 0–5')
+
+    _cart_jog.update({
+        'axis':      req.axis,
+        'direction': 1 if req.speed > 0 else -1,
+        'step':      abs(req.speed),
+    })
+
+    if not _cart_jog['active']:
+        _cart_jog['active'] = True
+        asyncio.create_task(_cart_jog_worker(node))
+
+    return {'success': True}
+
+
 @router.post('/home')
 async def move_home() -> dict:
     """Move robot to home position."""
@@ -172,3 +243,62 @@ async def move_home() -> dict:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Internal Error: {str(e)}')
+
+
+class SequenceStartRequest(BaseModel):
+    marker_id: int
+
+@router.post('/motion/start')
+async def start_sequence(req: SequenceStartRequest) -> dict:
+    """Start motion sequence for a marker."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.start_sequence(req.marker_id)
+    return {'success': True}
+
+@router.post('/motion/next')
+async def next_step() -> dict:
+    """Trigger next step in the motion sequence."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.next_step()
+    return {'success': True}
+
+@router.post('/motion/stop')
+async def stop_sequence() -> dict:
+    """Stop the current motion sequence."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.stop_sequence()
+    return {'success': True}
+
+
+@router.post('/temp_motion/start')
+async def start_temp_sequence(req: SequenceStartRequest) -> dict:
+    """Start temp sequence for a marker."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.start_temp_sequence(req.marker_id)
+    return {'success': True}
+
+@router.post('/temp_motion/next')
+async def next_temp_step() -> dict:
+    """Trigger next step in the temp sequence."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.next_temp_step()
+    return {'success': True}
+
+@router.post('/temp_motion/stop')
+async def stop_temp_sequence() -> dict:
+    """Stop the current temp sequence."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.stop_temp_sequence()
+    return {'success': True}

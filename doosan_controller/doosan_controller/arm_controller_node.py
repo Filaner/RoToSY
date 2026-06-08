@@ -30,7 +30,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor, ExternalShutdownException
 
 from std_msgs.msg import Bool
 from sensor_msgs.msg import JointState
@@ -135,7 +135,8 @@ class ArmControllerNode(Node):
         self._current_tcp    = [0.0] * 6
 
         # ── 안전복구 이벤트 / 스레드 ─────────────────────────────────────
-        self._recovery_event  = threading.Event()
+        self._recovery_event        = threading.Event()
+        self._intentional_servo_off = False   # 사용자가 의도적으로 Servo OFF 한 경우 True
         self._recovery_thread = threading.Thread(
             target=self._auto_recovery_loop, daemon=True
         )
@@ -341,15 +342,18 @@ class ArmControllerNode(Node):
         # SAFE_STOP / SAFE_OFF 전환 감지 → 자동복구 트리거
         # 반드시 정상 운전 중(STANDBY/MOVING)에서 폴트 상태로 전환된 경우에만 발동.
         # 기동 시 NOT_READY → SAFE_OFF 전환은 정상 시퀀스이므로 무시.
+        # 사용자가 의도적으로 Servo OFF 한 경우에는 자동복구 제외.
         if (self._prev_robot_state in (STATE_STANDBY, STATE_MOVING) and
                 state in (STATE_SAFE_STOP, STATE_SAFE_OFF) and
-                self._auto_recovery_enabled):
+                self._auto_recovery_enabled and
+                not self._intentional_servo_off):
             self.get_logger().warn(
                 f'[SafeRecovery] 상태 전환 감지: '
                 f'{STATE_STR.get(self._prev_robot_state, self._prev_robot_state)} '
                 f'→ {STATE_STR.get(state, state)} — 자동복구 예약'
             )
             self._recovery_event.set()
+        self._intentional_servo_off = False   # 매 주기 초기화
         self._prev_robot_state = state
 
         msg = RobotStatus()
@@ -377,6 +381,7 @@ class ArmControllerNode(Node):
         if request.enable:
             response.success, response.message = self._do_servo_on()
         else:
+            self._intentional_servo_off = True   # 의도적 OFF — 자동복구 억제
             response.success, response.message = self._do_servo_off(request.stop_type)
 
         response.robot_state_after = self._get_robot_state_now()
@@ -625,41 +630,42 @@ class ArmControllerNode(Node):
             req.radius     = g.blend_radius_mm
             req.mode       = 1 if g.relative else 0
             req.blend_type = 0
-            req.sync_type  = 0   # SYNC: 완료까지 블로킹 → 동작 순서 보장
+
+            # blend_radius > 0 → ASYNC(비동기): DSR이 관절 이동을 시작하자마자 반환.
+            # 이후 바로 MoveL을 전송하면 DSR이 내부적으로 블렌딩 처리.
+            # blend_radius == 0 → SYNC(동기): 완료까지 블로킹 (기존 동작 유지).
+            blend_mode = g.blend_radius_mm > 0.0
+            req.sync_type = 1 if blend_mode else 0
 
             self._robot_state = STATE_MOVING
 
-            done_event = threading.Event()
-            def feedback_thread():
-                while not done_event.is_set():
-                    if goal_handle.is_cancel_requested:
-                        self._request_move_stop()
-                        break
-                    fb = MoveJ.Feedback()
-                    fb.current_joints_deg = self._current_joints
-                    fb.robot_state        = 'MOVING'
-                    goal_handle.publish_feedback(fb)
-                    time.sleep(0.1)
-
-            fb_t = threading.Thread(target=feedback_thread, daemon=True)
-            fb_t.start()
-
             resp = self._call_service_sync(self._cli_move_joint, req, timeout=self._motion_timeout)
-            done_event.set()
-            fb_t.join()
-
-            elapsed = time.time() - t_start
-            if goal_handle.is_cancel_requested:
-                goal_handle.canceled()
-                result.success = False
-                result.message = 'Cancelled'
-                result.execution_time_sec = elapsed
-                return result
 
             if resp is None or not resp.success:
                 result.success = False
                 result.message = 'move_joint failed'
                 goal_handle.abort()
+                return result
+
+            elapsed = time.time() - t_start
+
+            if blend_mode:
+                # ASYNC 모드: DSR이 동작 중이므로 lock을 즉시 해제해
+                # 다음 MoveL이 바로 큐에 들어갈 수 있도록 함
+                log.info(f'MoveJ blending (radius={g.blend_radius_mm}°) — MoveL 즉시 전송 가능')
+                self._motion_lock.release()
+                goal_handle.succeed()
+                result.success = True
+                result.message = f'blending radius={g.blend_radius_mm}'
+                result.execution_time_sec = elapsed
+                return result
+
+            # SYNC 모드: 완전 종료 후 반환
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                result.success = False
+                result.message = 'Cancelled'
+                result.execution_time_sec = elapsed
                 return result
 
             self._robot_state = STATE_STANDBY
@@ -670,7 +676,9 @@ class ArmControllerNode(Node):
             result.execution_time_sec = elapsed
             return result
         finally:
-            self._motion_lock.release()
+            # blend_mode에서는 위에서 이미 release했으므로 중복 방지
+            if self._motion_lock.locked():
+                self._motion_lock.release()
 
     # ══════════════════════════════════════════════════════════════════════════
     # Phase 2 — MoveL execute callback
@@ -1019,11 +1027,12 @@ def main(args=None) -> None:
     executor.add_node(node)
     try:
         executor.spin()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
