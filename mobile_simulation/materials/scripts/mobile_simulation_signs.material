@@ -1,0 +1,125 @@
+material MobileSimulation/SignStorage
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient 1 1 1 1
+      diffuse 1 1 1 1
+      texture_unit { texture sign_storage.png }
+    }
+  }
+}
+
+material MobileSimulation/SignNurseStation
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient 1 1 1 1
+      diffuse 1 1 1 1
+      texture_unit { texture sign_nurse_station.png }
+    }
+  }
+}
+
+material MobileSimulation/SignWingA
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient 1 1 1 1
+      diffuse 1 1 1 1
+      texture_unit { texture sign_wing_a.png }
+    }
+  }
+}
+
+material MobileSimulation/SignWingB
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient 1 1 1 1
+      diffuse 1 1 1 1
+      texture_unit { texture sign_wing_b.png }
+    }
+  }
+}
+
+material MobileSimulation/MedRoomA
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient 1 1 1 1
+      diffuse 1 1 1 1
+      texture_unit { texture med_room_a.png }
+    }
+  }
+}
+
+material MobileSimulation/MedRoomB
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient 1 1 1 1
+      diffuse 1 1 1 1
+      texture_unit { texture med_room_b.png }
+    }
+  }
+}
+
+material MobileSimulation/ZonePickup
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient 1 1 1 1
+      diffuse 1 1 1 1
+      texture_unit { texture zone_pickup.png }
+    }
+  }
+}
+
+material MobileSimulation/ZoneDeliverA
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient 1 1 1 1
+      diffuse 1 1 1 1
+      texture_unit { texture zone_deliver_a.png }
+    }
+  }
+}
+
+material MobileSimulation/ZoneDeliverB
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient 1 1 1 1
+      diffuse 1 1 1 1
+      texture_unit { texture zone_deliver_b.png }
+    }
+  }
+}
