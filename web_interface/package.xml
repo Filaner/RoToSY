@@ -6,9 +6,13 @@
   <maintainer email="cjfgml0221@naver.com">cheol</maintainer>
   <license>Apache-2.0</license>
 
+  <buildtool_depend>ament_python</buildtool_depend>
+
   <depend>rclpy</depend>
+  <depend>ament_index_python</depend>
   <depend>robot_arm_interfaces</depend>
   <depend>std_msgs</depend>
+  <depend>dsr_msgs2</depend>
 
   <export>
     <build_type>ament_python</build_type>

@@ -84,6 +84,8 @@ def generate_launch_description() -> LaunchDescription:
 
     # ── arm_controller node ──────────────────────────────────────────────────
     # Delayed 3 s to give dsr_bringup2 time to register its services.
+    # /arm/move_l is remapped to /arm/move_l_real so that hybrid_ik_node can
+    # intercept /arm/move_l and forward to /arm/move_l_real after CCD IK.
     arm_controller = TimerAction(
         period=3.0,
         actions=[
@@ -98,6 +100,24 @@ def generate_launch_description() -> LaunchDescription:
                     'motion_timeout':  LaunchConfiguration('motion_timeout'),
                     'servo_on_retries': 3,
                 }],
+                remappings = [('/arm/move_l', '/arm/move_l_real')],
+            )
+        ],
+    )
+
+    # ── hybrid_ik node ───────────────────────────────────────────────────────
+    # Delayed 4 s — needs arm_controller's /arm/move_j and /arm/move_l_real.
+    # Provides /arm/move_l (public); uses DSR ikin service for full 6-DOF IK
+    # (position + orientation) so the wrist is already aligned before final MoveL.
+    hybrid_ik = TimerAction(
+        period=4.0,
+        actions=[
+            Node(
+                package    = 'doosan_controller',
+                executable = 'hybrid_ik',
+                name       = 'hybrid_ik_node',
+                output     = 'screen',
+                parameters = [{'robot_ns': LaunchConfiguration('name')}],
             )
         ],
     )
@@ -130,4 +150,34 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    return LaunchDescription(args + [dsr_bringup, arm_controller, tcp_monitor, web_server])
+    # ── motion_sequence_node ─────────────────────────────────────────────────
+    # Delayed 6 s — needs arm_controller services to be available.
+    # Bypasses hybrid_ik_node by remapping /arm/move_l directly to /arm/move_l_real.
+    motion_sequence = TimerAction(
+        period=6.0,
+        actions=[
+            Node(
+                package    = 'doosan_controller',
+                executable = 'motion_sequence',
+                name       = 'motion_sequence_node',
+                output     = 'screen',
+                remappings = [('/arm/move_l', '/arm/move_l_real')],
+            )
+        ],
+    )
+
+    # ── temp_sequence_node ───────────────────────────────────────────────────
+    # Delayed 6 s — needs arm_controller services to be available.
+    temp_sequence = TimerAction(
+        period=6.0,
+        actions=[
+            Node(
+                package    = 'doosan_controller',
+                executable = 'temp_sequence',
+                name       = 'temp_sequence_node',
+                output     = 'screen',
+            )
+        ],
+    )
+
+    return LaunchDescription(args + [dsr_bringup, arm_controller, hybrid_ik, tcp_monitor, web_server, motion_sequence, temp_sequence])

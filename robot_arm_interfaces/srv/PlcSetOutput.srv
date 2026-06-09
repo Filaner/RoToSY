@@ -1,0 +1,7 @@
+# Set one PLC digital output by zero-based configured DO index.
+uint8 index
+bool value
+---
+bool success
+string message
+uint32 do_mask

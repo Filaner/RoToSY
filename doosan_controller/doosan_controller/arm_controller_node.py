@@ -30,14 +30,14 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor, ExternalShutdownException
 
 from std_msgs.msg import Bool
 from sensor_msgs.msg import JointState
 
 # Custom interfaces
 from robot_arm_interfaces.action import MoveJ, MoveL
-from robot_arm_interfaces.srv import ServoOn, WaitDuration, Jog, Home, Teaching, EStop, Recover
+from robot_arm_interfaces.srv import ServoOn, WaitDuration, Jog, Home, Teaching, EStop
 from robot_arm_interfaces.msg import RobotStatus
 
 # Doosan DSR service interfaces
@@ -52,8 +52,6 @@ from dsr_msgs2.srv import (
     GetRobotState,
     GetCurrentPose,
     Jog as DsrJog,
-    SetSafeStopResetType,
-    GetLastAlarm,
 )
 
 # ─── Doosan state constants (mirrors DRFC.py) ─────────────────────────────────
@@ -66,9 +64,7 @@ STATE_SAFE_STOP    = 5
 STATE_NOT_READY    = 15
 
 CONTROL_ENABLE_OPERATION  = 1   # NOT_READY / INITIALIZING → STANDBY
-CONTROL_RESET_SAFET_STOP  = 2   # SAFE_STOP 리셋
-CONTROL_RESET_SAFET_OFF   = 3   # SAFE_OFF → STANDBY
-CONTROL_SERVO_ON          = 3   # alias
+CONTROL_SERVO_ON          = 3   # SAFE_OFF → STANDBY
 
 STATE_STR = {
     STATE_INITIALIZING: 'INITIALIZING',
@@ -96,22 +92,17 @@ class ArmControllerNode(Node):
         super().__init__('arm_controller')
 
         # ── Parameters ──────────────────────────────────────────────────────
-        self.declare_parameter('robot_ns',             'dsr01')
-        self.declare_parameter('status_rate_hz',       10.0)
-        self.declare_parameter('motion_timeout',       60.0)   # max seconds per move
-        self.declare_parameter('servo_on_retries',     3)
-        self.declare_parameter('auto_recovery_enabled', True)
+        self.declare_parameter('robot_ns',         'dsr01')
+        self.declare_parameter('status_rate_hz',   10.0)
+        self.declare_parameter('motion_timeout',   60.0)
+        self.declare_parameter('servo_on_retries', 3)
 
         ns             = self.get_parameter('robot_ns').value
         status_hz      = self.get_parameter('status_rate_hz').value
-        self._motion_timeout        = self.get_parameter('motion_timeout').value
-        self._servo_retries         = self.get_parameter('servo_on_retries').value
-        self._auto_recovery_enabled = self.get_parameter('auto_recovery_enabled').value
+        self._motion_timeout = self.get_parameter('motion_timeout').value
+        self._servo_retries  = self.get_parameter('servo_on_retries').value
 
-        self.get_logger().info(
-            f'robot_ns = {ns!r}  status_rate = {status_hz} Hz  '
-            f'auto_recovery = {self._auto_recovery_enabled}'
-        )
+        self.get_logger().info(f'robot_ns = {ns!r}  status_rate = {status_hz} Hz')
 
         # ── Callback groups ──────────────────────────────────────────────────
         # ReentrantCallbackGroup allows multiple action execute-callbacks to
@@ -127,18 +118,11 @@ class ArmControllerNode(Node):
         self._motion_lock = threading.Lock()
 
         # ── Cached robot state (updated by the status timer) ────────────────
-        self._robot_state    = STATE_NOT_READY
-        self._prev_robot_state = STATE_NOT_READY   # 상태 전환 감지용
-        self._teaching_mode  = False   # True when SetRobotMode(MANUAL) is active
+        self._robot_state   = STATE_NOT_READY
+        self._teaching_mode = False   # True when SetRobotMode(MANUAL) is active
 
         self._current_joints = [0.0] * 6
         self._current_tcp    = [0.0] * 6
-
-        # ── 안전복구 이벤트 / 스레드 ─────────────────────────────────────
-        self._recovery_event  = threading.Event()
-        self._recovery_thread = threading.Thread(
-            target=self._auto_recovery_loop, daemon=True
-        )
 
         # ── DSR service clients ──────────────────────────────────────────────
         def _cli(srv_type, name):
@@ -152,10 +136,8 @@ class ArmControllerNode(Node):
         self._cli_set_mode       = _cli(SetRobotMode,    'system/set_robot_mode')
         self._cli_get_state      = _cli(GetRobotState,   'system/get_robot_state')
         self._cli_get_pose       = _cli(GetCurrentPose,  'system/get_current_pose')
-        self._cli_dsr_jog             = _cli(DsrJog,               'motion/jog')
-        self._cli_move_home           = _cli(MoveHome,             'motion/move_home')
-        self._cli_set_safe_stop_reset = _cli(SetSafeStopResetType, 'system/set_safe_stop_reset_type')
-        self._cli_get_last_alarm      = _cli(GetLastAlarm,          'system/get_last_alarm')
+        self._cli_dsr_jog   = _cli(DsrJog,   'motion/jog')
+        self._cli_move_home = _cli(MoveHome, 'motion/move_home')
 
         # ── Publishers ───────────────────────────────────────────────────────
         self._pub_status = self.create_publisher(RobotStatus, '/arm/status', 10)
@@ -199,12 +181,7 @@ class ArmControllerNode(Node):
         self._srv_estop = self.create_service(
             EStop, '/arm/estop',
             self._estop_callback,
-            callback_group=self._estop_cbg,   # 전용 Reentrant: 항상 즉시 처리
-        )
-        self._srv_recover = self.create_service(
-            Recover, '/arm/recover',
-            self._recover_callback,
-            callback_group=self._estop_cbg,   # E-Stop과 동일 그룹: 어떤 상태에서도 즉시 처리
+            callback_group=self._estop_cbg,
         )
 
         # ── Action servers ───────────────────────────────────────────────────
@@ -235,9 +212,6 @@ class ArmControllerNode(Node):
             target=self._tcp_poll_loop, daemon=True
         )
         self._tcp_poll_thread.start()
-
-        # ── 자동복구 스레드 ──────────────────────────────────────────────────
-        self._recovery_thread.start()
 
         self.get_logger().info('ArmControllerNode ready.')
 
@@ -337,20 +311,6 @@ class ArmControllerNode(Node):
             if polled is not None:
                 self._robot_state = polled
             state = self._robot_state
-
-        # SAFE_STOP / SAFE_OFF 전환 감지 → 자동복구 트리거
-        # 반드시 정상 운전 중(STANDBY/MOVING)에서 폴트 상태로 전환된 경우에만 발동.
-        # 기동 시 NOT_READY → SAFE_OFF 전환은 정상 시퀀스이므로 무시.
-        if (self._prev_robot_state in (STATE_STANDBY, STATE_MOVING) and
-                state in (STATE_SAFE_STOP, STATE_SAFE_OFF) and
-                self._auto_recovery_enabled):
-            self.get_logger().warn(
-                f'[SafeRecovery] 상태 전환 감지: '
-                f'{STATE_STR.get(self._prev_robot_state, self._prev_robot_state)} '
-                f'→ {STATE_STR.get(state, state)} — 자동복구 예약'
-            )
-            self._recovery_event.set()
-        self._prev_robot_state = state
 
         msg = RobotStatus()
         msg.header.stamp       = self.get_clock().now().to_msg()
@@ -625,41 +585,42 @@ class ArmControllerNode(Node):
             req.radius     = g.blend_radius_mm
             req.mode       = 1 if g.relative else 0
             req.blend_type = 0
-            req.sync_type  = 0   # SYNC: 완료까지 블로킹 → 동작 순서 보장
+
+            # blend_radius > 0 → ASYNC(비동기): DSR이 관절 이동을 시작하자마자 반환.
+            # 이후 바로 MoveL을 전송하면 DSR이 내부적으로 블렌딩 처리.
+            # blend_radius == 0 → SYNC(동기): 완료까지 블로킹 (기존 동작 유지).
+            blend_mode = g.blend_radius_mm > 0.0
+            req.sync_type = 1 if blend_mode else 0
 
             self._robot_state = STATE_MOVING
 
-            done_event = threading.Event()
-            def feedback_thread():
-                while not done_event.is_set():
-                    if goal_handle.is_cancel_requested:
-                        self._request_move_stop()
-                        break
-                    fb = MoveJ.Feedback()
-                    fb.current_joints_deg = self._current_joints
-                    fb.robot_state        = 'MOVING'
-                    goal_handle.publish_feedback(fb)
-                    time.sleep(0.1)
-
-            fb_t = threading.Thread(target=feedback_thread, daemon=True)
-            fb_t.start()
-
             resp = self._call_service_sync(self._cli_move_joint, req, timeout=self._motion_timeout)
-            done_event.set()
-            fb_t.join()
-
-            elapsed = time.time() - t_start
-            if goal_handle.is_cancel_requested:
-                goal_handle.canceled()
-                result.success = False
-                result.message = 'Cancelled'
-                result.execution_time_sec = elapsed
-                return result
 
             if resp is None or not resp.success:
                 result.success = False
                 result.message = 'move_joint failed'
                 goal_handle.abort()
+                return result
+
+            elapsed = time.time() - t_start
+
+            if blend_mode:
+                # ASYNC 모드: DSR이 동작 중이므로 lock을 즉시 해제해
+                # 다음 MoveL이 바로 큐에 들어갈 수 있도록 함
+                log.info(f'MoveJ blending (radius={g.blend_radius_mm}°) — MoveL 즉시 전송 가능')
+                self._motion_lock.release()
+                goal_handle.succeed()
+                result.success = True
+                result.message = f'blending radius={g.blend_radius_mm}'
+                result.execution_time_sec = elapsed
+                return result
+
+            # SYNC 모드: 완전 종료 후 반환
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                result.success = False
+                result.message = 'Cancelled'
+                result.execution_time_sec = elapsed
                 return result
 
             self._robot_state = STATE_STANDBY
@@ -670,7 +631,9 @@ class ArmControllerNode(Node):
             result.execution_time_sec = elapsed
             return result
         finally:
-            self._motion_lock.release()
+            # blend_mode에서는 위에서 이미 release했으므로 중복 방지
+            if self._motion_lock.locked():
+                self._motion_lock.release()
 
     # ══════════════════════════════════════════════════════════════════════════
     # Phase 2 — MoveL execute callback
@@ -862,131 +825,6 @@ class ArmControllerNode(Node):
         return response
 
     # ══════════════════════════════════════════════════════════════════════════
-    # Safety recovery
-    # ══════════════════════════════════════════════════════════════════════════
-
-    def _auto_recovery_loop(self) -> None:
-        """SAFE_STOP/SAFE_OFF 전환 시 자동복구 시퀀스를 실행하는 백그라운드 스레드."""
-        while rclpy.ok():
-            self._recovery_event.wait()
-            self._recovery_event.clear()
-            if not self._auto_recovery_enabled:
-                continue
-            time.sleep(1.5)   # 상태 안정화 대기
-            self.get_logger().warn('=== [SafeRecovery] 자동 안전복구 시퀀스 실행 ===')
-            success, msg = self._do_recovery(go_to_teaching=True)
-            level = self.get_logger().info if success else self.get_logger().error
-            level(f'[SafeRecovery] {msg}')
-
-    def _do_recovery(self, go_to_teaching: bool = False) -> tuple:
-        """
-        SAFE_STOP / SAFE_OFF → STANDBY 복구 시퀀스.
-        SAFE_STOP: SetSafeStopResetType(0) → SetRobotControl(RESET_SAFET_STOP=2)
-        SAFE_OFF : SetRobotMode(AUTO) → SetRobotControl(RESET_SAFET_OFF=3)
-        성공 시 go_to_teaching=True 이면 MANUAL 모드 진입.
-        """
-        log   = self.get_logger()
-        state = self._get_robot_state_now()
-
-        log.warn(f'[SafeRecovery] 현재 상태: {STATE_STR.get(state, state)}')
-
-        if state == STATE_STANDBY:
-            if go_to_teaching:
-                return self._enter_teaching_mode()
-            return True, '이미 STANDBY 상태'
-
-        if state not in (STATE_SAFE_STOP, STATE_SAFE_OFF, STATE_NOT_READY):
-            return False, f'복구 불가 상태: {STATE_STR.get(state, state)}'
-
-        # 마지막 알람 조회 (참고용 로그)
-        alarm_resp = self._call_service_sync(
-            self._cli_get_last_alarm, GetLastAlarm.Request(), timeout=3.0
-        )
-        if alarm_resp and alarm_resp.success:
-            a = alarm_resp.log_alarm
-            log.warn(
-                f'[SafeRecovery] 마지막 알람 — level={a.level} group={a.group} '
-                f'index={a.index} params={list(a.param)}'
-            )
-
-        if state == STATE_SAFE_STOP:
-            # Step 1: 안전정지 리셋 타입 설정 (PROGRAM_STOP)
-            rst_req            = SetSafeStopResetType.Request()
-            rst_req.reset_type = 0
-            self._call_service_sync(self._cli_set_safe_stop_reset, rst_req, timeout=5.0)
-            log.info('[SafeRecovery] SetSafeStopResetType(0) 전송')
-
-            # Step 2: CONTROL_RESET_SAFET_STOP
-            ctrl_req               = SetRobotControl.Request()
-            ctrl_req.robot_control = CONTROL_RESET_SAFET_STOP
-            self._call_service_sync(self._cli_set_control, ctrl_req, timeout=5.0)
-            log.info('[SafeRecovery] SetRobotControl(RESET_SAFET_STOP) 전송')
-
-        else:  # SAFE_OFF / NOT_READY
-            # Step 1: AUTONOMOUS 모드 전환
-            mode_req            = SetRobotMode.Request()
-            mode_req.robot_mode = 1
-            self._call_service_sync(self._cli_set_mode, mode_req, timeout=5.0)
-            log.info('[SafeRecovery] SetRobotMode(AUTONOMOUS) 전송')
-
-            # Step 2: 서보 ON (RESET_SAFET_OFF)
-            ctrl_req               = SetRobotControl.Request()
-            ctrl_req.robot_control = CONTROL_RESET_SAFET_OFF
-            self._call_service_sync(self._cli_set_control, ctrl_req, timeout=5.0)
-            log.info('[SafeRecovery] SetRobotControl(RESET_SAFET_OFF) 전송')
-
-        # STANDBY 대기 (최대 15초)
-        deadline = time.time() + 15.0
-        while time.time() < deadline:
-            s = self._get_robot_state_now()
-            if s == STATE_STANDBY:
-                self._robot_state = STATE_STANDBY
-                log.info('[SafeRecovery] 복구 성공 → STANDBY')
-                if go_to_teaching:
-                    return self._enter_teaching_mode()
-                return True, '안전복구 성공'
-            time.sleep(0.5)
-
-        final = self._get_robot_state_now()
-        return False, (
-            f'안전복구 실패 — 최종 상태: {STATE_STR.get(final, final)}\n'
-            '  하드웨어 안전 조건(비상정지 버튼, 안전 펜스) 확인 필요'
-        )
-
-    def _enter_teaching_mode(self) -> tuple:
-        """서보 ON 상태에서 MANUAL 모드로 진입."""
-        mode_req            = SetRobotMode.Request()
-        mode_req.robot_mode = 0   # MANUAL
-        resp = self._call_service_sync(self._cli_set_mode, mode_req, timeout=5.0)
-        if resp and resp.success:
-            self._teaching_mode = True
-            self.get_logger().info(
-                '[SafeRecovery] 직접 교시 모드 진입 — '
-                '로봇 위치 확인 후 /arm/teaching enable=false 로 해제하세요'
-            )
-            return True, '안전복구 완료 → 직접 교시 모드 진입'
-        return False, 'SetRobotMode(MANUAL) 실패'
-
-    def _recover_callback(self, request: Recover.Request,
-                          response: Recover.Response) -> Recover.Response:
-        """수동 안전복구 트리거 (/arm/recover)."""
-        # 알람 문자열 수집
-        alarm_str  = ''
-        alarm_resp = self._call_service_sync(
-            self._cli_get_last_alarm, GetLastAlarm.Request(), timeout=3.0
-        )
-        if alarm_resp and alarm_resp.success:
-            a = alarm_resp.log_alarm
-            alarm_str = f'level={a.level} group={a.group} index={a.index} params={list(a.param)}'
-
-        success, msg = self._do_recovery(go_to_teaching=request.go_to_teaching)
-        response.success          = success
-        response.message          = msg
-        response.robot_state_after = self._get_robot_state_now()
-        response.last_alarm       = alarm_str
-        return response
-
-    # ══════════════════════════════════════════════════════════════════════════
     # Phase 3 — WaitDuration service
     # ══════════════════════════════════════════════════════════════════════════
 
@@ -1019,11 +857,12 @@ def main(args=None) -> None:
     executor.add_node(node)
     try:
         executor.spin()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

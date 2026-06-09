@@ -8,6 +8,7 @@ find_package(action_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotStatus.msg"
+  "msg/PlcStatus.msg"
   "srv/ServoOn.srv"
   "srv/WaitDuration.srv"
   "srv/Jog.srv"
@@ -15,6 +16,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/Teaching.srv"
   "srv/EStop.srv"
   "srv/Recover.srv"
+  "srv/PlcSetOutput.srv"
   "action/MoveJ.action"
   "action/MoveL.action"
   DEPENDENCIES std_msgs action_msgs

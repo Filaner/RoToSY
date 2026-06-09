@@ -243,6 +243,43 @@
       border-color: var(--blue);
     }
 
+    /* ── Disconnected overlay ── */
+    main { position: relative; }
+
+    #disconnected-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 17, 23, 0.82);
+      z-index: 10;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 0.75rem;
+      backdrop-filter: blur(3px);
+      border-radius: 0.75rem;
+    }
+
+    #disconnected-overlay.visible { display: flex; }
+
+    #disconnected-overlay .ov-icon {
+      font-size: 2.5rem;
+      line-height: 1;
+    }
+
+    #disconnected-overlay .ov-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--yellow);
+    }
+
+    #disconnected-overlay .ov-sub {
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-family: var(--mono);
+      text-align: center;
+    }
+
     /* ── E-Stop ── */
     .btn-estop {
       background: var(--red);
@@ -274,6 +311,16 @@
     }
     .btn-recover:disabled { opacity: 0.3; cursor: not-allowed; }
     .btn-recover.recovering { animation: pulse 0.8s infinite; }
+    .btn-recover.recovery-active {
+      background: #14532d55;
+      color: var(--green);
+      border-color: rgba(34,197,94,0.5);
+    }
+    .btn-recover.recovery-active:hover:not(:disabled) {
+      background: var(--green);
+      color: #1a1d27;
+    }
+
   </style>
 </head>
 <body>
@@ -291,50 +338,81 @@
 
 <main>
 
+  <!-- Disconnected overlay (WebSocket 끊김 시에만 표시) -->
+  <div id="disconnected-overlay" class="visible">
+    <div class="ov-icon">⚠</div>
+    <div class="ov-title">서버 연결 대기 중</div>
+    <div class="ov-sub" id="ov-sub-msg">WebSocket 서버에 연결 중...</div>
+  </div>
+
+  <!-- arm_controller 미연결 배너 (arm_controller 없을 때만 표시) -->
+  <div id="arm-disconnected-banner" style="
+    display: none;
+    grid-column: 1 / -1;
+    background: #78350f33;
+    border: 1px solid var(--yellow);
+    border-radius: 0.75rem;
+    padding: 0.65rem 1.25rem;
+    font-size: 0.82rem;
+    color: var(--yellow);
+    font-family: var(--mono);
+  ">
+    ⚠ arm_controller 노드 미연결 — 로봇 제어 비활성 (카메라·캘리브레이션은 사용 가능)
+  </div>
+
   <!-- Error banner (hidden by default) -->
   <div id="error-banner">
     <div class="err-title">Error</div>
     <div id="error-msg" class="err-msg"></div>
   </div>
 
-  <!-- Robot state -->
-  <div class="card" style="grid-column: 1 / -1;">
-    <div style="display: flex; align-items: center; gap: 2rem; flex-wrap: wrap;">
+  <!-- Robot State + 전자석 제어 (side by side) -->
+  <div style="grid-column: 1 / -1; display: flex; gap: 1rem; align-items: stretch;">
 
-      <!-- 상태 정보 (왼쪽) -->
-      <div style="flex: 1; min-width: 280px;">
-        <div class="card-title" style="margin-bottom: 0.9rem;">Robot State</div>
-        <div style="display: flex; gap: 2.5rem; flex-wrap: wrap; align-items: flex-start;">
-          <div class="status-item">
-            <span class="status-label">State</span>
-            <span id="st-state" class="status-value plain">—</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">Servo</span>
-            <span id="st-servo" class="status-value plain">—</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">Motion</span>
-            <span id="st-moving" class="status-value plain">—</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">Arm Ready</span>
-            <span id="st-ready" class="status-value plain">—</span>
-          </div>
+    <!-- Robot State (2/3) -->
+    <div class="card" style="flex: 2; min-width: 0;">
+      <div class="card-title" style="margin-bottom: 0.9rem;">Robot State</div>
+      <!-- 1줄: 상태 -->
+      <div style="display: flex; gap: 2.5rem; flex-wrap: wrap; align-items: flex-start;">
+        <div class="status-item">
+          <span class="status-label">State</span>
+          <span id="st-state" class="status-value plain">—</span>
         </div>
-        <div id="control-feedback" style="margin-top:0.7rem; font-size:0.75rem; color:var(--muted); font-family:var(--mono); min-height:1em;"></div>
+        <div class="status-item">
+          <span class="status-label">Servo</span>
+          <span id="st-servo" class="status-value plain">—</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Motion</span>
+          <span id="st-moving" class="status-value plain">—</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Arm Ready</span>
+          <span id="st-ready" class="status-value plain">—</span>
+        </div>
       </div>
-
-      <!-- 컨트롤 버튼 (오른쪽) -->
-      <div style="display: flex; gap: 0.65rem; flex-shrink: 0; align-items: center;">
-        <button id="btn-servo-on"  class="btn btn-on"    onclick="setServo(true)"    style="flex: none; padding: 0.7rem 1.2rem;">Servo ON</button>
-        <button id="btn-servo-off" class="btn btn-off"   onclick="setServo(false)"   style="flex: none; padding: 0.7rem 1.2rem;">Servo OFF</button>
-        <button id="btn-home"      class="btn move-btn"  onclick="moveHome()"        style="flex: none; padding: 0.7rem 1.2rem; background:#78350f33; border-color:#f59e0b44; color:var(--yellow);">Home</button>
-        <button id="btn-teach"     class="btn btn-teach" onclick="toggleTeaching()"  style="flex: none; padding: 0.7rem 1.2rem;">직접 교시</button>
-        <button id="btn-recover"   class="btn btn-recover" onclick="safeRecover()" style="flex: none; padding: 0.7rem 1.2rem;" disabled title="SAFE_STOP / SAFE_OFF 상태에서 복구 후 직접 교시 모드 진입">⚡ 안전 복구</button>
+      <div id="control-feedback" style="margin-top:0.5rem; font-size:0.75rem; color:var(--muted); font-family:var(--mono); min-height:1em;"></div>
+      <!-- 2줄: 버튼 -->
+      <div style="display: flex; gap: 0.65rem; flex-wrap: wrap; align-items: center; margin-top: 0.75rem;">
+        <button id="btn-servo-on"  class="btn btn-on"      onclick="setServo(true)"   style="flex: none; padding: 0.7rem 1.2rem;">Servo ON</button>
+        <button id="btn-servo-off" class="btn btn-off"     onclick="setServo(false)"  style="flex: none; padding: 0.7rem 1.2rem;">Servo OFF</button>
+        <button id="btn-home"      class="btn move-btn"    onclick="moveHome()"       style="flex: none; padding: 0.7rem 1.2rem; background:#78350f33; border-color:#f59e0b44; color:var(--yellow);">Home</button>
+        <button id="btn-teach"     class="btn btn-teach"   onclick="toggleTeaching()" style="flex: none; padding: 0.7rem 1.2rem;">직접 교시</button>
+        <button id="btn-recover"   class="btn btn-recover" onclick="toggleRecovery()" style="flex: none; padding: 0.7rem 1.2rem;" disabled>⚡ 안전 복구</button>
       </div>
-
     </div>
+
+    <!-- 전자석 제어 (1/3) -->
+    <div class="card" style="flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 0.75rem;">
+      <div class="card-title" style="align-self: flex-start; margin-bottom: 0;">전자석 제어</div>
+      <span id="magnet-state-badge" style="font-size: 3rem; font-weight: 900; letter-spacing: 0.05em; color: var(--muted); font-family: var(--mono);">OFF</span>
+      <div style="display: flex; gap: 0.65rem; width: 100%;">
+        <button id="btn-magnet-on"  class="btn btn-on"  onclick="magnetOn()"  style="flex: 1; padding: 0.7rem 1.2rem;">⚡ ON</button>
+        <button id="btn-magnet-off" class="btn btn-off" onclick="magnetOff()" style="flex: 1; padding: 0.7rem 1.2rem;">✕ OFF</button>
+      </div>
+      <span id="magnet-feedback" style="font-family:var(--mono); font-size:0.75rem; color:var(--muted); min-height:1em; text-align:center;"></span>
+    </div>
+
   </div>
 
   <!-- TCP Pose -->
@@ -363,41 +441,72 @@
     </div>
   </div>
 
-  <!-- Joint Jog Control -->
+  <!-- Camera Feed -->
   <div class="card" style="grid-column: 1 / -1;">
-    <div class="card-title">
-      Joint Jog Control
-      <span id="jog-status-badge" style="margin-left: 0.5rem; color: var(--red); display: none;">[DISABLED: SERVO OFF]</span>
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>Camera Feed &nbsp;<span style="color:var(--blue);font-weight:400;text-transform:none;letter-spacing:0">RealSense</span></span>
+      <div style="display:flex; align-items:center; gap:0.75rem;">
+        <span id="aruco-badge" style="font-size:0.75rem; color:var(--muted); font-family:var(--mono);">마커 없음</span>
+        <button class="btn" onclick="toggleAruco()" id="btn-aruco"
+          style="flex:none; padding:0.4rem 0.8rem; font-size:0.7rem; background:var(--surface); border-color:var(--border); color:var(--muted);">
+          ArUco 새로고침
+        </button>
+      </div>
     </div>
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
-      <template id="jog-row-template">
-        <div class="pose-item" style="display: flex; flex-direction: column; gap: 0.5rem;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="pose-axis" style="font-weight: 700;">J<span class="j-idx"></span></span>
-            <span class="pose-val" style="font-size: 0.8rem; color: var(--muted);"><span class="j-val">0.00</span>°</span>
+    <div style="display:flex; gap:1rem; align-items:flex-start;">
+      <div style="flex:0 0 75%; position:relative;">
+        <img id="camera-img"
+          src="/camera/stream"
+          style="width:100%; border-radius:0.5rem; border:1px solid var(--border); display:block; background:#000;"
+        />
+        <div id="camera-err" style="display:none; padding:2rem; text-align:center; color:var(--muted); font-size:0.85rem;">
+          카메라 연결 중... 잠시 대기
+        </div>
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:0.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem;">마커 상태 (ID 0~5)</div>
+        <div style="display:flex; flex-direction:column; gap:0.3rem;">
+          <div id="marker-slot-0" style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.35rem;">
+            <span id="marker-dot-0" style="width:7px;height:7px;border-radius:50%;background:var(--surface);flex-shrink:0;"></span>
+            <span style="font-size:0.75rem; font-family:var(--mono); color:var(--muted);">ID <b style="color:var(--yellow);">0</b></span>
+            <span id="marker-coord-0" style="font-size:0.68rem; font-family:var(--mono); color:var(--muted); margin-left:auto;">미감지</span>
           </div>
-          <div class="btn-group" style="margin-top: 0;">
-            <button class="btn btn-off jog-btn" data-dir="-1" style="padding: 0.5rem;">-</button>
-            <button class="btn btn-on jog-btn" data-dir="1" style="padding: 0.5rem;">+</button>
+          <div id="marker-slot-1" style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.35rem;">
+            <span id="marker-dot-1" style="width:7px;height:7px;border-radius:50%;background:var(--surface);flex-shrink:0;"></span>
+            <span style="font-size:0.75rem; font-family:var(--mono); color:var(--muted);">ID <b style="color:var(--yellow);">1</b></span>
+            <span id="marker-coord-1" style="font-size:0.68rem; font-family:var(--mono); color:var(--muted); margin-left:auto;">미감지</span>
+          </div>
+          <div id="marker-slot-2" style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.35rem;">
+            <span id="marker-dot-2" style="width:7px;height:7px;border-radius:50%;background:var(--surface);flex-shrink:0;"></span>
+            <span style="font-size:0.75rem; font-family:var(--mono); color:var(--muted);">ID <b style="color:var(--yellow);">2</b></span>
+            <span id="marker-coord-2" style="font-size:0.68rem; font-family:var(--mono); color:var(--muted); margin-left:auto;">미감지</span>
+          </div>
+          <div id="marker-slot-3" style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.35rem;">
+            <span id="marker-dot-3" style="width:7px;height:7px;border-radius:50%;background:var(--surface);flex-shrink:0;"></span>
+            <span style="font-size:0.75rem; font-family:var(--mono); color:var(--muted);">ID <b style="color:var(--yellow);">3</b></span>
+            <span id="marker-coord-3" style="font-size:0.68rem; font-family:var(--mono); color:var(--muted); margin-left:auto;">미감지</span>
+          </div>
+          <div id="marker-slot-4" style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.35rem;">
+            <span id="marker-dot-4" style="width:7px;height:7px;border-radius:50%;background:var(--surface);flex-shrink:0;"></span>
+            <span style="font-size:0.75rem; font-family:var(--mono); color:var(--muted);">ID <b style="color:var(--yellow);">4</b></span>
+            <span id="marker-coord-4" style="font-size:0.68rem; font-family:var(--mono); color:var(--muted); margin-left:auto;">미감지</span>
+          </div>
+          <div id="marker-slot-5" style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.35rem;">
+            <span id="marker-dot-5" style="width:7px;height:7px;border-radius:50%;background:var(--surface);flex-shrink:0;"></span>
+            <span style="font-size:0.75rem; font-family:var(--mono); color:var(--muted);">ID <b style="color:var(--yellow);">5</b></span>
+            <span id="marker-coord-5" style="font-size:0.68rem; font-family:var(--mono); color:var(--muted); margin-left:auto;">미감지</span>
           </div>
         </div>
-      </template>
-      <div id="jog-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; width: 100%;"></div>
-    </div>
-    
-    <div style="margin-top: 1.5rem; display: flex; align-items: center; gap: 1rem;">
-      <span class="status-label">Jog Speed</span>
-      <input type="range" id="jog-speed-range" min="1" max="50" value="5" style="flex: 1; accent-color: var(--blue);">
-      <span id="jog-speed-val" class="status-value plain" style="width: 3ch; text-align: right;">5</span>
-      <span class="status-label">%</span>
+      </div>
     </div>
   </div>
+
 
   <!-- Direct Move Control -->
   <div class="card" style="grid-column: 1 / -1;">
     <div class="card-title">Direct Move Control</div>
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
-      
+
       <!-- Task Space (MoveL) -->
       <div class="pose-item" style="border: none; background: transparent; padding: 0;">
         <div class="pose-axis" style="margin-bottom: 0.75rem; font-size: 0.75rem; color: var(--blue);">Task Space (Linear Move)</div>
@@ -435,15 +544,375 @@
     </div>
   </div>
 
+  <!-- Joint Jog Control -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">
+      Joint Jog Control
+      <span id="jog-status-badge" style="margin-left: 0.5rem; color: var(--red); display: none;">[DISABLED: SERVO OFF]</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+      <template id="jog-row-template">
+        <div class="pose-item" style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="pose-axis" style="font-weight: 700;">J<span class="j-idx"></span></span>
+            <span class="pose-val" style="font-size: 0.8rem; color: var(--muted);"><span class="j-val">0.00</span>°</span>
+          </div>
+          <div class="btn-group" style="margin-top: 0;">
+            <button class="btn btn-off jog-btn" data-dir="-1" style="padding: 0.5rem;">-</button>
+            <button class="btn btn-on jog-btn" data-dir="1" style="padding: 0.5rem;">+</button>
+          </div>
+        </div>
+      </template>
+      <div id="jog-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; width: 100%;"></div>
+    </div>
+
+    <div style="margin-top: 1.5rem; display: flex; align-items: center; gap: 1rem;">
+      <span class="status-label">Jog Speed</span>
+      <input type="range" id="jog-speed-range" min="1" max="50" value="5" style="flex: 1; accent-color: var(--blue);">
+      <span id="jog-speed-val" class="status-value plain" style="width: 3ch; text-align: right;">5</span>
+      <span class="status-label">%</span>
+    </div>
+  </div>
+
+  <!-- TCP Jog (Cartesian) -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">
+      TCP Jog (Cartesian)
+      <span id="cart-jog-badge" style="margin-left:0.5rem; color:var(--red); display:none;">[DISABLED: SERVO OFF]</span>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:1rem;">
+      <template id="cart-jog-template">
+        <div class="pose-item" style="display:flex; flex-direction:column; gap:0.5rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span class="pose-axis" style="font-weight:700;" data-label></span>
+            <span class="pose-val" style="font-size:0.8rem; color:var(--muted);"><span data-val>0.00</span><span data-unit></span></span>
+          </div>
+          <div class="btn-group" style="margin-top:0;">
+            <button class="btn btn-off cart-jog-btn" data-dir="-1" style="padding:0.5rem;">-</button>
+            <button class="btn btn-on  cart-jog-btn" data-dir="1"  style="padding:0.5rem;">+</button>
+          </div>
+        </div>
+      </template>
+      <div id="cart-jog-container" style="display:contents;"></div>
+    </div>
+    <div style="margin-top:1.5rem; display:flex; align-items:center; gap:1.5rem; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="status-label">이동 (mm)</span>
+        <input type="number" id="cart-step-trans" value="50" min="1" max="200" step="1"
+          style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="status-label">회전 (°)</span>
+        <input type="number" id="cart-step-rot" value="1" min="0.1" max="10" step="0.1"
+          style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+    </div>
+  </div>
+
+  <!-- Motion Sequence Control -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">Motion Sequence Control</div>
+    <div style="display:flex; gap:1.5rem; align-items:center;">
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="status-label">Marker ID</span>
+        <input type="number" id="seq-marker-id" min="0" max="5"
+          style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+      <button id="btn-seq-start" class="btn btn-on" onclick="startMotionSeq()" style="flex:none; padding:0.6rem 1.2rem;">시퀀스 시작</button>
+      <button id="btn-seq-stop"  class="btn btn-off" onclick="stopMotionSeq()" style="flex:none; padding:0.6rem 1.2rem;" disabled>시퀀스 중지</button>
+      <button id="btn-seq-next"  class="btn btn-teach" onclick="nextMotionStep()" style="flex:none; padding:0.6rem 1.2rem;" disabled>▶ 다음 단계 (Next)</button>
+      <div style="flex:1; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem; display:flex; align-items:center; gap:1rem;">
+        <span class="status-label">현재 단계:</span>
+        <span id="st-seq-step" class="status-value plain" style="color:var(--yellow);">IDLE</span>
+      </div>
+    </div>
+    <div style="margin-top:0.75rem; font-size:0.72rem; color:var(--muted);">
+      ※ 시퀀스 시작 전 <b style="color:var(--green);">Servo ON</b> 상태여야 합니다. <code>motion_sequence_node</code>가 실행 중인지 확인하세요.
+    </div>
+  </div>
+
+  <!-- Temp Sequence Control -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">Temp Sequence Control</div>
+    <div style="display:flex; gap:1.5rem; align-items:center;">
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="status-label">Marker ID</span>
+        <input type="number" id="tmp-marker-id" min="0" max="5"
+          style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+      <button id="btn-tmp-start" class="btn btn-on" onclick="startTempSeq()" style="flex:none; padding:0.6rem 1.2rem;">시퀀스 시작</button>
+      <button id="btn-tmp-stop"  class="btn btn-off" onclick="stopTempSeq()" style="flex:none; padding:0.6rem 1.2rem;" disabled>시퀀스 중지</button>
+      <button id="btn-tmp-next"  class="btn btn-teach" onclick="nextTempStep()" style="flex:none; padding:0.6rem 1.2rem;" disabled>▶ 다음 단계 (Next)</button>
+      <div style="flex:1; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem; display:flex; align-items:center; gap:1rem;">
+        <span class="status-label">현재 단계:</span>
+        <span id="st-tmp-step" class="status-value plain" style="color:var(--yellow);">IDLE</span>
+      </div>
+    </div>
+    <div style="margin-top:0.75rem; font-size:0.72rem; color:var(--muted);">
+      ※ 시퀀스 시작 전 <b style="color:var(--green);">Servo ON</b> 상태여야 합니다. <code>temp_sequence_node</code>가 실행 중인지 확인하세요.
+    </div>
+  </div>
+
+  <!-- Manual Point Calibration -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>Manual Point Calibration <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem;">— ID 0 마커 부착 상태로 로봇 이동 후 캡처</span></span>
+      <div style="display:flex; gap:0.5rem; align-items:center;">
+        <span id="calib-count-badge" style="font-size:0.75rem; color:var(--muted); font-family:var(--mono);">0 포인트</span>
+        <button class="btn" onclick="resetCalib()" style="flex:none; padding:0.35rem 0.7rem; font-size:0.7rem; background:var(--surface); border-color:var(--border); color:var(--red);">초기화</button>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:1rem;">
+      <!-- TCP 입력 -->
+      <div>
+        <div style="font-size:0.7rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.5rem;">TCP 위치 (mm) — 로봇 상태창 값 입력</div>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:0.5rem; margin-bottom:0.6rem;">
+          <div><div class="pose-axis">X</div><input id="cb-x" type="number" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div><div class="pose-axis">Y</div><input id="cb-y" type="number" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+          <div><div class="pose-axis">Z</div><input id="cb-z" type="number" step="0.1" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.4rem; border-radius:4px; font-family:var(--mono);"></div>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button class="btn" onclick="calibFillTcp()" style="flex:1; padding:0.5rem; font-size:0.72rem; background:var(--surface); border-color:var(--border); color:var(--muted);">웹 TCP 자동 입력</button>
+          <button class="btn btn-on" onclick="calibCapture()" style="flex:1.5; padding:0.5rem; font-size:0.8rem; font-weight:700;">캡처</button>
+          <button class="btn btn-teach" onclick="calibCaptureAuto()" style="flex:1; padding:0.5rem; font-size:0.75rem; font-weight:700;">Auto 캡처</button>
+        </div>
+        <div id="calib-feedback" style="margin-top:0.4rem; font-size:0.75rem; font-family:var(--mono); color:var(--muted); min-height:1em;"></div>
+      </div>
+
+      <!-- 마커 감지 상태 -->
+      <div>
+        <div style="font-size:0.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.5rem;">ID 0 마커 감지 상태</div>
+        <div id="calib-cam-info" style="font-family:var(--mono); font-size:0.8rem; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.7rem; min-height:4rem; line-height:1.7;">
+          <span style="color:var(--muted);">마커 미감지</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 수집된 포인트 목록 -->
+    <div id="calib-points-list" style="font-family:var(--mono); font-size:0.75rem; max-height:130px; overflow-y:auto; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.5rem; margin-bottom:1rem; color:var(--muted);">
+      포인트 없음
+    </div>
+
+    <!-- 계산 파라미터 — TCP 방향은 캡처 시 자동 저장됨 -->
+    <div style="margin-bottom:0.75rem;">
+      <div style="background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem;">
+        <div style="font-size:0.68rem; color:var(--yellow); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem;">TCP → 마커 오프셋 (tool 좌표계, mm) <span style="color:var(--muted);text-transform:none;letter-spacing:0;">— 그리퍼에 마커 부착 위치, 한 번만 설정</span></div>
+        <div style="display:flex; gap:0.4rem; align-items:center;">
+          <span class="pose-axis">x</span><input id="cb-gm-x" type="number" value="50"  step="0.1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span class="pose-axis">y</span><input id="cb-gm-y" type="number" value="0"   step="0.1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span class="pose-axis">z</span><input id="cb-gm-z" type="number" value="-55" step="0.1" style="width:4.2rem; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:0.3rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span style="font-size:0.7rem; color:var(--muted); margin-left:0.5rem;">TCP 방향은 캡처 시 자동 저장 — 별도 입력 불필요</span>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex; gap:0.75rem; align-items:center;">
+      <button class="btn btn-on" onclick="computeCalib()" style="flex:none; padding:0.6rem 1.2rem;">계산 (SVD)</button>
+      <button class="btn" onclick="saveCalib()" id="btn-calib-save" disabled style="flex:none; padding:0.6rem 1.2rem; background:var(--surface); border-color:var(--border); color:var(--muted);">저장</button>
+      <div id="calib-result" style="flex:1; font-family:var(--mono); font-size:0.8rem;"></div>
+    </div>
+  </div>
+
+  <!-- 터치 캘리브레이션 (숨김) -->
+  <div class="card" style="grid-column: 1 / -1; display:none;">
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>터치 캘리브레이션
+        <span style="color:var(--green);font-weight:600;font-size:0.72rem;text-transform:none;letter-spacing:0;"> ★ 권장</span>
+        <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem;">
+          — TCP로 마커 터치 → P_base 기록 → 로봇 치우기 → 계산
+        </span>
+      </span>
+      <div style="display:flex; gap:0.5rem; align-items:center;">
+        <span id="touch-count-badge" style="font-size:0.75rem; color:var(--muted); font-family:var(--mono);">0 기록</span>
+        <button class="btn" onclick="touchReset()" style="padding:0.35rem 0.7rem; font-size:0.7rem; background:var(--surface); border-color:var(--border); color:var(--red);">초기화</button>
+      </div>
+    </div>
+
+    <!-- 현재 TCP 표시 -->
+    <div style="background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem; margin-bottom:1rem; display:flex; align-items:center; gap:1.5rem;">
+      <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.08em; flex-shrink:0;">현재 TCP</div>
+      <div id="touch-tcp-display" style="font-family:var(--mono); font-size:0.85rem; color:var(--text);">—</div>
+    </div>
+
+    <!-- 공면 경고 -->
+    <div id="touch-coplanar-warn" style="display:none; background:#78350f33; border:1px solid var(--yellow);
+         border-radius:0.5rem; padding:0.6rem; margin-bottom:0.75rem; font-size:0.78rem; color:var(--yellow);"></div>
+
+    <!-- 마커 테이블 -->
+    <div id="touch-marker-table" style="margin-bottom:1rem;">
+      <div style="font-family:var(--mono); font-size:0.72rem; color:var(--muted); display:grid;
+           grid-template-columns:3.5rem 1fr 1fr 6rem; gap:0.3rem; padding:0.3rem 0.5rem;
+           border-bottom:1px solid var(--border);">
+        <span>ID</span><span>카메라 감지 (mm)</span><span>TCP 기록 (mm)</span><span></span>
+      </div>
+      <div id="touch-rows"></div>
+    </div>
+
+    <!-- 절차 안내 -->
+    <div style="background:var(--bg); border:1px solid var(--yellow); border-radius:0.5rem; padding:0.6rem; margin-bottom:1rem; font-size:0.75rem; color:var(--text); line-height:1.8;">
+      <b style="color:var(--yellow);">절차</b><br>
+      ① 그리퍼 끝으로 마커를 터치 → <b>"TCP 기록"</b> (카메라에 안 보여도 됨)<br>
+      ② 마커 1~5 반복 + <b style="color:var(--green);">캐비닛 앞면과 깊이가 다른 곳에 마커 추가</b> (테이블 위, 캐비닛 측면 등)<br>
+      ③ 로봇을 캐비닛에서 멀리 이동 → 카메라가 모든 마커를 선명히 봄<br>
+      ④ <b>"계산"</b> 클릭<br>
+      <span style="color:var(--muted);">※ 마커 0은 그리퍼 위에 있으므로 이 목록에 표시되지 않습니다</span>
+    </div>
+    <div style="display:flex; gap:0.75rem; align-items:center;">
+      <button class="btn btn-on" onclick="touchCompute()" style="flex:none; padding:0.6rem 1.2rem;">계산 (SVD)</button>
+      <button class="btn" onclick="touchSave()" id="touch-btn-save" disabled
+              style="flex:none; padding:0.6rem 1.2rem; background:var(--surface); border-color:var(--border); color:var(--muted);">저장</button>
+      <div id="touch-result" style="flex:1; font-family:var(--mono); font-size:0.8rem;"></div>
+    </div>
+  </div>
+
+  <!-- 교시 Hand-Eye Calibration (숨김) -->
+  <div class="card" style="grid-column: 1 / -1; display:none;">
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>교시 Hand-Eye 캘리브레이션
+        <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem;">
+          — 로봇 직접 교시 → 마커 보일 때 캡처 → calibrateHandEye(PARK)
+        </span>
+      </span>
+      <div style="display:flex; gap:0.5rem; align-items:center;">
+        <span id="he-count-badge" style="font-size:0.75rem; color:var(--muted); font-family:var(--mono);">0 샘플</span>
+        <button class="btn" onclick="heReset()" style="padding:0.35rem 0.7rem; font-size:0.7rem; background:var(--surface); border-color:var(--border); color:var(--red);">초기화</button>
+      </div>
+    </div>
+
+    <!-- 상태 표시 -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+      <div style="background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.7rem;">
+        <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem;">현재 TCP (mm / deg)</div>
+        <div id="he-tcp-display" style="font-family:var(--mono); font-size:0.82rem; color:var(--text); line-height:1.8;">—</div>
+      </div>
+      <div style="background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.7rem;">
+        <div style="font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem; display:flex; align-items:center; gap:0.4rem;">
+          <span id="he-marker-dot" style="width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block;"></span>
+          <span id="he-marker-label" style="color:var(--red);">ID 0 마커 미감지</span>
+        </div>
+        <div id="he-marker-display" style="font-family:var(--mono); font-size:0.82rem; color:var(--muted); line-height:1.8;">—</div>
+      </div>
+    </div>
+
+    <!-- 캡처 버튼 -->
+    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:1rem;">
+      <button id="he-btn-capture" class="btn btn-on" onclick="heCapture()"
+              style="padding:0.7rem 2rem; font-size:0.95rem; font-weight:700; flex:none;">
+        ● 샘플 캡처
+      </button>
+      <div id="he-capture-feedback" style="font-family:var(--mono); font-size:0.8rem; color:var(--muted);"></div>
+    </div>
+
+    <!-- 샘플 목록 -->
+    <div id="he-sample-list" style="font-family:var(--mono); font-size:0.75rem; max-height:140px; overflow-y:auto;
+         background:var(--bg); border:1px solid var(--border); border-radius:0.5rem;
+         padding:0.5rem; margin-bottom:1rem; color:var(--muted);">
+      샘플 없음
+    </div>
+
+    <!-- 계산 / 저장 -->
+    <div style="display:flex; gap:0.75rem; align-items:center;">
+      <button class="btn btn-on" onclick="heCompute()" style="flex:none; padding:0.6rem 1.2rem;">계산 (PARK)</button>
+      <button class="btn" onclick="heSave()" id="he-btn-save" disabled
+              style="flex:none; padding:0.6rem 1.2rem; background:var(--surface); border-color:var(--border); color:var(--muted);">저장</button>
+      <div id="he-result" style="flex:1; font-family:var(--mono); font-size:0.8rem;"></div>
+    </div>
+
+    <div style="margin-top:0.75rem; padding:0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem;
+         font-size:0.72rem; color:var(--muted); line-height:1.6;">
+      <b style="color:var(--yellow);">교시 가이드</b> —
+      다양한 방향에서 15~20개 수집 권장.
+      로봇 손목(J6) 방향을 ±45° 이상 변화시킬수록 정확도 향상.
+      마커가 카메라 화면에서 크고 선명하게 보일 때 캡처.
+      잔차 <b style="color:var(--green);">5mm 이하</b>이면 양호.
+    </div>
+  </div>
+
+  <!-- Auto Calibration (숨김) -->
+  <div class="card" style="grid-column: 1 / -1; display:none;">
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>자동 캘리브레이션 <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:0.7rem;">— 범위 내 랜덤 이동 → ID 0 마커 감지 시 자동 캡처</span></span>
+      <span id="auto-count-badge" style="font-size:0.75rem; color:var(--muted); font-family:var(--mono);">대기 중</span>
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:0.75rem; margin-bottom:1rem;">
+      <div>
+        <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.3rem;">X (mm)</div>
+        <div style="display:flex; gap:0.4rem; align-items:center;">
+          <input id="ar-xmin" type="number" value="310" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span style="color:var(--muted); flex-shrink:0;">~</span>
+          <input id="ar-xmax" type="number" value="460" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.3rem;">Y (mm)</div>
+        <div style="display:flex; gap:0.4rem; align-items:center;">
+          <input id="ar-ymin" type="number" value="-154" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span style="color:var(--muted); flex-shrink:0;">~</span>
+          <input id="ar-ymax" type="number" value="350" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.68rem; color:var(--blue); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.3rem;">Z (mm)</div>
+        <div style="display:flex; gap:0.4rem; align-items:center;">
+          <input id="ar-zmin" type="number" value="136" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+          <span style="color:var(--muted); flex-shrink:0;">~</span>
+          <input id="ar-zmax" type="number" value="460" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono); font-size:0.85rem;">
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:1.5rem; align-items:center; margin-bottom:1rem; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span style="font-size:0.75rem; color:var(--muted);">목표 캡처 수</span>
+        <input id="ar-count" type="number" value="20" min="4" max="60" style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span style="font-size:0.75rem; color:var(--muted);">이동 속도 (mm/s)</span>
+        <input id="ar-vel" type="number" value="30" min="5" max="100" style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
+      </div>
+    </div>
+
+    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.75rem;">
+      <button id="btn-auto-start" class="btn btn-on" onclick="startAutoCalib()" style="flex:none; padding:0.6rem 1.4rem;">▶ 자동 시작</button>
+      <button id="btn-auto-stop" class="btn btn-off" onclick="stopAutoCalib()" disabled style="flex:none; padding:0.6rem 1rem;">■ 중지</button>
+      <div style="flex:1; background:var(--bg); border:1px solid var(--border); border-radius:4px; height:8px; overflow:hidden;">
+        <div id="auto-progress-bar" style="width:0%; height:100%; background:var(--green); transition:width 0.4s;"></div>
+      </div>
+      <span id="auto-progress-text" style="font-family:var(--mono); font-size:0.8rem; color:var(--muted); white-space:nowrap;">0 / 0</span>
+    </div>
+
+    <div id="auto-log" style="font-family:var(--mono); font-size:0.75rem; max-height:130px; overflow-y:auto; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.5rem; color:var(--muted);">
+      시작 전
+    </div>
+  </div>
+
 </main>
 
 <script>
   const badge   = document.getElementById('ws-badge');
   const wslabel = document.getElementById('ws-label');
 
+  const overlay    = document.getElementById('disconnected-overlay');
+  const ovSubMsg   = document.getElementById('ov-sub-msg');
+  let   _wsOpen    = false;  // WebSocket 연결 여부
+  let   _armReady  = false;  // arm_controller 상태 수신 여부
+
+  function updateOverlay() {
+    if (_wsOpen) {
+      overlay.classList.remove('visible');
+    } else {
+      overlay.classList.add('visible');
+      ovSubMsg.textContent = 'WebSocket 서버에 연결 중...';
+    }
+  }
+
   function setConnectionStatus(state) {
     badge.className = 'badge ' + state;
     wslabel.textContent = { connected: '연결됨', disconnected: '연결 끊김', connecting: '연결 중...' }[state];
+    _wsOpen = (state === 'connected');
+    if (!_wsOpen) _armReady = false;
+    updateOverlay();
   }
 
   function fmt(v, decimals = 2) {
@@ -458,6 +927,15 @@
 
   function applyState(s) {
     latestState = s;
+
+    // robot_state === -1 이면 arm_controller 미연결 상태
+    const armConnected = s.robot_state !== -1;
+    if (armConnected !== _armReady) {
+      _armReady = armConnected;
+    }
+    const armBanner = document.getElementById('arm-disconnected-banner');
+    if (armBanner) armBanner.style.display = armConnected ? 'none' : 'block';
+
     // Robot state
     document.getElementById('st-state').textContent  = s.robot_state_str ?? '—';
 
@@ -489,10 +967,27 @@
     const btnTeach   = document.getElementById('btn-teach');
     const btnRecover = document.getElementById('btn-recover');
 
-    // 복구 버튼: SAFE_STOP(5), SAFE_OFF(3), NOT_READY(15) 일 때만 활성화
-    const recoverableStates = [3, 5, 15];
-    const isRecoverable = recoverableStates.includes(s.robot_state) && !s.is_moving;
-    btnRecover.disabled = !isRecoverable;
+    // 안전복구 버튼: state=10(RECOVERY_HANDGUIDING)일 때 활성화
+    if (btnRecover) {
+      const recoveryActive = s.recovery_active === true;
+      const needsRecovery  = s.robot_state === 10;
+      if (recoveryActive) {
+        btnRecover.disabled = false;
+        btnRecover.textContent = '✓ 복구 완료';
+        btnRecover.classList.add('recovery-active');
+        btnRecover.classList.remove('btn-recover');
+      } else if (needsRecovery) {
+        btnRecover.disabled = false;
+        btnRecover.textContent = '⚡ 안전 복구';
+        btnRecover.classList.remove('recovery-active');
+        btnRecover.classList.add('btn-recover');
+      } else {
+        btnRecover.disabled = true;
+        btnRecover.textContent = '⚡ 안전 복구';
+        btnRecover.classList.remove('recovery-active');
+        btnRecover.classList.add('btn-recover');
+      }
+    }
 
     if (isTeaching) {
       // 직접 교시 모드: Jog + Move 비활성화, Read Current만 활성화
@@ -536,6 +1031,21 @@
       btnTeach.disabled = true;
     }
 
+    // Cartesian Jog 인터락 (서보 OFF 또는 교시 모드이면 비활성)
+    const cartBtns  = document.querySelectorAll('.cart-jog-btn');
+    const cartBadge = document.getElementById('cart-jog-badge');
+    const cartEnabled = s.servo_on && !isTeaching;
+    cartBtns.forEach(b => b.disabled = !cartEnabled);
+    cartBadge.style.display = cartEnabled ? 'none' : 'inline';
+    cartBadge.textContent   = isTeaching ? '[DISABLED: 직접 교시 모드]' : '[DISABLED: SERVO OFF]';
+
+    // Cartesian Jog TCP 값 실시간 업데이트
+    const ctcp = (s.current_tcp_rt && s.current_tcp_rt.some(v => v !== 0)) ? s.current_tcp_rt : (s.current_tcp ?? []);
+    CART_AXES.forEach((_, i) => {
+      const el = document.getElementById(`cart-val-${i}`);
+      if (el) el.textContent = fmt(ctcp[i], i < 3 ? 1 : 2);
+    });
+
     // TCP — 실시간 디스플레이는 TF2 기반 current_tcp_rt, 없으면 DSR-native current_tcp 사용
     const tcp = (s.current_tcp_rt && s.current_tcp_rt.some(v => v !== 0)) ? s.current_tcp_rt : (s.current_tcp ?? []);
     ['tcp-x','tcp-y','tcp-z','tcp-rx','tcp-ry','tcp-rz'].forEach((id, i) => {
@@ -550,6 +1060,46 @@
       const jogVal = document.getElementById(`jog-val-${i}`);
       if (jogVal) jogVal.textContent = val;
     });
+
+    // Motion Sequence
+    const seqStep = document.getElementById('st-seq-step');
+    const seqNextBtn = document.getElementById('btn-seq-next');
+    const seqStartBtn = document.getElementById('btn-seq-start');
+    const seqStopBtn = document.getElementById('btn-seq-stop');
+
+    if (s.seq_step) {
+      const raw = s.seq_step;
+      const isWaiting = raw.startsWith('WAIT:');
+      const isRunning = raw !== 'IDLE' && raw !== '시퀀스 완료';
+      seqStep.textContent = isWaiting ? raw.slice(5) : raw.startsWith('RUN:') ? raw.slice(4) : raw;
+      seqNextBtn.disabled  = !isWaiting;
+      seqStartBtn.disabled = isRunning;
+      seqStopBtn.disabled  = !isRunning;
+    }
+
+    // Electromagnet
+    const badge = document.getElementById('magnet-state-badge');
+    if (badge) {
+      const on = s.magnet_on === true;
+      badge.textContent  = on ? 'ON' : 'OFF';
+      badge.style.color  = on ? 'var(--green)' : 'var(--muted)';
+    }
+
+    // Temp Sequence
+    const tmpStep = document.getElementById('st-tmp-step');
+    const tmpNextBtn = document.getElementById('btn-tmp-next');
+    const tmpStartBtn = document.getElementById('btn-tmp-start');
+    const tmpStopBtn = document.getElementById('btn-tmp-stop');
+
+    if (s.tmp_step) {
+      const raw = s.tmp_step;
+      const isWaiting = raw.startsWith('WAIT:');
+      const isRunning = raw !== 'IDLE' && raw !== '시퀀스 완료';
+      tmpStep.textContent = isWaiting ? raw.slice(5) : raw.startsWith('RUN:') ? raw.slice(4) : raw;
+      tmpNextBtn.disabled  = !isWaiting;
+      tmpStartBtn.disabled = isRunning;
+      tmpStopBtn.disabled  = !isRunning;
+    }
 
     // Error
     const banner = document.getElementById('error-banner');
@@ -678,33 +1228,6 @@
     setTimeout(() => banner.classList.remove('visible'), 5000);
   }
 
-  async function safeRecover() {
-    const btn = document.getElementById('btn-recover');
-    if (btn && btn.disabled) return;
-    const feedback = document.getElementById('control-feedback');
-    feedback.style.color = 'var(--yellow)';
-    feedback.textContent = '안전 복구 시퀀스 실행 중...';
-    btn.classList.add('recovering');
-    btn.disabled = true;
-    try {
-      const resp = await fetch('/api/recover', { method: 'POST' });
-      const data = await resp.json();
-      if (resp.ok) {
-        feedback.style.color = 'var(--green)';
-        feedback.textContent = `복구 완료 — ${data.message}`;
-      } else {
-        feedback.style.color = 'var(--red)';
-        feedback.textContent = data.detail || '안전 복구 실패';
-      }
-    } catch (err) {
-      feedback.style.color = 'var(--red)';
-      feedback.textContent = '안전 복구 실패: ' + err.message;
-    } finally {
-      btn.classList.remove('recovering');
-      setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 6000);
-    }
-  }
-
   async function emergencyStop() {
     const feedback = document.getElementById('control-feedback');
     feedback.style.color = 'var(--red)';
@@ -742,6 +1265,142 @@
     finally { setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 5000); }
   }
 
+  async function toggleRecovery() {
+    const feedback = document.getElementById('control-feedback');
+    const isActive = latestState && latestState.recovery_active === true;
+    feedback.style.color = 'var(--muted)';
+    feedback.textContent = isActive ? '복구 완료 처리 중...' : '안전복구 모드 진입 중...';
+    try {
+      const resp = await fetch('/control/recovery', { method: 'POST' });
+      const data = await resp.json();
+      if (resp.ok) {
+        feedback.style.color = isActive ? 'var(--blue)' : 'var(--yellow)';
+        feedback.textContent = data.message ?? (isActive ? '자동 모드 복귀' : '안전복구 모드 진입');
+      } else {
+        showAlert(data.detail || '안전복구 전환 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+    finally { setTimeout(() => { feedback.textContent = ''; feedback.style.color = 'var(--muted)'; }, 8000); }
+  }
+
+  async function startMotionSeq() {
+    const markerId = parseInt(document.getElementById('seq-marker-id').value);
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = `시퀀스 시작 명령 전송 (마커 ${markerId})...`;
+    try {
+      const resp = await fetch('/api/motion/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marker_id: markerId })
+      });
+      if (resp.ok) {
+        feedback.style.color = 'var(--green)';
+        feedback.textContent = '시퀀스 시작됨. "다음 단계" 버튼을 눌러 진행하세요.';
+      } else {
+        const d = await resp.json();
+        showAlert(d.detail || '시퀀스 시작 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function nextMotionStep() {
+    try {
+      await fetch('/api/motion/next', { method: 'POST' });
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function stopMotionSeq() {
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = '시퀀스 중지 명령 전송...';
+    try {
+      const resp = await fetch('/api/motion/stop', { method: 'POST' });
+      if (resp.ok) {
+        feedback.style.color = 'var(--yellow)';
+        feedback.textContent = '시퀀스가 중지되었습니다.';
+      } else {
+        const d = await resp.json();
+        showAlert(d.detail || '시퀀스 중지 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function magnetOn() {
+    const fb = document.getElementById('magnet-feedback');
+    fb.style.color = 'var(--muted)';
+    fb.textContent = '전자석 ON 명령 전송...';
+    try {
+      const resp = await fetch('/api/gripper/on', { method: 'POST' });
+      if (resp.ok) {
+        fb.style.color = 'var(--green)';
+        fb.textContent = '전자석 ON';
+      } else {
+        const d = await resp.json();
+        fb.style.color = 'var(--red)';
+        fb.textContent = d.detail || '전자석 ON 실패';
+      }
+    } catch (err) { fb.style.color = 'var(--red)'; fb.textContent = err.message; }
+    setTimeout(() => { fb.textContent = ''; }, 4000);
+  }
+
+  async function magnetOff() {
+    const fb = document.getElementById('magnet-feedback');
+    fb.style.color = 'var(--muted)';
+    fb.textContent = '전자석 OFF 명령 전송...';
+    try {
+      const resp = await fetch('/api/gripper/off', { method: 'POST' });
+      if (resp.ok) {
+        fb.style.color = 'var(--yellow)';
+        fb.textContent = '전자석 OFF';
+      } else {
+        const d = await resp.json();
+        fb.style.color = 'var(--red)';
+        fb.textContent = d.detail || '전자석 OFF 실패';
+      }
+    } catch (err) { fb.style.color = 'var(--red)'; fb.textContent = err.message; }
+    setTimeout(() => { fb.textContent = ''; }, 4000);
+  }
+
+  async function startTempSeq() {
+    const markerId = Math.max(0, Math.min(5, parseInt(document.getElementById('tmp-marker-id').value)));
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = `Temp 시퀀스 시작 명령 전송 (마커 ${markerId})...`;
+    try {
+      const resp = await fetch('/api/temp_motion/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marker_id: markerId })
+      });
+      if (resp.ok) {
+        feedback.style.color = 'var(--green)';
+        feedback.textContent = 'Temp 시퀀스 시작됨. "다음 단계" 버튼을 눌러 진행하세요.';
+      } else {
+        const d = await resp.json();
+        showAlert(d.detail || 'Temp 시퀀스 시작 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function nextTempStep() {
+    try {
+      await fetch('/api/temp_motion/next', { method: 'POST' });
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function stopTempSeq() {
+    const feedback = document.getElementById('control-feedback');
+    feedback.textContent = 'Temp 시퀀스 중지 명령 전송...';
+    try {
+      const resp = await fetch('/api/temp_motion/stop', { method: 'POST' });
+      if (resp.ok) {
+        feedback.style.color = 'var(--yellow)';
+        feedback.textContent = 'Temp 시퀀스가 중지되었습니다.';
+      } else {
+        const d = await resp.json();
+        showAlert(d.detail || 'Temp 시퀀스 중지 실패');
+      }
+    } catch (err) { showAlert(err.message); }
+  }
+
   function connect() {
     setConnectionStatus('connecting');
     const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -752,6 +1411,340 @@
   }
 
   connect();
+
+  // ── 카메라 스트림 자동 재시도 ────────────────────────────────────────────
+  (function initStream() {
+    const img = document.getElementById('camera-img');
+    const err = document.getElementById('camera-err');
+
+    function loadStream() {
+      img.style.display = 'block';
+      err.style.display = 'none';
+      img.src = '/camera/stream?t=' + Date.now();
+    }
+
+    img.onerror = function () {
+      img.style.display = 'none';
+      err.style.display = 'block';
+      err.textContent = '카메라 연결 중... 잠시 대기';
+      setTimeout(loadStream, 2000);
+    };
+
+    loadStream();
+  })();
+
+  // ── Manual Calibration ──────────────────────────────────────────────────
+  setInterval(async () => {
+    try {
+      const d = await (await fetch('/camera/markers')).json();
+      const m = (d.markers || []).find(x => x.id === 0);
+      const el = document.getElementById('calib-cam-info');
+      if (m && m.x_cam_m != null) {
+        el.innerHTML =
+          `<span style="color:var(--green)">● 감지됨 + depth OK</span><br>` +
+          `cam x=${m.x_cam_m.toFixed(4)} y=${m.y_cam_m.toFixed(4)} z=${m.z_cam_m.toFixed(4)} m<br>` +
+          `base (${m.x_mm?.toFixed(1)}, ${m.y_mm?.toFixed(1)}, ${m.z_mm?.toFixed(1)}) mm`;
+      } else if (m) {
+        el.innerHTML =
+          `<span style="color:var(--yellow)">● 감지됨 — depth 불량</span><br>` +
+          `<span style="color:var(--muted);font-size:0.72rem;">마커 주변 depth 값이 없습니다.<br>카메라와의 거리 조정 또는 마커 각도 변경해보세요.</span>`;
+      } else {
+        el.innerHTML = '<span style="color:var(--red)">● 미감지 — 마커가 카메라에 보이도록 위치 조정</span>';
+      }
+    } catch(_) {}
+  }, 500);
+
+  function calibFillTcp() {
+    if (!latestState?.current_tcp) return;
+    const tcp = latestState.current_tcp;
+    document.getElementById('cb-x').value = tcp[0].toFixed(2);
+    document.getElementById('cb-y').value = tcp[1].toFixed(2);
+    document.getElementById('cb-z').value = tcp[2].toFixed(2);
+  }
+
+  async function calibCapture() {
+    const x = parseFloat(document.getElementById('cb-x').value);
+    const y = parseFloat(document.getElementById('cb-y').value);
+    const z = parseFloat(document.getElementById('cb-z').value);
+    const fb = document.getElementById('calib-feedback');
+    if (isNaN(x) || isNaN(y) || isNaN(z)) {
+      fb.style.color = 'var(--red)'; fb.textContent = 'TCP 좌표를 입력하세요'; return;
+    }
+    try {
+      const r = await fetch('/api/manual_calib/capture', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({x_tcp_mm: x, y_tcp_mm: y, z_tcp_mm: z, marker_id: 0})
+      });
+      const d = await r.json();
+      if (r.ok) {
+        fb.style.color = 'var(--green)';
+        fb.textContent = `✓ ${d.count}개 수집됨`;
+        calibRefreshList();
+      } else {
+        fb.style.color = 'var(--red)';
+        fb.textContent = d.detail || '캡처 실패';
+      }
+    } catch(e) { fb.style.color = 'var(--red)'; fb.textContent = e.message; }
+  }
+
+  async function calibRefreshList() {
+    try {
+      const d = await (await fetch('/api/manual_calib/status')).json();
+      document.getElementById('calib-count-badge').textContent = `${d.count} 포인트`;
+      const list = document.getElementById('calib-points-list');
+      if (!d.points?.length) {
+        list.innerHTML = '<span style="color:var(--muted)">포인트 없음</span>'; return;
+      }
+      list.innerHTML = d.points.map((p, i) => {
+        const o = p.tcp_orient_deg;
+        const orientStr = o
+          ? `<span style="color:var(--blue);">A${o[0].toFixed(1)} B${o[1].toFixed(1)} C${o[2].toFixed(1)}</span>`
+          : `<span style="color:var(--red);">방향 미저장</span>`;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.25rem; gap:0.5rem;">
+          <span style="color:var(--yellow); min-width:3rem; flex-shrink:0;">${p.label}</span>
+          <span style="flex-shrink:0;">TCP (${p.p_tcp_mm.map(v=>v.toFixed(1)).join(', ')}) mm</span>
+          <span style="flex-shrink:0; font-size:0.72rem;">${orientStr}</span>
+          <span style="color:var(--muted); flex-shrink:0;">cam (${p.p_cam_m.map(v=>v.toFixed(3)).join(', ')}) m</span>
+          <button onclick="calibDeletePoint(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 0.3rem; flex-shrink:0;">✕</button>
+        </div>`;
+      }).join('');
+    } catch(_) {}
+  }
+
+  async function calibDeletePoint(i) {
+    await fetch(`/api/manual_calib/point/${i}`, {method: 'DELETE'});
+    calibRefreshList();
+  }
+
+  async function resetCalib() {
+    await fetch('/api/manual_calib/reset', {method: 'DELETE'});
+    document.getElementById('calib-result').textContent = '';
+    document.getElementById('btn-calib-save').disabled = true;
+    document.getElementById('btn-calib-save').style.color = 'var(--muted)';
+    calibRefreshList();
+  }
+
+  async function computeCalib() {
+    const fb = document.getElementById('calib-result');
+    fb.style.color = 'var(--muted)'; fb.textContent = '계산 중...';
+    const gmx   = parseFloat(document.getElementById('cb-gm-x').value);
+    const gmy   = parseFloat(document.getElementById('cb-gm-y').value);
+    const gmz   = parseFloat(document.getElementById('cb-gm-z').value);
+    try {
+      const r = await fetch('/api/manual_calib/compute', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({gm_x_mm: gmx, gm_y_mm: gmy, gm_z_mm: gmz})
+      });
+      const d = await r.json();
+      if (r.ok) {
+        const ok = d.mean_residual_mm < 10;
+        fb.style.color = ok ? 'var(--green)' : 'var(--yellow)';
+        const gm = d.gm_offset_world_mm?.map(v => v.toFixed(1)).join(', ') ?? '-';
+        fb.textContent = `평균 잔차 ${d.mean_residual_mm.toFixed(2)} mm  최대 ${d.max_residual_mm.toFixed(2)} mm  (${d.samples}샘플)  │  gm_world=[${gm}]mm`;
+        const btn = document.getElementById('btn-calib-save');
+        btn.disabled = false;
+        btn.style.color = 'var(--green)';
+        btn.style.borderColor = 'rgba(34,197,94,0.4)';
+      } else {
+        fb.style.color = 'var(--red)'; fb.textContent = d.detail || '계산 실패';
+      }
+    } catch(e) { fb.style.color = 'var(--red)'; fb.textContent = e.message; }
+  }
+
+  async function saveCalib() {
+    const fb = document.getElementById('calib-result');
+    try {
+      const r = await fetch('/api/manual_calib/save', {method: 'POST'});
+      const d = await r.json();
+      if (r.ok) {
+        fb.style.color = 'var(--green)';
+        fb.textContent = `저장 완료 (평균 잔차 ${d.mean_residual_mm.toFixed(2)} mm) — 웹 서버 재시작 후 적용`;
+        document.getElementById('btn-calib-save').disabled = true;
+      } else {
+        fb.style.color = 'var(--red)'; fb.textContent = d.detail || '저장 실패';
+      }
+    } catch(e) { fb.style.color = 'var(--red)'; fb.textContent = e.message; }
+  }
+
+  // ── ArUco marker polling (2 Hz) ──────────────────────────────────────────
+  async function fetchAruco() {
+    try {
+      const resp = await fetch('/camera/markers');
+      if (!resp.ok) return;
+      const data = await resp.json();
+
+      const detected = {};
+      (data.markers || []).forEach(m => { detected[m.id] = m; });
+
+      let count = 0;
+      for (let id = 0; id <= 5; id++) {
+        const m     = detected[id];
+        const slot  = document.getElementById(`marker-slot-${id}`);
+        const dot   = document.getElementById(`marker-dot-${id}`);
+        const coord = document.getElementById(`marker-coord-${id}`);
+        if (!slot) continue;
+
+        if (m) {
+          count++;
+          slot.style.borderColor = 'rgba(34,197,94,0.45)';
+          slot.style.background  = '#14532d22';
+          dot.style.background   = 'var(--green)';
+          if (m.x_mm != null) {
+            coord.innerHTML = `<span style="color:var(--green);font-size:0.65rem;">${m.x_mm.toFixed(0)},${m.y_mm.toFixed(0)},${m.z_mm.toFixed(0)}</span>`;
+          } else {
+            coord.innerHTML = `<span style="color:var(--red);font-size:0.65rem;">depth 불량</span>`;
+          }
+        } else {
+          slot.style.borderColor = 'var(--border)';
+          slot.style.background  = 'var(--bg)';
+          dot.style.background   = 'var(--surface)';
+          coord.innerHTML = '<span style="color:var(--muted)">미감지</span>';
+        }
+      }
+
+      const badge = document.getElementById('aruco-badge');
+      if (badge) {
+        badge.textContent = count > 0 ? `${count}/6 감지` : '마커 없음';
+        badge.style.color = count > 0 ? 'var(--yellow)' : 'var(--muted)';
+      }
+    } catch (_) {}
+  }
+  setInterval(fetchAruco, 500);
+  fetchAruco();
+
+  function toggleAruco() { fetchAruco(); }
+
+  // ── Auto 캡처 (단일) ────────────────────────────────────────────────────────
+  async function calibCaptureAuto() {
+    const fb = document.getElementById('calib-feedback');
+    fb.style.color = 'var(--muted)'; fb.textContent = 'Auto 캡처 중...';
+    try {
+      const r = await fetch('/api/manual_calib/capture_auto', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        fb.style.color = 'var(--green)';
+        fb.textContent = `✓ Auto ${d.count}개 수집됨`;
+        calibRefreshList();
+      } else {
+        fb.style.color = 'var(--red)';
+        fb.textContent = d.detail || '캡처 실패';
+      }
+    } catch(e) { fb.style.color = 'var(--red)'; fb.textContent = e.message; }
+  }
+
+  // ── 자동 캘리브레이션 ────────────────────────────────────────────────────────
+  let _autoTimer = null;
+
+  async function startAutoCalib() {
+    const req = {
+      x_min: parseFloat(document.getElementById('ar-xmin').value),
+      x_max: parseFloat(document.getElementById('ar-xmax').value),
+      y_min: parseFloat(document.getElementById('ar-ymin').value),
+      y_max: parseFloat(document.getElementById('ar-ymax').value),
+      z_min: parseFloat(document.getElementById('ar-zmin').value),
+      z_max: parseFloat(document.getElementById('ar-zmax').value),
+      count: parseInt(document.getElementById('ar-count').value),
+      velocity: parseFloat(document.getElementById('ar-vel').value),
+      acceleration: parseFloat(document.getElementById('ar-vel').value) * 2,
+    };
+    try {
+      const r = await fetch('/api/manual_calib/auto_run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+      });
+      if (!r.ok) { const d = await r.json(); showAlert(d.detail || '시작 실패'); return; }
+      document.getElementById('btn-auto-start').disabled = true;
+      document.getElementById('btn-auto-stop').disabled  = false;
+      _autoTimer = setInterval(pollAutoStatus, 1000);
+    } catch(e) { showAlert(e.message); }
+  }
+
+  async function pollAutoStatus() {
+    try {
+      const d = await (await fetch('/api/manual_calib/auto_status')).json();
+      const total = d.total || 1;
+      const pct   = Math.round((d.progress / total) * 100);
+      document.getElementById('auto-progress-bar').style.width = pct + '%';
+      document.getElementById('auto-progress-text').textContent = `${d.progress} / ${total}`;
+      document.getElementById('auto-count-badge').textContent =
+        d.running ? `실행 중 ${d.progress}/${total}` : `완료 ${d.progress}개`;
+
+      const logEl = document.getElementById('auto-log');
+      logEl.innerHTML = (d.log || []).map(l => {
+        const color = l.includes('✓') ? 'var(--green)' : l.includes('✗') ? 'var(--red)' : 'var(--muted)';
+        return `<div style="color:${color}">${l}</div>`;
+      }).join('');
+      logEl.scrollTop = logEl.scrollHeight;
+
+      if (d.done) {
+        clearInterval(_autoTimer); _autoTimer = null;
+        document.getElementById('btn-auto-start').disabled = false;
+        document.getElementById('btn-auto-stop').disabled  = true;
+        calibRefreshList();
+      }
+    } catch(_) {}
+  }
+
+  async function stopAutoCalib() {
+    await fetch('/api/manual_calib/auto_stop', { method: 'POST' });
+  }
+
+  // ── Cartesian Jog ────────────────────────────────────────────────────────────
+  const CART_AXES = [
+    { label: 'X', unit: ' mm', stateKey: 0 },
+    { label: 'Y', unit: ' mm', stateKey: 1 },
+    { label: 'Z', unit: ' mm', stateKey: 2 },
+    { label: 'Rx', unit: '°',  stateKey: 3 },
+    { label: 'Ry', unit: '°',  stateKey: 4 },
+    { label: 'Rz', unit: '°',  stateKey: 5 },
+  ];
+  const cartContainer = document.getElementById('cart-jog-container');
+  const cartTemplate  = document.getElementById('cart-jog-template');
+
+  CART_AXES.forEach((ax, axisIdx) => {
+    const clone = cartTemplate.content.cloneNode(true);
+    clone.querySelector('[data-label]').textContent = ax.label;
+    clone.querySelector('[data-unit]').textContent  = ax.unit;
+    const valEl = clone.querySelector('[data-val]');
+    valEl.id = `cart-val-${axisIdx}`;
+
+    clone.querySelectorAll('.cart-jog-btn').forEach(btn => {
+      const dir = parseInt(btn.dataset.dir);
+      let pressing = false;
+
+      btn.onpointerdown = async () => {
+        if (btn.disabled) return;
+        pressing = true;
+        const step = axisIdx < 3
+          ? parseFloat(document.getElementById('cart-step-trans').value)
+          : parseFloat(document.getElementById('cart-step-rot').value);
+        try {
+          await fetch('/api/jog_cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ axis: axisIdx, speed: step * dir }),
+          });
+        } catch (_) {}
+      };
+
+      const stopCart = async () => {
+        if (!pressing) return;
+        pressing = false;
+        try {
+          await fetch('/api/jog_cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ axis: axisIdx, speed: 0 }),
+          });
+        } catch (_) {}
+      };
+
+      btn.onpointerup    = stopCart;
+      btn.onpointerleave = stopCart;
+    });
+    cartContainer.appendChild(clone);
+  });
 
   const jogContainer = document.getElementById('jog-container');
   const jogTemplate  = document.getElementById('jog-row-template');
@@ -766,17 +1759,315 @@
     const btns = clone.querySelectorAll('.jog-btn');
     btns.forEach(btn => {
       const dir = parseInt(btn.dataset.dir);
+      let pressing = false;
+
       btn.onpointerdown = async (e) => {
         if (btn.disabled) return;
-        try { await fetch('/api/jog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ joint_index: i, speed: parseFloat(speedRange.value) * dir }) }); } catch (err) {}
+        pressing = true;
+        try { await fetch('/api/jog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ joint_index: i, speed: parseFloat(speedRange.value) * dir }) }); } catch (_) {}
       };
-      btn.onpointerup = btn.onpointerleave = async (e) => {
-        if (btn.disabled) return;
-        try { await fetch('/api/jog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ joint_index: i, speed: 0 }) }); } catch (err) {}
+
+      const stopJog = async () => {
+        if (!pressing) return;
+        pressing = false;
+        try { await fetch('/api/jog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ joint_index: i, speed: 0 }) }); } catch (_) {}
       };
+
+      btn.onpointerup     = stopJog;
+      btn.onpointerleave  = stopJog;
     });
     jogContainer.appendChild(clone);
   }
+
+  // ── 터치 캘리브레이션 ──────────────────────────────────────────────────────
+
+  async function touchRefresh() {
+    try {
+      const d = await (await fetch('/api/manual_calib/touch/status')).json();
+      document.getElementById('touch-count-badge').textContent = `${d.count} / 6 기록`;
+
+      const rows = document.getElementById('touch-rows');
+      rows.innerHTML = d.markers.map(m => {
+        const camTxt = m.cam_visible
+          ? `<span style="color:var(--green);">X${(m.p_cam_m[0]*1000).toFixed(0)} Y${(m.p_cam_m[1]*1000).toFixed(0)} Z${(m.p_cam_m[2]*1000).toFixed(0)}</span>`
+          : '<span style="color:var(--muted);">— (터치 중이거나 미감지)</span>';
+        const tcpTxt = m.tcp_mm
+          ? `<span style="color:var(--green);">✓ X${m.tcp_mm[0].toFixed(0)} Y${m.tcp_mm[1].toFixed(0)} Z${m.tcp_mm[2].toFixed(0)}</span>`
+          : '<span style="color:var(--muted);">미기록</span>';
+        const delBtn = m.tcp_mm
+          ? `<button onclick="touchRemove(${m.marker_id})" title="삭제"
+               style="background:none;border:none;color:var(--red);cursor:pointer;font-size:0.8rem; padding:0 0.2rem;">✕</button>`
+          : '';
+        return `<div style="display:grid; grid-template-columns:3.5rem 1fr 1fr 6rem; gap:0.3rem;
+                  align-items:center; padding:0.35rem 0.5rem; border-bottom:1px solid var(--border);
+                  font-family:var(--mono); font-size:0.78rem;">
+          <span style="color:var(--blue); font-weight:700;">ID ${m.marker_id}</span>
+          <span>${camTxt}</span>
+          <span>${tcpTxt}</span>
+          <span style="display:flex; gap:0.25rem; align-items:center;">
+            <button onclick="touchRecord(${m.marker_id})"
+              style="background:var(--blue); color:#fff; border:none; border-radius:3px;
+                     padding:0.22rem 0.45rem; cursor:pointer; font-size:0.72rem; font-weight:700;">
+              TCP 기록
+            </button>${delBtn}
+          </span>
+        </div>`;
+      }).join('');
+    } catch (_) {}
+  }
+
+  setInterval(touchRefresh, 800);
+
+  // WebSocket → TCP 실시간 반영
+  if (ws) {
+    ws.addEventListener('message', e => {
+      try {
+        const s = JSON.parse(e.data);
+        const tcp = s.current_tcp || [];
+        if (tcp.length >= 3) {
+          document.getElementById('touch-tcp-display').innerHTML =
+            `X <b>${tcp[0].toFixed(1)}</b> &nbsp; Y <b>${tcp[1].toFixed(1)}</b> &nbsp; Z <b>${tcp[2].toFixed(1)}</b> mm`;
+        }
+      } catch (_) {}
+    });
+  }
+
+  async function touchRecord(markerId) {
+    try {
+      const r = await fetch(`/api/manual_calib/touch/record/${markerId}`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) { alert(`✗ ${d.detail}`); return; }
+      touchRefresh();
+    } catch (e) { alert(`✗ ${e}`); }
+  }
+
+  async function touchRemove(markerId) {
+    await fetch(`/api/manual_calib/touch/remove/${markerId}`, { method: 'DELETE' });
+    touchRefresh();
+  }
+
+  async function touchReset() {
+    await fetch('/api/manual_calib/touch/reset', { method: 'DELETE' });
+    document.getElementById('touch-result').textContent = '';
+    document.getElementById('touch-btn-save').disabled = true;
+    touchRefresh();
+  }
+
+  async function touchCompute() {
+    const res = document.getElementById('touch-result');
+    const warn = document.getElementById('touch-coplanar-warn');
+    res.textContent = '계산 중...';
+    res.style.color = 'var(--muted)';
+    warn.style.display = 'none';
+    try {
+      const r = await fetch('/api/manual_calib/touch/compute', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        // 공면 경고
+        if (d.coplanar_warning) {
+          warn.style.display = 'block';
+          warn.textContent = '⚠ ' + d.coplanar_warning;
+        }
+        const ok = d.mean_residual_mm < 5 && !d.coplanar_warning;
+        res.style.color = ok ? 'var(--green)' : d.mean_residual_mm < 15 ? 'var(--yellow)' : 'var(--red)';
+        const t = d.translation_xyz;
+        // 포인트별 잔차
+        const ptList = (d.per_point || []).map(p => {
+          const bad = p.residual_mm > 15;
+          return `<span style="color:${bad ? 'var(--red)' : 'var(--muted)'}">ID${p.marker_id}:${p.residual_mm}mm</span>`;
+        }).join('  ');
+        res.innerHTML =
+          `잔차 평균 <b>${d.mean_residual_mm}</b>mm  최대 <b>${d.max_residual_mm}</b>mm<br>` +
+          `포인트별: ${ptList}<br>` +
+          (d.outlier_markers.length ? `<span style="color:var(--red)">⚠ 아웃라이어 의심: ID [${d.outlier_markers}] — 해당 마커 삭제 후 재계산 권장</span><br>` : '') +
+          `t=[${t.map(v=>v.toFixed(3)).join(', ')}]`;
+        const btn = document.getElementById('touch-btn-save');
+        btn.disabled = d.coplanar_warning != null;
+        btn.style.color = d.coplanar_warning ? 'var(--muted)' : 'var(--text)';
+        btn.style.borderColor = ok ? 'var(--green)' : 'var(--yellow)';
+      } else {
+        res.style.color = 'var(--red)';
+        res.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) {
+      res.style.color = 'var(--red)';
+      res.textContent = `✗ ${e}`;
+    }
+  }
+
+  async function touchSave() {
+    const res = document.getElementById('touch-result');
+    try {
+      const r = await fetch('/api/manual_calib/touch/save', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        res.style.color = 'var(--green)';
+        res.textContent = `✓ 저장 완료 (잔차 평균 ${d.mean_residual_mm}mm)`;
+        document.getElementById('touch-btn-save').disabled = true;
+      } else {
+        res.style.color = 'var(--red)';
+        res.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) { res.style.color = 'var(--red)'; res.textContent = `✗ ${e}`; }
+  }
+
+  touchRefresh();
+
+  // ── 교시 Hand-Eye 캘리브레이션 ─────────────────────────────────────────────
+
+  // WebSocket 상태 업데이트에서 TCP / 마커 실시간 표시
+  const _heOrigOnState = typeof onStateUpdate === 'function' ? onStateUpdate : null;
+  function heUpdateFromState(state) {
+    // TCP 표시
+    const tcp = state.current_tcp || [];
+    if (tcp.length >= 6) {
+      document.getElementById('he-tcp-display').innerHTML =
+        `X <b>${tcp[0].toFixed(1)}</b>  Y <b>${tcp[1].toFixed(1)}</b>  Z <b>${tcp[2].toFixed(1)}</b><br>` +
+        `Rx <b>${tcp[3].toFixed(1)}</b>  Ry <b>${tcp[4].toFixed(1)}</b>  Rz <b>${tcp[5].toFixed(1)}</b>`;
+    }
+  }
+
+  // 마커 상태 폴링 (카메라 마커 API)
+  async function heUpdateMarker() {
+    try {
+      const d = await (await fetch('/camera/markers')).json();
+      const m = (d.markers || []).find(x => x.id === 0);
+      const dot   = document.getElementById('he-marker-dot');
+      const label = document.getElementById('he-marker-label');
+      const disp  = document.getElementById('he-marker-display');
+      if (m && m.rvec) {
+        dot.style.background   = 'var(--green)';
+        dot.style.boxShadow    = '0 0 6px var(--green)';
+        label.style.color      = 'var(--green)';
+        label.textContent      = 'ID 0 마커 감지됨';
+        disp.style.color       = 'var(--text)';
+        disp.innerHTML =
+          `cam X <b>${(m.x_cam_m*1000).toFixed(1)}</b>  Y <b>${(m.y_cam_m*1000).toFixed(1)}</b>  Z <b>${(m.z_cam_m*1000).toFixed(1)}</b> mm<br>` +
+          `base X <b>${m.x_mm ?? '—'}</b>  Y <b>${m.y_mm ?? '—'}</b>  Z <b>${m.z_mm ?? '—'}</b> mm`;
+      } else {
+        dot.style.background   = 'var(--red)';
+        dot.style.boxShadow    = 'none';
+        label.style.color      = 'var(--red)';
+        label.textContent      = 'ID 0 마커 미감지';
+        disp.style.color       = 'var(--muted)';
+        disp.textContent       = '—';
+      }
+    } catch (_) {}
+  }
+  setInterval(heUpdateMarker, 500);
+
+  // WebSocket onmessage 확장
+  const _origWsOnMsg = ws ? ws.onmessage : null;
+  if (ws) {
+    ws.addEventListener('message', e => {
+      try { heUpdateFromState(JSON.parse(e.data)); } catch (_) {}
+    });
+  }
+
+  async function heCapture() {
+    const fb = document.getElementById('he-capture-feedback');
+    fb.style.color = 'var(--muted)';
+    fb.textContent = '캡처 중...';
+    try {
+      const r = await fetch('/api/manual_calib/handeye/capture', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        fb.style.color = 'var(--green)';
+        fb.textContent = `✓ ${d.label} 저장 (총 ${d.count}개)`;
+        heRefreshList();
+      } else {
+        fb.style.color = 'var(--red)';
+        fb.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) {
+      fb.style.color = 'var(--red)';
+      fb.textContent = `✗ ${e}`;
+    }
+  }
+
+  async function heRefreshList() {
+    try {
+      const d = await (await fetch('/api/manual_calib/handeye/status')).json();
+      document.getElementById('he-count-badge').textContent = `${d.count} 샘플`;
+      const list = document.getElementById('he-sample-list');
+      if (d.samples.length === 0) {
+        list.textContent = '샘플 없음';
+        return;
+      }
+      list.innerHTML = d.samples.map((s, i) => {
+        const tcp = s.tcp_mm;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:0.15rem 0;border-bottom:1px solid var(--border);">
+          <span><b style="color:var(--blue);">${s.label}</b>
+            &nbsp;X${tcp[0].toFixed(0)} Y${tcp[1].toFixed(0)} Z${tcp[2].toFixed(0)}
+            &nbsp;Rx${tcp[3].toFixed(0)} Ry${tcp[4].toFixed(0)} Rz${tcp[5].toFixed(0)}</span>
+          <button onclick="heDeleteSample(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0 0.3rem;">✕</button>
+        </div>`;
+      }).join('');
+    } catch (_) {}
+  }
+
+  async function heDeleteSample(i) {
+    await fetch(`/api/manual_calib/handeye/sample/${i}`, { method: 'DELETE' });
+    heRefreshList();
+  }
+
+  async function heReset() {
+    await fetch('/api/manual_calib/handeye/reset', { method: 'DELETE' });
+    document.getElementById('he-result').textContent = '';
+    document.getElementById('he-btn-save').disabled = true;
+    document.getElementById('he-btn-save').style.color = 'var(--muted)';
+    document.getElementById('he-capture-feedback').textContent = '';
+    heRefreshList();
+  }
+
+  async function heCompute() {
+    const res = document.getElementById('he-result');
+    res.textContent = '계산 중...';
+    res.style.color = 'var(--muted)';
+    try {
+      const r = await fetch('/api/manual_calib/handeye/compute', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        const ok = d.mean_residual_mm < 10;
+        res.style.color = ok ? 'var(--green)' : 'var(--yellow)';
+        const t = d.translation_xyz;
+        res.innerHTML =
+          `잔차 평균 <b>${d.mean_residual_mm.toFixed(2)}</b> mm  최대 <b>${d.max_residual_mm.toFixed(2)}</b> mm  |  ` +
+          `t=[${t.map(v=>v.toFixed(3)).join(', ')}]`;
+        const btn = document.getElementById('he-btn-save');
+        btn.disabled = false;
+        btn.style.color = 'var(--text)';
+        btn.style.borderColor = ok ? 'var(--green)' : 'var(--yellow)';
+      } else {
+        res.style.color = 'var(--red)';
+        res.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) {
+      res.style.color = 'var(--red)';
+      res.textContent = `✗ ${e}`;
+    }
+  }
+
+  async function heSave() {
+    const res = document.getElementById('he-result');
+    try {
+      const r = await fetch('/api/manual_calib/handeye/save', { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        res.style.color = 'var(--green)';
+        res.textContent = `✓ 저장 완료 → ${d.saved_to}  (잔차 평균 ${d.mean_residual_mm.toFixed(2)}mm)`;
+        document.getElementById('he-btn-save').disabled = true;
+      } else {
+        res.style.color = 'var(--red)';
+        res.textContent = `✗ ${d.detail}`;
+      }
+    } catch (e) {
+      res.style.color = 'var(--red)';
+      res.textContent = `✗ ${e}`;
+    }
+  }
+
+  heRefreshList();
 </script>
 </body>
 </html>
