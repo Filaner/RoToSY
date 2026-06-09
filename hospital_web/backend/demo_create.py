@@ -45,13 +45,17 @@ PATIENTS = [
 ]
 
 MEDICINES = [
-    '아세트아미노펜 500mg', '이부프로펜 400mg',
-    '오메프라졸 20mg', '메트포르민 500mg',
-    '암로디핀 5mg', '로수바스타틴 10mg',
-    '레보티록신 50mcg',
+    # 실제 보유 약품 (단위 cm). barcode_plane: 박스면 번호 (없으면 None)
+    {'name': '벤포벨S',       'width':  5.7, 'depth': 5.6, 'height': 11.0, 'barcode_plane': '4'},
+    {'name': '심미안정',      'width':  7.8, 'depth': 4.6, 'height': 10.7, 'barcode_plane': '2'},
+    {'name': '유한 비타민C',  'width': 10.7, 'depth': 6.4, 'height':  7.7, 'barcode_plane': '2'},
+    {'name': '니뽄 유산균',   'width':  5.7, 'depth': 5.5, 'height': 10.2, 'barcode_plane': '6'},
+    {'name': '메디폼 H뷰티',  'width': 10.1, 'depth': 1.6, 'height': 16.5, 'barcode_plane': '3'},
+    {'name': '애크논',        'width': 12.5, 'depth': 2.1, 'height':  3.3, 'barcode_plane': None},
+    {'name': '임팩타민',      'width':  5.0, 'depth': 5.0, 'height': 10.1, 'barcode_plane': None},
 ]
 
-# 처방 시드 (고정 코드 — 데모 재현성 확보)
+# 처방 시드 (고정 코드 — 데모 재현성 확보). 실제 보유 약품으로 임의 매칭.
 PRESCRIPTIONS = [
     {
         'code':          'P-DEMO01',
@@ -59,20 +63,20 @@ PRESCRIPTIONS = [
         'doctor':        '김철수',
         'priority':      'emergency',
         'drugs': [
-            {'name': '아세트아미노펜 500mg', 'quantity': 3, 'frequency': '1일 3회 식후'},
-            {'name': '이부프로펜 400mg',    'quantity': 2, 'frequency': '1일 2회 식후'},
+            {'name': '벤포벨S',  'quantity': 2, 'frequency': '1일 2회 식후'},
+            {'name': '심미안정', 'quantity': 1, 'frequency': '1일 1회 취침 전'},
         ],
         'ocr': {
-            'raw':        '아세트아미노펜 500mg 3정 / 이부프로펜 400mg 2정',
+            'raw':        '벤포벨S 2정 / 심미안정 1정',
             'parsed': [
-                {'name': '아세트아미노펜 500mg', 'qty': 3, 'match': True},
-                {'name': '이부프로펜 400mg',    'qty': 2, 'match': True},
+                {'name': '벤포벨S',  'qty': 2, 'match': True},
+                {'name': '심미안정', 'qty': 1, 'match': True},
             ],
             'confidence': 97,
         },
         'vision': [
-            {'name': '아세트아미노펜 500mg', 'confidence': 94, 'qty_detected': 3, 'match': True},
-            {'name': '이부프로펜 400mg',    'confidence': 91, 'qty_detected': 2, 'match': True},
+            {'name': '벤포벨S',  'confidence': 94, 'qty_detected': 2, 'match': True},
+            {'name': '심미안정', 'confidence': 91, 'qty_detected': 1, 'match': True},
         ],
     },
     {
@@ -81,20 +85,20 @@ PRESCRIPTIONS = [
         'doctor':        '박민준',
         'priority':      'general',
         'drugs': [
-            {'name': '오메프라졸 20mg',  'quantity': 1, 'frequency': '1일 1회 아침 식전'},
-            {'name': '메트포르민 500mg', 'quantity': 2, 'frequency': '1일 2회 식사 중'},
+            {'name': '유한 비타민C', 'quantity': 1, 'frequency': '1일 1회 아침 식후'},
+            {'name': '니뽄 유산균',  'quantity': 2, 'frequency': '1일 2회 식사 중'},
         ],
         'ocr': {
-            'raw': '오메프라졸 20mg 1정 / 메트포르민 500mg 2정',
+            'raw': '유한 비타민C 1정 / 니뽄 유산균 2정',
             'parsed': [
-                {'name': '오메프라졸 20mg',  'qty': 1, 'match': True},
-                {'name': '메트포르민 500mg', 'qty': 2, 'match': True},
+                {'name': '유한 비타민C', 'qty': 1, 'match': True},
+                {'name': '니뽄 유산균',  'qty': 2, 'match': True},
             ],
             'confidence': 99,
         },
         'vision': [
-            {'name': '오메프라졸 20mg',  'confidence': 88, 'qty_detected': 1, 'match': True},
-            {'name': '메트포르민 500mg', 'confidence': 95, 'qty_detected': 2, 'match': True},
+            {'name': '유한 비타민C', 'confidence': 88, 'qty_detected': 1, 'match': True},
+            {'name': '니뽄 유산균',  'confidence': 95, 'qty_detected': 2, 'match': True},
         ],
     },
     {
@@ -103,20 +107,20 @@ PRESCRIPTIONS = [
         'doctor':        '정수진',
         'priority':      'general',
         'drugs': [
-            {'name': '암로디핀 5mg',     'quantity': 1, 'frequency': '1일 1회 아침'},
-            {'name': '로수바스타틴 10mg', 'quantity': 1, 'frequency': '1일 1회 저녁'},
+            {'name': '메디폼 H뷰티', 'quantity': 1, 'frequency': '1일 1회 세안 후'},
+            {'name': '애크논',       'quantity': 1, 'frequency': '1일 1회 취침 전'},
         ],
         'ocr': {
-            'raw': '암로디핀 5mg 1정 / 로수바스타틴 20mg 1정',
+            'raw': '메디폼 H뷰티 1개 / 애크논 1개',
             'parsed': [
-                {'name': '암로디핀 5mg',     'qty': 1, 'match': True},
-                {'name': '로수바스타틴 20mg', 'qty': 1, 'match': False},
+                {'name': '메디폼 H뷰티', 'qty': 1, 'match': True},
+                {'name': '애크논',       'qty': 1, 'match': False},
             ],
             'confidence': 72,
         },
         'vision': [
-            {'name': '암로디핀 5mg',     'confidence': 89, 'qty_detected': 1, 'match': True},
-            {'name': '로수바스타틴 10mg', 'confidence': 61, 'qty_detected': 1, 'match': False},
+            {'name': '메디폼 H뷰티', 'confidence': 89, 'qty_detected': 1, 'match': True},
+            {'name': '애크논',       'confidence': 61, 'qty_detected': 1, 'match': False},
         ],
     },
     {
@@ -125,17 +129,17 @@ PRESCRIPTIONS = [
         'doctor':        '이동훈',
         'priority':      'scheduled',
         'drugs': [
-            {'name': '레보티록신 50mcg', 'quantity': 1, 'frequency': '1일 1회 공복'},
+            {'name': '임팩타민', 'quantity': 1, 'frequency': '1일 1회 아침 식후'},
         ],
         'ocr': {
-            'raw': '레보티록신 50mcg 1정',
+            'raw': '임팩타민 1정',
             'parsed': [
-                {'name': '레보티록신 50mcg', 'qty': 1, 'match': True},
+                {'name': '임팩타민', 'qty': 1, 'match': True},
             ],
             'confidence': 100,
         },
         'vision': [
-            {'name': '레보티록신 50mcg', 'confidence': 97, 'qty_detected': 1, 'match': True},
+            {'name': '임팩타민', 'confidence': 97, 'qty_detected': 1, 'match': True},
         ],
     },
 ]
@@ -146,14 +150,15 @@ CABINETS = [
      'size_x': 600, 'size_y': 800, 'size_z': 400},
 ]
 
-# (row, col): 'drawer_xxx', aruco, label, pixel_x, pixel_y
+# (row, col): 'drawer_xxx', aruco, label, medicine, pixel_x, pixel_y
+# medicine=None 이면 매핑 없음 (현재는 임팩타민이 슬롯 미배치)
 DRAWERS = [
-    {'cabinet': 'CAB-A', 'code': 'drawer_001', 'row': 0, 'col': 0, 'aruco': 10, 'label': '감기약', 'px': 100, 'py': 100},
-    {'cabinet': 'CAB-A', 'code': 'drawer_002', 'row': 0, 'col': 1, 'aruco': 11, 'label': '소화제', 'px': 300, 'py': 100},
-    {'cabinet': 'CAB-A', 'code': 'drawer_003', 'row': 1, 'col': 0, 'aruco': 20, 'label': '항생제', 'px': 100, 'py': 250},
-    {'cabinet': 'CAB-A', 'code': 'drawer_004', 'row': 1, 'col': 1, 'aruco': 21, 'label': '항염증', 'px': 300, 'py': 250},
-    {'cabinet': 'CAB-A', 'code': 'drawer_005', 'row': 2, 'col': 0, 'aruco': 30, 'label': '혈압약', 'px': 100, 'py': 400},
-    {'cabinet': 'CAB-A', 'code': 'drawer_006', 'row': 2, 'col': 1, 'aruco': 31, 'label': '당뇨약', 'px': 300, 'py': 400},
+    {'cabinet': 'CAB-A', 'code': 'drawer_001', 'row': 0, 'col': 0, 'aruco': 10, 'label': '비타민B',     'medicine': '벤포벨S',     'px': 100, 'py': 100},
+    {'cabinet': 'CAB-A', 'code': 'drawer_002', 'row': 0, 'col': 1, 'aruco': 11, 'label': '신경안정제',  'medicine': '심미안정',     'px': 300, 'py': 100},
+    {'cabinet': 'CAB-A', 'code': 'drawer_003', 'row': 1, 'col': 0, 'aruco': 20, 'label': '비타민C',     'medicine': '유한 비타민C', 'px': 100, 'py': 250},
+    {'cabinet': 'CAB-A', 'code': 'drawer_004', 'row': 1, 'col': 1, 'aruco': 21, 'label': '유산균',      'medicine': '니뽄 유산균',  'px': 300, 'py': 250},
+    {'cabinet': 'CAB-A', 'code': 'drawer_005', 'row': 2, 'col': 0, 'aruco': 30, 'label': '피부미용',    'medicine': '메디폼 H뷰티', 'px': 100, 'py': 400},
+    {'cabinet': 'CAB-A', 'code': 'drawer_006', 'row': 2, 'col': 1, 'aruco': 31, 'label': '여드름크림',  'medicine': '애크논',       'px': 300, 'py': 400},
 ]
 
 
@@ -198,11 +203,20 @@ def seed() -> None:
                 (p['name'], p['chart_no'], ward_id)
             )
 
-        # medicine (name 기준 UNIQUE)
-        for m_name in MEDICINES:
+        # medicine (name 기준 UNIQUE). 재시딩 시 사이즈/바코드도 갱신.
+        for m in MEDICINES:
             c.execute(
-                'INSERT OR IGNORE INTO medicine (name, display_name) VALUES (?, ?)',
-                (m_name, m_name)
+                '''INSERT INTO medicine
+                   (name, display_name, width, depth, height, barcode_plane)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(name) DO UPDATE SET
+                       display_name  = excluded.display_name,
+                       width         = excluded.width,
+                       depth         = excluded.depth,
+                       height        = excluded.height,
+                       barcode_plane = excluded.barcode_plane''',
+                (m['name'], m['name'],
+                 m['width'], m['depth'], m['height'], m['barcode_plane'])
             )
 
         # cabinet (code 기준 UNIQUE)
@@ -216,15 +230,21 @@ def seed() -> None:
                  cab['size_x'], cab['size_y'], cab['size_z'])
             )
 
-        # cabinet_slot (code 기준 UNIQUE)
+        # cabinet_slot (code 기준 UNIQUE). 재시딩 시 라벨/약품 매핑 갱신.
         for d in DRAWERS:
             cab_id = _id_of(c, 'cabinet', 'code=?', (d['cabinet'],))
+            med_id = (_id_of(c, 'medicine', 'name=?', (d['medicine'],))
+                      if d.get('medicine') else None)
             c.execute(
-                '''INSERT OR IGNORE INTO cabinet_slot
-                   (cabinet_id, code, row_idx, col_idx, aruco_marker_id,
-                    label, pixel_x, pixel_y)
-                   VALUES (?,?,?,?,?,?,?,?)''',
-                (cab_id, d['code'], d['row'], d['col'], d['aruco'],
+                '''INSERT INTO cabinet_slot
+                   (cabinet_id, medicine_id, code, row_idx, col_idx,
+                    aruco_marker_id, label, pixel_x, pixel_y)
+                   VALUES (?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(code) DO UPDATE SET
+                       medicine_id     = excluded.medicine_id,
+                       label           = excluded.label,
+                       aruco_marker_id = excluded.aruco_marker_id''',
+                (cab_id, med_id, d['code'], d['row'], d['col'], d['aruco'],
                  d['label'], d['px'], d['py'])
             )
 
