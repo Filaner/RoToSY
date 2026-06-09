@@ -1330,6 +1330,10 @@ function renderTodayDeliveries(list) {
     const reqBadge = p.delivery_requested
       ? `<span style="font-size:.68rem;color:var(--green);background:#14532d22;border:1px solid var(--green);border-radius:9999px;padding:.1rem .5rem;"> 배송 요청</span>`
       : `<span style="font-size:.68rem;color:var(--muted);background:var(--surf2);border:1px solid var(--border);border-radius:9999px;padding:.1rem .5rem;">미요청</span>`;
+    const canStart = p.delivery_requested && p.status === 'approved';
+    const startBtn = canStart
+      ? `<button class="btn btn-teal btn-sm" onclick="startPicking('${p.id}',this)" style="font-size:.75rem;">조제 시작</button>`
+      : '';
     return `
     <div style="display:flex;align-items:center;gap:.85rem;padding:.65rem .9rem;
       background:var(--surf2);border:1px solid ${p.delivery_requested?'var(--green)33':'var(--border)'};
@@ -1345,9 +1349,27 @@ function renderTodayDeliveries(list) {
       <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
         ${reqBadge}
         <span style="font-size:.75rem;font-weight:700;color:${sColor};">${sLabel}</span>
+        ${startBtn}
       </div>
     </div>`;
   }).join('');
+}
+
+async function startPicking(pid, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '시작 중...'; }
+  try {
+    const r = await fetch(`/api/prescription/${pid}/start_picking`, {method: 'POST'});
+    const d = await r.json();
+    if (!r.ok) {
+      alert(d.detail || '조제 시작 실패');
+      if (btn) { btn.disabled = false; btn.textContent = '조제 시작'; }
+      return;
+    }
+    await loadTodayDeliveries();
+  } catch(e) {
+    alert(e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '조제 시작'; }
+  }
 }
 
 async function loadAudit() {

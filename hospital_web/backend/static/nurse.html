@@ -572,7 +572,6 @@ async function loadWardSchedule() {
 }
 
 loadPatients();
-loadMedicines();
 loadWardSchedule();
 setInterval(loadWardSchedule, 30000);
 
@@ -1104,7 +1103,7 @@ function el(id) { return document.getElementById(id); }
 // Init
 // ═══════════════════════════════════════════════
 connect();
-addDrugRow();
+loadMedicines().then(addDrugRow);
 renderWardSchedule();
 renderTimeline();
 loadMyPrescriptions();

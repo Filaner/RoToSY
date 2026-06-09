@@ -22,8 +22,12 @@ from .db_schema import init_schema, get_conn
 # ── 데이터 정의 ───────────────────────────────────────────────────────────────
 
 WARDS = [
-    {'name': '1병동'}, {'name': '2병동'}, {'name': '3병동'},
-    {'name': '5병동'},
+    # 좌표: mobile_simulation 맵 기준 (단위 m, theta는 rad)
+    #   Wing A: y > 0,  Wing B: y < 0
+    {'name': '1병동', 'goal_x': 1.7, 'goal_y':  3.2, 'goal_theta': 0},  # Wing A 좌측
+    {'name': '2병동', 'goal_x': 4.4, 'goal_y':  3.2, 'goal_theta': 0},  # Wing A 우측
+    {'name': '3병동', 'goal_x': 1.7, 'goal_y': -3.2, 'goal_theta': 0},  # Wing B 좌측
+    {'name': '5병동', 'goal_x': 4.4, 'goal_y': -3.2, 'goal_theta': 0},  # Wing B 우측
 ]
 
 STAFF = [
@@ -169,7 +173,15 @@ def seed() -> None:
     with get_conn() as c:
         # ward
         for w in WARDS:
-            c.execute('INSERT OR IGNORE INTO ward (name) VALUES (?)', (w['name'],))
+            c.execute(
+                '''INSERT INTO ward (name, goal_x, goal_y, goal_theta)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(name) DO UPDATE SET
+                       goal_x     = excluded.goal_x,
+                       goal_y     = excluded.goal_y,
+                       goal_theta = excluded.goal_theta''',
+                (w['name'], w.get('goal_x'), w.get('goal_y'), w.get('goal_theta', 0))
+            )
 
         # staff
         for s in STAFF:

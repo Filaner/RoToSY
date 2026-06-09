@@ -82,3 +82,28 @@ async def confirm_loading(pid: str):
     mission = ms.confirm_loading('pharmacist')
     ms.add_audit('pharmacist', 'CONFIRM_LOADING', f'{pid} — {p["patient_name"]} 적재 확인')
     return {'prescription': p, 'mission': mission}
+
+
+@router.post('/{pid}/start_picking')
+async def start_picking(pid: str):
+    """관리자의 '조제 시작' — 배송 요청된 처방에 대해 미션 생성 + 로봇 호출.
+
+    조건:
+      - prescription.status == 'approved'
+      - prescription.delivery_requested == 1
+    """
+    p = ps.get(pid)
+    if not p:
+        raise HTTPException(status_code=404, detail='처방전을 찾을 수 없습니다.')
+    if p['status'] != 'approved':
+        raise HTTPException(status_code=400, detail='승인된 처방만 조제 시작 가능합니다.')
+    if not p['delivery_requested']:
+        raise HTTPException(status_code=400, detail='간호사 배송 요청이 먼저 필요합니다.')
+
+    mission = ms.new_mission(p['ward'], pid)
+    ps.set_status(pid, 'awaiting_load_confirm')
+    ms.add_audit(
+        'admin', 'START_PICKING',
+        f'{pid} 조제 시작 — {p["patient_name"]} ({p["ward"]})'
+    )
+    return {'prescription': ps.get(pid), 'mission': mission}

@@ -38,7 +38,10 @@ def init_schema() -> None:
         CREATE TABLE IF NOT EXISTS ward (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             name        TEXT NOT NULL UNIQUE,
-            location    TEXT
+            location    TEXT,
+            goal_x      REAL,
+            goal_y      REAL,
+            goal_theta  REAL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS staff (
