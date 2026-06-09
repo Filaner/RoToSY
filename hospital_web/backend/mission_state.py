@@ -209,6 +209,30 @@ def add_audit(actor: str, action: str, detail: str = '') -> None:
         _insert_audit(c, mid, actor, action, detail)
 
 
+def cancel_current_mission(actor: str = 'admin', detail: str = '미션 취소') -> dict:
+    """현재 미션 → IDLE + 약사/관리자 확인 플래그 둘 다 0으로 리셋.
+    재시작 시 새 사이클이 깨끗하게 시작되도록."""
+    with _lock, get_conn() as c:
+        row = _latest_row(c)
+        if not row:
+            return _idle_snapshot()
+        mission_int_id = row['id']
+        prev_status = row['status']
+        c.execute(
+            '''UPDATE mission
+               SET status='IDLE',
+                   pharmacist_confirmed=0,
+                   admin_confirmed=0
+               WHERE id=?''',
+            (mission_int_id,)
+        )
+        _insert_audit(c, mission_int_id, actor, 'CANCEL',
+                      detail or f'{prev_status} → IDLE (재시도 가능)')
+        row = c.execute('SELECT * FROM mission WHERE id=?',
+                        (mission_int_id,)).fetchone()
+        return _row_to_snapshot(c, row)
+
+
 # ── internal ─────────────────────────────────────────────────────────────────
 
 def _insert_audit(c, mission_id: Optional[int], actor: str,

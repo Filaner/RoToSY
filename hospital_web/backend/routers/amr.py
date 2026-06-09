@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from .. import ros_bridge as ros
 from .. import mission_state as ms
+from .. import prescription_state as ps
 
 router = APIRouter(prefix='/api/amr', tags=['amr'])
 
@@ -32,9 +33,22 @@ async def dispatch(req: DispatchReq):
 
 @router.post('/cancel')
 async def cancel():
+    """AMR 미션 취소 — 처방 status 'approved'로 되돌리고 확인 플래그 리셋.
+    재시작 시 관리자가 '조제 시작'을 다시 누르면 새 사이클로 진입."""
     result = await ros.cancel_mission()
-    ms.update_status('IDLE', actor='admin', detail='미션 취소')
-    ms.add_audit('admin', 'AMR_CANCEL')
+
+    # 현재 미션이 가리키는 처방을 되돌림
+    current = ms.get_mission()
+    pid = current.get('prescription_id')
+    if pid:
+        p = ps.get(pid)
+        if p and p['status'] in ('awaiting_load_confirm',):
+            ps.set_status(pid, 'approved')
+
+    # 미션 row IDLE + 확인 플래그 리셋
+    ms.cancel_current_mission(actor='admin', detail='미션 취소')
+    ms.add_audit('admin', 'AMR_CANCEL',
+                 f'처방 {pid} 재시도 가능' if pid else '미션 없음')
     return result
 
 
