@@ -15,16 +15,23 @@ import threading
 import uuid
 import random
 import math
+import os
+import time
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / 'sensor_data.db'
+DB_PATH = Path(__file__).parent / 'hospital.db'
 
 TEMP_MIN, TEMP_MAX = 15.0, 25.0
 HUMI_MIN, HUMI_MAX = 40.0, 70.0
 SENSOR_ID = 'arduino_01'
 
 _lock = threading.Lock()
+_log  = logging.getLogger('sensor_db')
+
+_serial_thread: threading.Thread | None = None
+_serial_stop = threading.Event()
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
@@ -236,3 +243,79 @@ def _seed_history() -> None:
                sensor_status=?, last_reading_at=? WHERE sensor_id=?''',
             (last[2], last[3], status, last[5], SENSOR_ID)
         )
+
+
+# ── Serial reader (background thread) ────────────────────────────────────────
+#
+# Arduino DHT22 → CSV "t,h\n" 라인을 읽어 insert_reading()로 적재.
+# Env: SENSOR_PORT (기본 /dev/ttyACM0), SENSOR_BAUD (9600), SENSOR_ENABLED (1)
+# 시리얼 열기 실패 / 권한 거부 / 라인 깨짐 등은 모두 graceful — 백엔드를 죽이지 않음.
+
+def start_serial_reader() -> None:
+    global _serial_thread
+    if _serial_thread and _serial_thread.is_alive():
+        return
+    if os.environ.get('SENSOR_ENABLED', '1') == '0':
+        _log.info('sensor reader disabled (SENSOR_ENABLED=0)')
+        return
+    _serial_stop.clear()
+    _serial_thread = threading.Thread(
+        target=_serial_loop, name='sensor-serial', daemon=True
+    )
+    _serial_thread.start()
+
+
+def stop_serial_reader() -> None:
+    _serial_stop.set()
+    if _serial_thread and _serial_thread.is_alive():
+        _serial_thread.join(timeout=2.0)
+
+
+def _serial_loop() -> None:
+    port = os.environ.get('SENSOR_PORT', '/dev/ttyACM0')
+    baud = int(os.environ.get('SENSOR_BAUD', '9600'))
+
+    try:
+        import serial   # pyserial; lazy import
+    except ImportError:
+        _log.warning('pyserial 미설치 — sensor reader 비활성')
+        return
+
+    while not _serial_stop.is_set():
+        try:
+            with serial.Serial(port, baud, timeout=2) as ser:
+                _log.info(f'sensor reader: connected {port} @ {baud}, Arduino 리셋 대기 ~3s')
+                # Arduino DTR 리셋 후 첫 측정까지 정적 구간
+                if _serial_stop.wait(3.0):
+                    return
+                ser.reset_input_buffer()
+
+                while not _serial_stop.is_set():
+                    line = ser.readline().decode(errors='ignore').strip()
+                    if not line:
+                        continue
+                    try:
+                        t_str, h_str = line.split(',')
+                        t, h = float(t_str), float(h_str)
+                    except ValueError:
+                        continue
+                    if math.isnan(t) or math.isnan(h):
+                        continue
+                    try:
+                        insert_reading(t, h)
+                    except Exception as e:
+                        _log.warning(f'insert_reading 실패: {e}')
+
+        except PermissionError as e:
+            _log.warning(
+                f'sensor reader: permission denied on {port} '
+                f'(dialout 권한 또는 sudo 필요) — {e}; 5s 뒤 재시도'
+            )
+        except Exception as e:
+            _log.warning(
+                f'sensor reader: {type(e).__name__} on {port} — {e}; 5s 뒤 재시도'
+            )
+
+        # interruptible 5s backoff
+        if _serial_stop.wait(5.0):
+            return

@@ -19,8 +19,9 @@ from fastapi.staticfiles import StaticFiles
 from . import robot_proxy as proxy
 from . import ros_bridge   as ros
 from . import mission_state as ms
-from .routers import robot, amr, system as sys_router, prescription as presc_router, sensor as sensor_router, vision as vision_router, demo as demo_router
+from .routers import robot, amr, system as sys_router, prescription as presc_router, sensor as sensor_router, vision as vision_router, demo as demo_router, patient as patient_router, medicine as medicine_router
 from . import sensor_db
+from . import db_schema
 
 STATIC_DIR   = Path(__file__).parent / 'static'
 BROADCAST_HZ = 10
@@ -59,6 +60,10 @@ manager = ConnectionManager()
 def _build_state() -> dict:
     bridge   = ros.get_state()
     robot_st = proxy.get_robot_state()
+    # 'arduino' 필드는 DB(sensor_db)가 단일 소스. 시리얼 리더가 insert_reading()으로
+    # drawer_sensors를 upsert하면 get_latest()가 최신값을 들고 옴.
+    # DB에 아직 값이 없으면 ros_bridge mock으로 폴백.
+    arduino = sensor_db.get_latest() or bridge['arduino']
     return {
         'robot':   robot_st,
         'robot_online': proxy.is_online(),
@@ -67,7 +72,7 @@ def _build_state() -> dict:
         'mission': ms.get_mission(),
         'nodes':   bridge['nodes'],
         'plc':     {'status': 'DISCONNECTED'},
-        'arduino': bridge['arduino'],
+        'arduino': arduino,
     }
 
 
@@ -83,13 +88,16 @@ async def _broadcast_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    db_schema.init_schema()
     sensor_db.init_db()
+    sensor_db.start_serial_reader()
     ros.init()
     broadcast_task = asyncio.create_task(_broadcast_loop())
     poll_task      = asyncio.create_task(proxy.poll_loop())
     yield
     broadcast_task.cancel()
     poll_task.cancel()
+    sensor_db.stop_serial_reader()
     ros.shutdown()
 
 
@@ -104,6 +112,8 @@ app.include_router(presc_router.router)
 app.include_router(sensor_router.router)
 app.include_router(vision_router.router)
 app.include_router(demo_router.router)
+app.include_router(patient_router.router)
+app.include_router(medicine_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')
