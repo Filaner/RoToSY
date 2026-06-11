@@ -152,6 +152,17 @@ async def camera_markers() -> dict:
     }
 
 
+@app.get('/camera/snapshot')
+async def camera_snapshot():
+    """Return the latest camera frame as a JPEG image."""
+    from fastapi import HTTPException as _HTTPException
+    from fastapi.responses import Response as _Response
+    frame = cam_module.camera.get_jpeg()
+    if frame is None:
+        raise _HTTPException(status_code=503, detail='카메라 프레임 없음')
+    return _Response(content=frame, media_type='image/jpeg')
+
+
 
 @app.websocket('/ws')
 async def websocket_endpoint(websocket: WebSocket) -> None:

@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from . import robot_proxy as proxy
 from . import ros_bridge   as ros
 from . import mission_state as ms
-from .routers import robot, amr, system as sys_router, prescription as presc_router, sensor as sensor_router, vision as vision_router, demo as demo_router, patient as patient_router, medicine as medicine_router
+from .routers import robot, amr, system as sys_router, prescription as presc_router, sensor as sensor_router, vision as vision_router, demo as demo_router, patient as patient_router, medicine as medicine_router, ocr as ocr_router
 from . import sensor_db
 from . import db_schema
 
@@ -65,14 +65,15 @@ def _build_state() -> dict:
     # DB에 아직 값이 없으면 ros_bridge mock으로 폴백.
     arduino = sensor_db.get_latest() or bridge['arduino']
     return {
-        'robot':   robot_st,
+        'robot':        robot_st,
         'robot_online': proxy.is_online(),
-        'amr':     bridge['amr'],
-        'door':    bridge['door'],
-        'mission': ms.get_mission(),
-        'nodes':   bridge['nodes'],
-        'plc':     {'status': 'DISCONNECTED'},
-        'arduino': arduino,
+        'amr':          bridge['amr'],
+        'door':         bridge['door'],
+        'mission':      ms.get_mission(),
+        'nodes':        bridge['nodes'],
+        'plc':          {'status': 'DISCONNECTED'},
+        'arduino':      arduino,
+        'motion_step':  bridge['motion_step'],
     }
 
 
@@ -114,6 +115,7 @@ app.include_router(vision_router.router)
 app.include_router(demo_router.router)
 app.include_router(patient_router.router)
 app.include_router(medicine_router.router)
+app.include_router(ocr_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')

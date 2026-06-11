@@ -32,5 +32,10 @@ Thumbs.db
 # Project Specific
 doosan-robot2/
 
+# Database files (runtime data — not committed)
+*.db
+*.db-shm
+*.db-wal
+
 # Local
 hopital_web/.venv/

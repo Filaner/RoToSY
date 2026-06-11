@@ -8,12 +8,20 @@ Usage:
      ros2 run doosan_controller motion_sequence <marker_id> [--step]
 """
 
+import base64
 import json
 import math
+import os
 import sys
 import threading
 import time
 import urllib.request
+
+try:
+    from groq import Groq as _Groq
+    _GROQ_AVAILABLE = True
+except ImportError:
+    _GROQ_AVAILABLE = False
 
 import rclpy
 from rclpy.action import ActionClient
@@ -30,8 +38,11 @@ from rotosy_gripper_control.keyboard_electromagnet_gripper import KeyboardElectr
 
 # ── 공통 파라미터 ────────────────────────────────────────────────────────────
 
-CAMERA_API       = 'http://localhost:8000/camera/markers'
-ROBOT_NS         = 'dsr01'
+CAMERA_API          = 'http://localhost:8000/camera/markers'
+CAMERA_SNAPSHOT_API = 'http://localhost:8000/camera/snapshot'
+OCR_VERIFY_API      = 'http://localhost:8080/api/ocr/verify'
+ROBOT_NS            = 'dsr01'
+GROQ_API_KEY        = os.environ.get('GROQ_API_KEY', '')
 
 VEL_MM           = 30.0
 ACC_MM           = 60.0
@@ -338,6 +349,102 @@ class MotionSequenceNode(Node):
         self.get_logger().info(f'호 이동 완료  end=({end_pos[0]:.1f},{end_pos[1]:.1f},{end_pos[2]:.1f})')
         return end_pos
 
+    # ── OCR 파이프라인 ────────────────────────────────────────────────────────
+
+    def _capture_image(self) -> bytes | None:
+        """web_interface에서 현재 카메라 프레임을 JPEG bytes로 취득."""
+        try:
+            with urllib.request.urlopen(CAMERA_SNAPSHOT_API, timeout=5) as resp:
+                return resp.read()
+        except Exception as e:
+            self.get_logger().error(f'[OCR] 스냅샷 취득 실패: {e}')
+            return None
+
+    def _ocr_and_parse(self) -> dict | None:
+        """카메라 스냅샷 → Groq llama-4-scout (이미지 직접 전달) → JSON 파싱 → ROS 토픽 발행."""
+        if not _GROQ_AVAILABLE:
+            self.get_logger().error('[OCR] groq 패키지 미설치: pip install groq')
+            return None
+
+        self.get_logger().info('[OCR] 카메라 스냅샷 취득...')
+        img = self._capture_image()
+        if img is None:
+            return None
+
+        self.get_logger().info('[OCR] Groq llama-4-scout 비전 분석 중...')
+        try:
+            img_b64 = base64.b64encode(img).decode()
+            client = _Groq(api_key=GROQ_API_KEY)
+            chat = client.chat.completions.create(
+                model='meta-llama/llama-4-scout-17b-16e-instruct',
+                max_tokens=512,
+                messages=[{
+                    'role': 'user',
+                    'content': [
+                        {
+                            'type': 'image_url',
+                            'image_url': {'url': f'data:image/jpeg;base64,{img_b64}'},
+                        },
+                        {
+                            'type': 'text',
+                            'text': (
+                                '이 약품 라벨에서 텍스트를 읽어서 아래 JSON 형식으로만 반환하세요. '
+                                '다른 설명 없이 유효한 JSON만 출력하세요.\n'
+                                '{\n'
+                                '  "medicine_name": "약품명",\n'
+                                '  "dosage": "용량",\n'
+                                '  "instructions": "복용법",\n'
+                                '  "patient_name": "환자명 또는 null",\n'
+                                '  "prescription_date": "처방일 또는 null",\n'
+                                '  "ward": "병동 또는 null",\n'
+                                '  "raw_text": "이미지에서 읽은 텍스트 전체"\n'
+                                '}'
+                            ),
+                        },
+                    ],
+                }],
+            )
+            text = chat.choices[0].message.content.strip()
+            if '```' in text:
+                text = text.split('```')[1]
+                if text.startswith('json'):
+                    text = text[4:]
+                text = text.strip()
+            result = json.loads(text)
+        except Exception as e:
+            self.get_logger().error(f'[OCR] Groq 비전 호출 실패: {e}')
+            return None
+
+        self.get_logger().info(f'[OCR] 파싱 결과: {result}')
+        self._step_info_pub.publish(
+            String(data=f'OCR:{json.dumps(result, ensure_ascii=False)}')
+        )
+
+        # hospital_web에 인증 요청
+        try:
+            payload = json.dumps(result, ensure_ascii=False).encode()
+            req = urllib.request.Request(
+                OCR_VERIFY_API,
+                data=payload,
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                verify = json.loads(resp.read())
+            status = verify.get('match_status', 'UNKNOWN')
+            pending = verify.get('pending_count', '?')
+            self.get_logger().info(
+                f'[OCR] 인증 결과: {status}  남은 품목: {pending}개'
+            )
+            if status == 'MISMATCH':
+                self.get_logger().warn(
+                    f'[OCR] 불일치: {verify.get("mismatch_reason", "")}'
+                )
+        except Exception as e:
+            self.get_logger().warn(f'[OCR] hospital_web 전송 실패 (계속 진행): {e}')
+
+        return result
+
     def _get_marker(self, marker_id: int, retries: int = 5):
         for attempt in range(retries):
             try:
@@ -446,6 +553,12 @@ class MotionSequenceNode(Node):
             # 13. MoveJ 카메라 앞 정렬
             if not self._wait_for_step('13. MoveJ 카메라 앞 정렬'): return
             if not self._move_j([20.44, 53.45, 49.27, 158.82, 97.28, -25.6]): return
+
+            # 13.5. OCR & JSON 파싱 (실패해도 시퀀스는 계속)
+            if not self._wait_for_step('13.5. OCR & JSON 파싱'): return
+            ocr_result = self._ocr_and_parse()
+            if ocr_result is None:
+                self.get_logger().warn('[OCR] 파싱 실패 — 다음 단계 계속 진행')
 
             # 14. MoveJ 병동 박스 정렬
             if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return

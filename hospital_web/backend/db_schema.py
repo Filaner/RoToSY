@@ -160,6 +160,22 @@ def init_schema() -> None:
                         DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now'))
         );
 
+        CREATE TABLE IF NOT EXISTS ocr_scan (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            mission_id      INTEGER REFERENCES mission(id),
+            prescription_id INTEGER REFERENCES prescription(id),
+            medicine_name   TEXT    DEFAULT '',
+            dosage          TEXT    DEFAULT '',
+            raw_text        TEXT    DEFAULT '',
+            ocr_json        TEXT    DEFAULT '{}',
+            match_status    TEXT    NOT NULL DEFAULT 'UNKNOWN'
+                            CHECK (match_status IN ('MATCHED','MISMATCH','UNKNOWN')),
+            matched_item_id INTEGER REFERENCES prescription_item(id),
+            mismatch_reason TEXT    DEFAULT '',
+            scanned_at      TEXT    NOT NULL
+                            DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_prescription_status ON prescription(status);
         CREATE INDEX IF NOT EXISTS idx_prescription_created ON prescription(created_at);
         CREATE INDEX IF NOT EXISTS idx_pitem_pid ON prescription_item(prescription_id);
@@ -167,4 +183,6 @@ def init_schema() -> None:
         CREATE INDEX IF NOT EXISTS idx_audit_mission ON audit_log(mission_id);
         CREATE INDEX IF NOT EXISTS idx_slot_cab ON cabinet_slot(cabinet_id);
         CREATE INDEX IF NOT EXISTS idx_mission_created ON mission(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_scan_mission ON ocr_scan(mission_id);
+        CREATE INDEX IF NOT EXISTS idx_scan_scanned ON ocr_scan(scanned_at DESC);
         ''')
