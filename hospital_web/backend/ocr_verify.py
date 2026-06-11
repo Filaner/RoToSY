@@ -31,12 +31,23 @@ def _normalize(text: str) -> str:
 
 
 def _match_name(detected: str, expected: str) -> bool:
-    """약품명 매칭: 정규화 후 exact → contains 순으로 시도."""
+    """약품명 매칭: exact → contains → 토큰 부분 매칭 순으로 시도.
+    OCR 오독으로 제형 접미사(정/캡슐 등)나 브랜드명이 누락돼도 핵심 토큰이
+    겹치면 매칭으로 인정한다."""
     d = _normalize(detected)
     e = _normalize(expected)
     if not d or not e:
         return False
-    return d == e or d in e or e in d
+    if d == e or d in e or e in d:
+        return True
+    # 공백 분리 토큰 중 2자 이상인 것이 상대 문자열에 포함되면 매칭
+    for token in [_normalize(t) for t in expected.split() if len(_normalize(t)) >= 2]:
+        if token in d:
+            return True
+    for token in [_normalize(t) for t in detected.split() if len(_normalize(t)) >= 2]:
+        if token in e:
+            return True
+    return False
 
 
 # ── 핵심 함수 ─────────────────────────────────────────────────────────────────
