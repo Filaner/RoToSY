@@ -153,12 +153,12 @@ CABINETS = [
 # (row, col): 'drawer_xxx', aruco, label, medicine, pixel_x, pixel_y
 # medicine=None 이면 매핑 없음 (현재는 임팩타민이 슬롯 미배치)
 DRAWERS = [
-    {'cabinet': 'CAB-A', 'code': 'drawer_001', 'row': 0, 'col': 0, 'aruco': 10, 'label': '비타민B',     'medicine': '벤포벨S',     'px': 100, 'py': 100},
-    {'cabinet': 'CAB-A', 'code': 'drawer_002', 'row': 0, 'col': 1, 'aruco': 11, 'label': '신경안정제',  'medicine': '심미안정',     'px': 300, 'py': 100},
-    {'cabinet': 'CAB-A', 'code': 'drawer_003', 'row': 1, 'col': 0, 'aruco': 20, 'label': '비타민C',     'medicine': '유한 비타민C', 'px': 100, 'py': 250},
-    {'cabinet': 'CAB-A', 'code': 'drawer_004', 'row': 1, 'col': 1, 'aruco': 21, 'label': '유산균',      'medicine': '니뽄 유산균',  'px': 300, 'py': 250},
-    {'cabinet': 'CAB-A', 'code': 'drawer_005', 'row': 2, 'col': 0, 'aruco': 30, 'label': '피부미용',    'medicine': '메디폼 H뷰티', 'px': 100, 'py': 400},
-    {'cabinet': 'CAB-A', 'code': 'drawer_006', 'row': 2, 'col': 1, 'aruco': 31, 'label': '여드름크림',  'medicine': '애크논',       'px': 300, 'py': 400},
+    {'cabinet': 'CAB-A', 'code': 'drawer_001', 'row': 0, 'col': 0, 'aruco': 0, 'label': '비타민B',     'medicine': '벤포벨S',     'px': 100, 'py': 100},
+    {'cabinet': 'CAB-A', 'code': 'drawer_002', 'row': 0, 'col': 1, 'aruco': 1, 'label': '신경안정제',  'medicine': '심미안정',     'px': 300, 'py': 100},
+    {'cabinet': 'CAB-A', 'code': 'drawer_003', 'row': 1, 'col': 0, 'aruco': 2, 'label': '비타민C',     'medicine': '유한 비타민C', 'px': 100, 'py': 250},
+    {'cabinet': 'CAB-A', 'code': 'drawer_004', 'row': 1, 'col': 1, 'aruco': 3, 'label': '유산균',      'medicine': '니뽄 유산균',  'px': 300, 'py': 250},
+    {'cabinet': 'CAB-A', 'code': 'drawer_005', 'row': 2, 'col': 0, 'aruco': 4, 'label': '피부미용',    'medicine': '메디폼 H뷰티', 'px': 100, 'py': 400},
+    {'cabinet': 'CAB-A', 'code': 'drawer_006', 'row': 2, 'col': 1, 'aruco': 5, 'label': '여드름크림',  'medicine': '애크논',       'px': 300, 'py': 400},
 ]
 
 

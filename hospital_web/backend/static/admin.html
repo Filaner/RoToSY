@@ -609,6 +609,107 @@ body{
         </div>
       </div>
 
+      <!-- ── 자동 조제 시퀀스 (옵션 Y) ── -->
+      <div class="card" id="seq-auto-card" style="border-left:3px solid var(--green);">
+        <div class="card-title">
+          ▶ 자동 조제 시퀀스
+          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.85rem;">
+            처방 → 슬롯 → ArUco 마커 자동 호출
+          </span>
+        </div>
+        <div style="display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;">
+          <div style="flex:1;min-width:280px;">
+            <div class="st-item"><div class="st-label">진행도</div>
+              <div class="st-val" id="seq-progress">— / —</div>
+            </div>
+            <div class="st-item"><div class="st-label">현재 마커</div>
+              <div class="st-val" id="seq-current-marker">—</div>
+            </div>
+            <div class="st-item"><div class="st-label">현재 약품</div>
+              <div class="st-val" id="seq-current-label" style="font-size:.95rem;">—</div>
+            </div>
+            <div class="st-item"><div class="st-label">시퀀스 단계</div>
+              <div class="st-val" id="seq-motion-step">IDLE</div>
+            </div>
+            <div class="st-item" style="margin-top:.5rem;"><div class="st-label">마커 큐</div>
+              <div id="seq-queue" style="font-family:monospace;color:var(--muted);font-size:.85rem;">—</div>
+            </div>
+            <div class="feedback" id="seq-feedback"></div>
+          </div>
+          <div class="btn-group" style="flex-shrink:0;flex-direction:column;gap:.4rem;">
+            <button class="btn btn-green"  id="btn-seq-start"   onclick="seqAutoStart()">▶ 자동 시작</button>
+            <button class="btn btn-blue"   id="btn-seq-step"    onclick="seqAutoStep()" disabled>▶ 단계 진행
+              <span style="font-size:.7rem;font-weight:400;opacity:.8;">(현재 마커 내)</span>
+            </button>
+            <button class="btn btn-yellow" id="btn-seq-marker"  onclick="seqAutoNextMarker()" disabled>▶ 다음 마커
+              <span style="font-size:.7rem;font-weight:400;opacity:.8;">(큐 진행)</span>
+            </button>
+            <button class="btn btn-red"    id="btn-seq-stop"    onclick="seqAutoStop()" disabled>■ 중지</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 수동 호출 (옵션 X) ── -->
+      <div class="card" id="seq-manual-card" style="border-left:3px solid var(--yellow);">
+        <div class="card-title">
+          수동 호출
+          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.85rem;">
+            ArUco 마커 번호 직접 입력 (디버깅 · 폴백)
+          </span>
+        </div>
+        <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+          <label class="st-label">마커 ID</label>
+          <input type="number" id="manual-marker" min="0" max="999" class="num-in" style="width:6rem;" placeholder="예: 3">
+          <button class="btn btn-yellow" id="btn-manual-go"   onclick="seqManualGo()">▶ 호출</button>
+          <button class="btn btn-blue"   id="btn-manual-next" onclick="motionNext()">▶ 다음 단계</button>
+          <button class="btn btn-red"    id="btn-manual-stop" onclick="motionStop()">■ 정지</button>
+          <span style="color:var(--muted);font-size:.85rem;margin-left:.5rem;">
+            ※ 자동 시퀀스 중에는 비활성화
+          </span>
+        </div>
+        <div class="feedback" id="manual-feedback"></div>
+      </div>
+
+      <!-- ── 마그넷 (그리퍼) ── -->
+      <div class="card" id="magnet-card">
+        <div style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
+            <div class="card-title">마그넷</div>
+            <div class="st-item"><div class="st-label">상태</div>
+              <div class="st-val" id="magnet-state">OFF</div>
+            </div>
+          </div>
+          <div class="btn-group" style="flex-shrink:0;">
+            <button class="btn btn-green" onclick="magnetOn()">⚡ ON</button>
+            <button class="btn btn-red"   onclick="magnetOff()">✕ OFF</button>
+          </div>
+        </div>
+        <div class="feedback" id="magnet-feedback"></div>
+      </div>
+
+      <!-- ── 카테시안 조그 ── -->
+      <div class="card" id="cart-jog-card">
+        <div class="card-title">Cartesian Jog
+          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.85rem;">
+            X / Y / Z 직선 미세이동 (mm)
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+          <label class="st-label">거리</label>
+          <input type="number" id="cart-dist" min="0.1" max="50" step="0.5" value="5" class="num-in" style="width:5rem;">
+          <span class="st-label">mm</span>
+          <div style="display:flex;gap:.5rem;margin-left:1rem;flex-wrap:wrap;">
+            <button class="btn btn-ghost" onclick="jogCart('x',-1)">X−</button>
+            <button class="btn btn-ghost" onclick="jogCart('x', 1)">X+</button>
+            <button class="btn btn-ghost" onclick="jogCart('y',-1)">Y−</button>
+            <button class="btn btn-ghost" onclick="jogCart('y', 1)">Y+</button>
+            <button class="btn btn-ghost" onclick="jogCart('z',-1)">Z−</button>
+            <button class="btn btn-ghost" onclick="jogCart('z', 1)">Z+</button>
+          </div>
+        </div>
+        <div class="feedback" id="cart-feedback"></div>
+      </div>
+
     </div><!-- /tab-robot -->
 
 
@@ -937,7 +1038,48 @@ function applyState(s) {
   if (s.mission) applyMission(s.mission);
   if (s.nodes)  applyNodes(s.nodes);
   applyRoToSYOnline(s.robot_online);
+  applySequence(s);
   if (typeof updateSensorValues === 'function') updateSensorValues(s);
+}
+
+// ── Motion sequence (Y 자동 + X 수동) + 마그넷 ──
+function applySequence(s) {
+  const q     = s.marker_queue || { markers: [], labels: [], index: 0, total: 0, current: null };
+  const step  = s.motion_step  || 'IDLE';
+  const mag   = !!s.magnet_on;
+  const total = q.total || 0;
+  const idx   = q.index || 0;
+
+  setText('seq-progress',       total ? `${Math.min(idx+1, total)} / ${total}` : '— / —');
+  setText('seq-current-marker', q.current !== null && q.current !== undefined ? q.current : '—');
+  setText('seq-current-label',  (q.labels && q.labels[idx]) || '—');
+  setText('seq-motion-step',    step);
+  setText('magnet-state',       mag ? 'ON' : 'OFF');
+  setValColor('magnet-state',   mag ? 'ON' : 'OFF', mag ? 'good' : '');
+
+  // 마커 큐 표시
+  const queueEl = document.getElementById('seq-queue');
+  if (queueEl) {
+    if (!total) { queueEl.textContent = '—'; }
+    else {
+      queueEl.innerHTML = q.markers.map((m, i) => {
+        const cls = i < idx ? 'color:var(--muted);text-decoration:line-through;'
+                  : i === idx ? 'color:var(--green);font-weight:700;'
+                  : 'color:var(--text);';
+        return `<span style="${cls}">[${m}${q.labels[i] ? ' ' + q.labels[i] : ''}]</span>`;
+      }).join(' → ');
+    }
+  }
+
+  // 인터락: 자동 시퀀스 활성 시 수동 버튼 disabled
+  const autoActive = total > 0 && idx < total;
+  el('btn-seq-start').disabled    = !total || autoActive;
+  el('btn-seq-step').disabled     = !autoActive;
+  el('btn-seq-marker').disabled   = !autoActive;
+  el('btn-seq-stop').disabled     = !autoActive;
+  el('btn-manual-go').disabled    = autoActive;
+  el('btn-manual-next').disabled  = autoActive;
+  el('btn-manual-stop').disabled  = autoActive;
 }
 
 // ── Robot ──
@@ -1218,6 +1360,54 @@ function syncJoints() {
   if (!latestRobot) return;
   const j = latestRobot.current_joints_deg ?? [];
   [1,2,3,4,5,6].forEach((n,i) => { const e=el('in-j'+n); if(e) e.value=fmt(j[i]); });
+}
+
+// ── Sequence / Gripper / Cart jog actions ──
+function _fb(id, ok, msg) {
+  const e = document.getElementById(id);
+  if (!e) return;
+  e.style.color = ok ? 'var(--green)' : 'var(--red)';
+  e.textContent = msg;
+  setTimeout(() => { if (e) e.textContent = ''; }, 4000);
+}
+
+async function _postFB(path, body, fbId) {
+  const e = document.getElementById(fbId);
+  if (e) { e.style.color = 'var(--muted)'; e.textContent = '요청 중...'; }
+  const r = await apiPost(path, body, null);
+  _fb(fbId, !!r, r ? (r.message || r.detail || '완료') : '명령 실패');
+  return r;
+}
+
+// 자동 (옵션 Y)
+async function seqAutoStart()      { await _postFB('/api/robot/auto/start',   null, 'seq-feedback'); }
+async function seqAutoStep()       { await _postFB('/api/robot/motion/next', null, 'seq-feedback'); }  // 현재 마커 내 step 진행
+async function seqAutoNextMarker() {
+  if (!confirm('현재 마커를 끝내고 다음 마커로 넘어갑니다.\n현재 시퀀스가 진행 중이면 abort 됩니다. 계속?')) return;
+  await _postFB('/api/robot/auto/next', null, 'seq-feedback');
+}
+async function seqAutoStop()       {
+  if (!confirm('자동 시퀀스를 중단합니다.\n진행 중인 픽업도 멈춥니다. 계속?')) return;
+  await _postFB('/api/robot/auto/stop',  null, 'seq-feedback');
+}
+
+// 수동 (옵션 X)
+async function seqManualGo() {
+  const mid = parseInt(el('manual-marker').value, 10);
+  if (Number.isNaN(mid)) { _fb('manual-feedback', false, '마커 ID를 입력하세요.'); return; }
+  await _postFB('/api/robot/motion/start', { marker_id: mid }, 'manual-feedback');
+}
+async function motionNext() { await _postFB('/api/robot/motion/next', null, 'manual-feedback'); }
+async function motionStop() { await _postFB('/api/robot/motion/stop', null, 'manual-feedback'); }
+
+// 마그넷
+async function magnetOn()  { await _postFB('/api/robot/gripper/on',  null, 'magnet-feedback'); }
+async function magnetOff() { await _postFB('/api/robot/gripper/off', null, 'magnet-feedback'); }
+
+// 카테시안 조그
+async function jogCart(axis, direction) {
+  const dist = parseFloat(el('cart-dist').value) || 5;
+  await _postFB('/api/robot/jog_cart', { axis, direction, distance: dist }, 'cart-feedback');
 }
 
 async function confirmLoading() {

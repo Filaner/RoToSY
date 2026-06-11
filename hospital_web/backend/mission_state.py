@@ -32,6 +32,14 @@ from .db_schema import get_conn
 
 _lock = threading.Lock()
 
+# 자동 시퀀스(Y) 마커 큐 — 메모리 보관. 서버 재시작 시 초기화.
+# 미션 1개당 1개의 큐. mission row를 새로 만들 때 reset.
+_marker_queue: dict = {
+    'markers': [],   # ArUco ID 순서 (예: [0, 3, 5])
+    'labels':  [],   # 표시용 약품명 (예: ['벤포벨S', '니뽄 유산균', '애크논'])
+    'index':   0,    # 다음에 호출할 인덱스
+}
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec='seconds')
@@ -212,6 +220,7 @@ def add_audit(actor: str, action: str, detail: str = '') -> None:
 def cancel_current_mission(actor: str = 'admin', detail: str = '미션 취소') -> dict:
     """현재 미션 → IDLE + 약사/관리자 확인 플래그 둘 다 0으로 리셋.
     재시작 시 새 사이클이 깨끗하게 시작되도록."""
+    queue_clear()
     with _lock, get_conn() as c:
         row = _latest_row(c)
         if not row:
@@ -231,6 +240,54 @@ def cancel_current_mission(actor: str = 'admin', detail: str = '미션 취소') 
         row = c.execute('SELECT * FROM mission WHERE id=?',
                         (mission_int_id,)).fetchone()
         return _row_to_snapshot(c, row)
+
+
+# ── Marker queue (옵션 Y, 메모리) ─────────────────────────────────────────────
+
+def set_marker_queue(markers: list, labels: Optional[list] = None) -> dict:
+    """처방 → 마커 ID 순서로 큐를 채움. start_picking에서 호출."""
+    with _lock:
+        _marker_queue['markers'] = list(markers)
+        _marker_queue['labels']  = list(labels) if labels else [''] * len(markers)
+        _marker_queue['index']   = 0
+        return dict(_marker_queue)
+
+
+def get_marker_queue() -> dict:
+    with _lock:
+        return {
+            'markers': list(_marker_queue['markers']),
+            'labels':  list(_marker_queue['labels']),
+            'index':   _marker_queue['index'],
+            'total':   len(_marker_queue['markers']),
+            'current': (_marker_queue['markers'][_marker_queue['index']]
+                        if _marker_queue['index'] < len(_marker_queue['markers'])
+                        else None),
+        }
+
+
+def queue_current_marker() -> Optional[int]:
+    """현재 index의 마커 ID. 큐 비었거나 끝났으면 None."""
+    with _lock:
+        i = _marker_queue['index']
+        ms = _marker_queue['markers']
+        return ms[i] if 0 <= i < len(ms) else None
+
+
+def queue_advance() -> Optional[int]:
+    """index를 1 증가시키고 새 마커 ID 반환. 끝이면 None."""
+    with _lock:
+        _marker_queue['index'] += 1
+        i = _marker_queue['index']
+        ms = _marker_queue['markers']
+        return ms[i] if i < len(ms) else None
+
+
+def queue_clear() -> None:
+    with _lock:
+        _marker_queue['markers'] = []
+        _marker_queue['labels']  = []
+        _marker_queue['index']   = 0
 
 
 # ── internal ─────────────────────────────────────────────────────────────────

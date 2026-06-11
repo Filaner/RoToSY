@@ -73,7 +73,9 @@ def _build_state() -> dict:
         'nodes':        bridge['nodes'],
         'plc':          {'status': 'DISCONNECTED'},
         'arduino':      arduino,
-        'motion_step':  bridge['motion_step'],
+        'motion_step':  robot_st.get('seq_step', 'IDLE'),
+        'magnet_on':    robot_st.get('magnet_on', False),
+        'marker_queue': ms.get_marker_queue(),
     }
 
 

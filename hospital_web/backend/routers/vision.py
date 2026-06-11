@@ -81,9 +81,9 @@ async def camera_stream():
 # ── Vision AI 결과 (현재는 mock) ──────────────────────────────────────────
 
 _mock_detections = {
-    'drawer_001': {'confidence': 0.95, 'aruco': 10, 'detected_at': None},
-    'drawer_002': {'confidence': 0.88, 'aruco': 11, 'detected_at': None},
-    'drawer_003': {'confidence': 0.92, 'aruco': 20, 'detected_at': None},
+    'drawer_001': {'confidence': 0.95, 'aruco': 0, 'detected_at': None},
+    'drawer_002': {'confidence': 0.88, 'aruco': 1, 'detected_at': None},
+    'drawer_003': {'confidence': 0.92, 'aruco': 2, 'detected_at': None},
 }
 
 
