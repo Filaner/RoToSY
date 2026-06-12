@@ -64,7 +64,7 @@ class TempSequenceNode(Node):
         self._ikin_cli = self.create_client(
             Ikin, f'/{ROBOT_NS}/motion/ikin', callback_group=self._cb_group
         )
-        self._gripper = KeyboardElectromagnetGripper()
+        self._gripper = KeyboardElectromagnetGripper(self)
 
         # Subscribers
         self._status_sub = self.create_subscription(
@@ -435,10 +435,10 @@ class TempSequenceNode(Node):
             mx, my, mz = result
             cx, cy, cz = mx, my, mz
 
-            # 2-1. Y -2cm 상대 이동
-            if not self._wait_for_step('Y -20mm 상대 이동'): return
-            if not self._move_l(0, -20, 0, relative=True): return
-            cy -= 20
+            # 2-1. 마커 앞 30mm 지점에서 마커 Y 좌표까지 접근
+            if not self._wait_for_step('Y -30mm 상대 이동'): return
+            if not self._move_l(0, -30, 0, relative=True): return
+            cy -= 30
 
             # 2-2. 전자석 ON
             if not self._wait_for_step('전자석 ON'): return

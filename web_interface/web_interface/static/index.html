@@ -464,6 +464,11 @@
         </div>
       </div>
       <div style="flex:1; min-width:0;">
+        <div style="font-size:0.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem;">약품 객체</div>
+        <div id="detection-status" style="font-family:var(--mono); font-size:0.72rem; color:var(--muted); margin-bottom:0.4rem;">모델 확인 중...</div>
+        <div id="detection-list" style="display:flex; flex-direction:column; gap:0.3rem; margin-bottom:0.9rem;">
+          <div style="padding:0.45rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.35rem; color:var(--muted); font-size:0.72rem;">감지된 객체 없음</div>
+        </div>
         <div style="font-size:0.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem;">마커 상태 (ID 0~5)</div>
         <div style="display:flex; flex-direction:column; gap:0.3rem;">
           <div id="marker-slot-0" style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.35rem;">
@@ -620,6 +625,7 @@
       </div>
       <button id="btn-seq-start" class="btn btn-on" onclick="startMotionSeq()" style="flex:none; padding:0.6rem 1.2rem;">시퀀스 시작</button>
       <button id="btn-seq-stop"  class="btn btn-off" onclick="stopMotionSeq()" style="flex:none; padding:0.6rem 1.2rem;" disabled>시퀀스 중지</button>
+      <button id="btn-seq-reset" class="btn" onclick="resetMotionSeq()" style="flex:none; padding:0.6rem 1.2rem; background:#334155; color:var(--text);">초기화</button>
       <button id="btn-seq-next"  class="btn btn-teach" onclick="nextMotionStep()" style="flex:none; padding:0.6rem 1.2rem;" disabled>▶ 다음 단계 (Next)</button>
       <div style="flex:1; background:var(--bg); border:1px solid var(--border); border-radius:0.5rem; padding:0.6rem; display:flex; align-items:center; gap:1rem;">
         <span class="status-label">현재 단계:</span>
@@ -895,6 +901,7 @@
 
   const overlay    = document.getElementById('disconnected-overlay');
   const ovSubMsg   = document.getElementById('ov-sub-msg');
+  let   ws         = null;
   let   _wsOpen    = false;  // WebSocket 연결 여부
   let   _armReady  = false;  // arm_controller 상태 수신 여부
 
@@ -1039,15 +1046,15 @@
     cartBadge.style.display = cartEnabled ? 'none' : 'inline';
     cartBadge.textContent   = isTeaching ? '[DISABLED: 직접 교시 모드]' : '[DISABLED: SERVO OFF]';
 
-    // Cartesian Jog TCP 값 실시간 업데이트
-    const ctcp = (s.current_tcp_rt && s.current_tcp_rt.some(v => v !== 0)) ? s.current_tcp_rt : (s.current_tcp ?? []);
+    // Cartesian Jog와 이동 명령은 Doosan-native TCP 좌표를 기준으로 통일한다.
+    const ctcp = s.current_tcp ?? [];
     CART_AXES.forEach((_, i) => {
       const el = document.getElementById(`cart-val-${i}`);
       if (el) el.textContent = fmt(ctcp[i], i < 3 ? 1 : 2);
     });
 
-    // TCP — 실시간 디스플레이는 TF2 기반 current_tcp_rt, 없으면 DSR-native current_tcp 사용
-    const tcp = (s.current_tcp_rt && s.current_tcp_rt.some(v => v !== 0)) ? s.current_tcp_rt : (s.current_tcp ?? []);
+    // TCP 표시와 Read Current가 동일한 Doosan-native 좌표를 사용한다.
+    const tcp = s.current_tcp ?? [];
     ['tcp-x','tcp-y','tcp-z','tcp-rx','tcp-ry','tcp-rz'].forEach((id, i) => {
       document.getElementById(id).textContent = fmt(tcp[i]);
     });
@@ -1271,7 +1278,7 @@
     feedback.style.color = 'var(--muted)';
     feedback.textContent = isActive ? '복구 완료 처리 중...' : '안전복구 모드 진입 중...';
     try {
-      const resp = await fetch('/control/recovery', { method: 'POST' });
+      const resp = await fetch('/api/recovery', { method: 'POST' });
       const data = await resp.json();
       if (resp.ok) {
         feedback.style.color = isActive ? 'var(--blue)' : 'var(--yellow)';
@@ -1286,6 +1293,10 @@
   async function startMotionSeq() {
     const markerId = parseInt(document.getElementById('seq-marker-id').value);
     const feedback = document.getElementById('control-feedback');
+    if (!Number.isInteger(markerId)) {
+      showAlert('마커 ID를 입력하세요.');
+      return;
+    }
     feedback.textContent = `시퀀스 시작 명령 전송 (마커 ${markerId})...`;
     try {
       const resp = await fetch('/api/motion/start', {
@@ -1321,6 +1332,21 @@
         const d = await resp.json();
         showAlert(d.detail || '시퀀스 중지 실패');
       }
+    } catch (err) { showAlert(err.message); }
+  }
+
+  async function resetMotionSeq() {
+    const feedback = document.getElementById('control-feedback');
+    feedback.style.color = 'var(--yellow)';
+    feedback.textContent = '시퀀스 초기화 중...';
+    try {
+      const resp = await fetch('/api/motion/reset', { method: 'POST' });
+      if (!resp.ok) {
+        const d = await resp.json();
+        showAlert(d.detail || '시퀀스 초기화 실패');
+        return;
+      }
+      feedback.textContent = '실행 중인 동작을 정지하고 초기 상태로 복귀 중입니다.';
     } catch (err) { showAlert(err.message); }
   }
 
@@ -1361,8 +1387,13 @@
   }
 
   async function startTempSeq() {
-    const markerId = Math.max(0, Math.min(5, parseInt(document.getElementById('tmp-marker-id').value)));
+    const rawMarkerId = parseInt(document.getElementById('tmp-marker-id').value);
     const feedback = document.getElementById('control-feedback');
+    if (!Number.isInteger(rawMarkerId)) {
+      showAlert('마커 ID를 입력하세요.');
+      return;
+    }
+    const markerId = Math.max(0, Math.min(5, rawMarkerId));
     feedback.textContent = `Temp 시퀀스 시작 명령 전송 (마커 ${markerId})...`;
     try {
       const resp = await fetch('/api/temp_motion/start', {
@@ -1403,7 +1434,8 @@
 
   function connect() {
     setConnectionStatus('connecting');
-    const ws = new WebSocket(`ws://${location.host}/ws`);
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
     ws.onopen  = () => setConnectionStatus('connected');
     ws.onclose = () => { setConnectionStatus('disconnected'); setTimeout(connect, 3000); };
     ws.onerror = () => ws.close();
@@ -1411,6 +1443,43 @@
   }
 
   connect();
+
+  async function updateDetections() {
+    const status = document.getElementById('detection-status');
+    const list = document.getElementById('detection-list');
+    try {
+      const resp = await fetch('/camera/detections');
+      const data = await resp.json();
+      if (!data.model_loaded) {
+        status.textContent = data.error || '약품 인식 모델 로드 실패';
+        status.style.color = 'var(--red)';
+        return;
+      }
+
+      const detections = data.detections || [];
+      status.textContent = detections.length ? `${detections.length}개 감지` : '모델 동작 중 · 객체 없음';
+      status.style.color = detections.length ? 'var(--green)' : 'var(--muted)';
+      list.innerHTML = detections.length ? detections.map(d => {
+        const isMedicine = String(d.class_name).toLowerCase() === 'medicine';
+        const label = isMedicine ? '약품' : '수액팩';
+        const color = isMedicine ? 'var(--yellow)' : 'var(--green)';
+        const base = d.base_position_m;
+        const coord = base
+          ? `X ${(base[0] * 1000).toFixed(1)} Y ${(base[1] * 1000).toFixed(1)} Z ${(base[2] * 1000).toFixed(1)} mm`
+          : '깊이 좌표 없음';
+        return `<div style="padding:0.45rem 0.6rem; background:var(--bg); border:1px solid ${color}; border-radius:0.35rem; font-family:var(--mono); font-size:0.7rem;">
+          <div style="display:flex; justify-content:space-between; color:${color};"><b>${label}</b><span>${(d.confidence * 100).toFixed(1)}%</span></div>
+          <div style="color:var(--muted); margin-top:0.2rem;">${coord}</div>
+        </div>`;
+      }).join('') : '<div style="padding:0.45rem 0.6rem; background:var(--bg); border:1px solid var(--border); border-radius:0.35rem; color:var(--muted); font-size:0.72rem;">감지된 객체 없음</div>';
+    } catch (err) {
+      status.textContent = '탐지 API 연결 실패';
+      status.style.color = 'var(--red)';
+    }
+  }
+
+  updateDetections();
+  setInterval(updateDetections, 500);
 
   // ── 카메라 스트림 자동 재시도 ────────────────────────────────────────────
   (function initStream() {

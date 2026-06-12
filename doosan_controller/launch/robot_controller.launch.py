@@ -168,16 +168,16 @@ def generate_launch_description() -> LaunchDescription:
 
     # ── temp_sequence_node ───────────────────────────────────────────────────
     # Delayed 6 s — needs arm_controller services to be available.
-    temp_sequence = TimerAction(
-        period=6.0,
-        actions=[
-            Node(
-                package    = 'doosan_controller',
-                executable = 'temp_sequence',
-                name       = 'temp_sequence_node',
-                output     = 'screen',
-            )
-        ],
-    )
+    # temp_sequence = TimerAction(
+    #     period=6.0,
+    #     actions=[
+    #         Node(
+    #             package    = 'doosan_controller',
+    #             executable = 'temp_sequence',
+    #             name       = 'temp_sequence_node',
+    #             output     = 'screen',
+    #         )
+    #     ],
+    # )
 
-    return LaunchDescription(args + [dsr_bringup, arm_controller, hybrid_ik, tcp_monitor, web_server, motion_sequence, temp_sequence])
+    return LaunchDescription(args + [dsr_bringup, arm_controller, hybrid_ik, tcp_monitor, web_server, motion_sequence])

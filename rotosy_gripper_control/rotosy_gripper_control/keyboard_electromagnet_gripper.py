@@ -1,6 +1,7 @@
 import select
 import sys
 import termios
+import time
 import tty
 from typing import Optional
 
@@ -14,41 +15,47 @@ DOOSAN_TOOL_DO_ON = 1   # 실제 동작: 1=ON(자성 발생)
 DOOSAN_TOOL_DO_OFF = 0  # 실제 동작: 0=OFF(자성 없음)
 
 
-class KeyboardElectromagnetGripper(Node):
-    """Keyboard example for an electromagnet gripper on Doosan flange DO1."""
+class KeyboardElectromagnetGripper:
+    """Helper for an electromagnet gripper on Doosan flange DO1.
+    Can be used as a standalone Node or as a component within another Node.
+    """
 
-    def __init__(self) -> None:
-        super().__init__('keyboard_electromagnet_gripper')
+    def __init__(self, node: Optional[Node] = None) -> None:
+        if node is None:
+            self._node = Node('keyboard_electromagnet_gripper')
+            self._own_node = True
+        else:
+            self._node = node
+            self._own_node = False
 
-        self.declare_parameter('robot_ns', 'dsr01')
-        self.declare_parameter('tool_do_index', 1)
-        self.declare_parameter('service_timeout_sec', 5.0)
-        self.declare_parameter('turn_off_on_exit', True)
+        self._node.declare_parameter('robot_ns', 'dsr01')
+        self._node.declare_parameter('tool_do_index', 1)
+        self._node.declare_parameter('service_timeout_sec', 5.0)
+        self._node.declare_parameter('turn_off_on_exit', True)
 
-        self._robot_ns = self.get_parameter('robot_ns').value
-        self._tool_do_index = int(self.get_parameter('tool_do_index').value)
+        self._robot_ns = self._node.get_parameter('robot_ns').value
+        self._tool_do_index = int(self._node.get_parameter('tool_do_index').value)
         self._service_timeout_sec = float(
-            self.get_parameter('service_timeout_sec').value
+            self._node.get_parameter('service_timeout_sec').value
         )
-        self._turn_off_on_exit = bool(self.get_parameter('turn_off_on_exit').value)
+        self._turn_off_on_exit = bool(self._node.get_parameter('turn_off_on_exit').value)
 
-        self._client = self.create_client(
+        self._client = self._node.create_client(
             SetToolDigitalOutput,
             f'{self._robot_ns}/io/set_tool_digital_output',
         )
         self._is_on = False
 
-        self.get_logger().info(
+        self._node.get_logger().info(
             f'Using service {self._client.srv_name!r}, flange DO{self._tool_do_index}.'
         )
-        self.get_logger().info(
+        self._node.get_logger().info(
             'Before running this on hardware, set DART Flange I/O Supply Voltage to 12V.'
         )
-        self.get_logger().info('Keys: [o] ON, [f] OFF, [q] quit')
 
     def set_gripper(self, enabled: bool) -> bool:
         if not self._client.wait_for_service(timeout_sec=self._service_timeout_sec):
-            self.get_logger().error(f'Service {self._client.srv_name!r} unavailable')
+            self._node.get_logger().error(f'Service {self._client.srv_name!r} unavailable')
             return False
 
         request = SetToolDigitalOutput.Request()
@@ -56,25 +63,33 @@ class KeyboardElectromagnetGripper(Node):
         request.value = DOOSAN_TOOL_DO_ON if enabled else DOOSAN_TOOL_DO_OFF
 
         future = self._client.call_async(request)
-        rclpy.spin_until_future_complete(
-            self,
-            future,
-            timeout_sec=self._service_timeout_sec,
-        )
+
+        # 만약 별도의 노드로 동작 중이면 직접 spin, 아니면 future가 완료될 때까지 대기
+        if self._own_node:
+            rclpy.spin_until_future_complete(
+                self._node,
+                future,
+                timeout_sec=self._service_timeout_sec,
+            )
+        else:
+            # 부모 노드의 executor가 이 service 응답을 처리해줘야 함
+            start_t = time.time()
+            while not future.done() and (time.time() - start_t) < self._service_timeout_sec:
+                time.sleep(0.05)
 
         if not future.done():
-            self.get_logger().error('Timed out while setting tool digital output')
+            self._node.get_logger().error('Timed out while setting tool digital output')
             return False
 
         response = future.result()
         if response is None or not response.success:
-            self.get_logger().error(
+            self._node.get_logger().error(
                 f'Failed to set DO{self._tool_do_index} to {"ON" if enabled else "OFF"}'
             )
             return False
 
         self._is_on = enabled
-        self.get_logger().info(
+        self._node.get_logger().info(
             f'Electromagnet gripper {"ON" if enabled else "OFF"} '
             f'(DO{self._tool_do_index}, {"12V output" if enabled else "open output"})'
         )
@@ -82,8 +97,16 @@ class KeyboardElectromagnetGripper(Node):
 
     def shutdown(self) -> None:
         if self._turn_off_on_exit and self._is_on:
-            self.get_logger().info('Turning gripper OFF before exit')
+            self._node.get_logger().info('Turning gripper OFF before exit')
             self.set_gripper(False)
+
+    def destroy_node(self):
+        if self._own_node:
+            self._node.destroy_node()
+
+    @property
+    def logger(self):
+        return self._node.get_logger()
 
 
 class RawTerminal:

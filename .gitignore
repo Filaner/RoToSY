@@ -6,11 +6,16 @@ log/
 
 # Python
 __pycache__/
+**/__pycache__/
+*pycache*/
 *.py[cod]
 *$py.class
 *.so
 *.egg-info/
 .eggs/
+
+# Machine learning model weights
+*.pt
 
 # IDEs and Editors
 .vscode/

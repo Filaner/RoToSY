@@ -83,6 +83,8 @@ def _load_calib(yaml_path: Path) -> tuple:
     return T, marker_size_m
 
 
+from .vision_detector import VisionDetector
+
 class CameraManager:
     def __init__(self, width: int = 640, height: int = 480, fps: int = 30):
         self._width  = width
@@ -94,10 +96,14 @@ class CameraManager:
 
         self._aruco_lock = threading.Lock()
         self._aruco_markers: list = []
+        self._detections: list = []
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._error: Optional[str] = None
+
+        self._detector = VisionDetector()
+        self._detector_loaded = self._detector.load()
 
         calib_path = _find_calib_yaml()
         self._T_base_camera: Optional[np.ndarray] = None
@@ -133,6 +139,22 @@ class CameraManager:
     def get_aruco_markers(self) -> list:
         with self._aruco_lock:
             return list(self._aruco_markers)
+
+    def get_detections(self) -> list:
+        with self._aruco_lock:
+            return list(self._detections)
+
+    @property
+    def detections(self) -> list:
+        return self.get_detections()
+
+    @property
+    def detector_loaded(self) -> bool:
+        return self._detector_loaded
+
+    @property
+    def detector_error(self) -> Optional[str]:
+        return self._detector.error
 
     @property
     def error(self) -> Optional[str]:
@@ -293,6 +315,7 @@ class CameraManager:
 
                                 # rvec: solvePnPGeneric으로 취득 (hand-eye 캘리브레이션 UI 전용)
                                 rvec_flat = None
+                                marker_rotation_base = None
                                 img_pts = corners[i][0].astype(np.float32)
                                 n_sols, rvecs_s, _, _ = cv2.solvePnPGeneric(
                                     _obj_pts, img_pts, _cam_matrix, _dist_coeffs,
@@ -307,6 +330,13 @@ class CameraManager:
                                             break
                                     rv = chosen_rvec.flatten()
                                     rvec_flat = [float(rv[0]), float(rv[1]), float(rv[2])]
+                                    if self._T_base_camera is not None:
+                                        R_marker_camera, _ = cv2.Rodrigues(chosen_rvec)
+                                        R_marker_base = self._T_base_camera[:3, :3] @ R_marker_camera
+                                        marker_rotation_base = [
+                                            [float(v) for v in row]
+                                            for row in R_marker_base
+                                        ]
 
                                 markers_out.append({
                                     'id':      int(marker_id),
@@ -316,6 +346,7 @@ class CameraManager:
                                     'y_cam_m': round(p_cam[1], 6) if p_cam else None,
                                     'z_cam_m': round(p_cam[2], 6) if p_cam else None,
                                     'rvec':    rvec_flat,
+                                    'rotation_matrix_base': marker_rotation_base,
                                     'x_mm':    round(robot[0], 1) if robot else None,
                                     'y_mm':    round(robot[1], 1) if robot else None,
                                     'z_mm':    round(robot[2], 1) if robot else None,
@@ -334,10 +365,25 @@ class CameraManager:
                     with self._aruco_lock:
                         self._aruco_markers = markers_out
 
+                    # ── YOLO 약품 검출 ──────────────────────────────────────────
+                    if self._detector_loaded:
+                        stable_dets, annotated = self._detector.process(
+                            frame, depth_data, depth_scale, intrinsics, self._T_base_camera
+                        )
+                        frame = annotated  # 시각화된 프레임 사용
+                        with self._aruco_lock:
+                            self._detections = stable_dets
+                    else:
+                        with self._aruco_lock:
+                            self._detections = []
+
                     ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     if ok:
                         with self._lock:
                             self._jpeg = jpeg.tobytes()
+
+                    # GIL 해제 및 CPU 점유율 조절을 위해 명시적 슬립 추가
+                    _t.sleep(0.01)
 
             finally:
                 try:

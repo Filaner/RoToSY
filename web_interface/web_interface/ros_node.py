@@ -13,7 +13,7 @@ import time
 from typing import Optional
 
 import rclpy
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from std_msgs.msg import Bool, Float64MultiArray, String, Int32, Empty
@@ -24,356 +24,111 @@ from robot_arm_interfaces.srv import ServoOn, Jog, Home, Teaching, EStop
 from robot_arm_interfaces.action import MoveJ, MoveL
 from dsr_msgs2.srv import SetToolDigitalOutput, GetToolDigitalOutput, SetRobotMode
 
-
 class RobotBridgeNode(Node):
-    """Subscribes to arm topics and maintains a thread-safe state snapshot."""
+    """ROS2 node that bridges robot state to the FastAPI application."""
 
     def __init__(self):
-        super().__init__('web_interface_node')
+        super().__init__('web_server_bridge')
         self._lock = threading.Lock()
         self._command_lock = asyncio.Lock()
-        self._state: dict = {
-            'robot_state':        -1,
-            'robot_state_str':    'UNKNOWN',
-            'servo_on':           False,
-            'is_moving':          False,
-            'teaching_mode':      False,
-            'arm_ready':          False,
-            'current_joints_deg': [0.0] * 6,
-            'current_tcp':        [0.0] * 6,  # DSR-native coords — use for MoveL input
-            'current_tcp_rt':     [0.0] * 6,  # TF2-derived real-time — display only
-            'error_code':         0,
-            'error_message':      '',
-            'seq_step':           'IDLE',
-            'tmp_step':           'IDLE',
-            'magnet_on':          False,
-            'recovery_active':    False,
+        self._state = {
+            'robot_state':     -1,
+            'robot_state_str': 'DISCONNECTED',
+            'servo_on':        False,
+            'is_moving':       False,
+            'arm_ready':       False,
+            'teaching_mode':   False,
+            'current_joints_deg': [0.0]*6,
+            'current_tcp':     [0.0]*6,
+            'current_tcp_rt':  [0.0]*6,
+            'error_code':      0,
+            'error_message':   '',
+            'magnet_on':       False,
+            'recovery_active': False,
+            'seq_step':        'IDLE',
+            'tmp_step':        'IDLE',
         }
 
-        # ── Subscribers ──────────────────────────────────────────────────────
-        self.create_subscription(RobotStatus,      '/arm/status',   self._status_cb,   10)
-        self.create_subscription(Bool,             '/arm/ready',    self._ready_cb,    10)
-        self.create_subscription(Float64MultiArray, '/arm/tcp_pose', self._tcp_pose_cb, 10)
-        self.create_subscription(String,           '/motion/step_info',      self._seq_step_cb, 10)
-        self.create_subscription(String,           '/temp_motion/step_info', self._tmp_step_cb, 10)
+        # Subscribers
+        self.create_subscription(RobotStatus, '/arm/status', self._status_cb, 10)
+        self.create_subscription(Bool, '/arm/ready', self._ready_cb, 10)
+        self.create_subscription(Float64MultiArray, '/arm/tcp_pose', self._tcp_rt_cb, 10)
+        self.create_subscription(String, '/motion/step_info', self._seq_step_cb, 10)
+        self.create_subscription(String, '/temp_motion/step_info', self._tmp_step_cb, 10)
 
-        # ── Publishers ───────────────────────────────────────────────────────
-        self._pub_seq_start = self.create_publisher(Int32, '/motion/start', 10)
-        self._pub_seq_next  = self.create_publisher(Empty, '/motion/next_step', 10)
-        self._pub_seq_stop  = self.create_publisher(Empty, '/motion/stop', 10)
-        self._pub_tmp_start = self.create_publisher(Int32, '/temp_motion/start', 10)
-        self._pub_tmp_next  = self.create_publisher(Empty, '/temp_motion/next_step', 10)
-        self._pub_tmp_stop  = self.create_publisher(Empty, '/temp_motion/stop', 10)
-        self._cli_magnet     = self.create_client(SetToolDigitalOutput, '/dsr01/io/set_tool_digital_output')
-        self._cli_magnet_get = self.create_client(GetToolDigitalOutput, '/dsr01/io/get_tool_digital_output')
-        self._cli_set_mode   = self.create_client(SetRobotMode, '/dsr01/system/set_robot_mode')
-        self._cli_servo    = self.create_client(ServoOn,  '/arm/servo_on')
+        # Clients (for REST API use)
+        self.cli_servo    = self.create_client(ServoOn,    '/arm/servo_on')
+        self.cli_jog      = self.create_client(Jog,        '/arm/jog')
+        self.cli_home     = self.create_client(Home,       '/arm/home')
+        self.cli_teaching = self.create_client(Teaching,   '/arm/teaching')
+        self.cli_estop    = self.create_client(EStop,      '/arm/estop')
+        self.cli_magnet   = self.create_client(SetToolDigitalOutput, '/dsr01/io/set_tool_digital_output')
+        self.cli_mag_get  = self.create_client(GetToolDigitalOutput, '/dsr01/io/get_tool_digital_output')
+        self.cli_mode     = self.create_client(SetRobotMode, '/dsr01/system/set_robot_mode')
 
-        self.create_timer(0.5, self._poll_magnet_state)
-        self._cli_jog      = self.create_client(Jog,      '/arm/jog')
-        self._cli_home     = self.create_client(Home,     '/arm/home')
-        self._cli_teaching = self.create_client(Teaching, '/arm/teaching')
-        self._cli_estop    = self.create_client(EStop,    '/arm/estop')
+        # Action Clients
+        self.act_move_j   = ActionClient(self, MoveJ, '/arm/move_j')
+        self.act_move_l   = ActionClient(self, MoveL, '/arm/move_l')
 
-        # ── Action Clients ───────────────────────────────────────────────────
-        self._ac_movej = ActionClient(self, MoveJ, '/arm/move_j')
-        self._ac_movel = ActionClient(self, MoveL, '/arm/move_l')
+        # Publishers (for triggering sequence steps)
+        self.pub_seq_start = self.create_publisher(Int32, '/motion/start', 10)
+        self.pub_seq_next  = self.create_publisher(Empty, '/motion/next_step', 10)
+        self.pub_seq_stop  = self.create_publisher(Empty, '/motion/stop', 10)
+        self.pub_seq_reset = self.create_publisher(Empty, '/motion/reset', 10)
 
-        self.get_logger().info('Web interface ROS2 node started.')
+        self.pub_tmp_start = self.create_publisher(Int32, '/temp_motion/start', 10)
+        self.pub_tmp_next  = self.create_publisher(Empty, '/temp_motion/next_step', 10)
+        self.pub_tmp_stop  = self.create_publisher(Empty, '/temp_motion/stop', 10)
 
-    async def call_servo(self, enable: bool) -> dict:
-        """Asynchronously call the /arm/servo_on service with a lock."""
-        if self._command_lock.locked():
-            return {'success': False, 'message': 'Robot is busy with another command'}
+        # Magnet state polling timer (1Hz)
+        self.create_timer(1.0, self._poll_magnet)
 
-        async with self._command_lock:
-            req = ServoOn.Request()
-            req.enable = enable
-            return await self._run_srv(self._cli_servo, req)
-
-    async def call_jog(self, joint_index: int, speed: float) -> dict:
-        """Asynchronously call the /arm/jog service."""
-        # Note: We don't necessarily want to block jogging with command_lock 
-        # if the user wants to stop (speed=0) while something else is happening,
-        # but usually jogging is the only active command.
-        # Let's NOT lock for speed=0 (stop) so it always works.
-        if speed == 0:
-            req = Jog.Request()
-            req.joint_index = joint_index
-            req.speed = 0.0
-            return await self._run_srv(self._cli_jog, req)
-        
-        if self._command_lock.locked():
-            return {'success': False, 'message': 'Robot is busy'}
-
-        async with self._command_lock:
-            req = Jog.Request()
-            req.joint_index = joint_index
-            req.speed = speed
-            return await self._run_srv(self._cli_jog, req)
-
-    async def call_movej(self, joints: list, vel: float, acc: float) -> dict:
-        """Execute a MoveJ action."""
-        if self._command_lock.locked():
-            return {'success': False, 'message': 'Robot is busy'}
-
-        async with self._command_lock:
-            if not self._ac_movej.server_is_ready():
-                loop = asyncio.get_event_loop()
-                ready = await loop.run_in_executor(
-                    None, lambda: self._ac_movej.wait_for_server(timeout_sec=2.0)
-                )
-                if not ready:
-                    return {'success': False, 'message': 'MoveJ action server unavailable'}
-
-            goal = MoveJ.Goal()
-            goal.joint_angles_deg = [float(j) for j in joints]
-            goal.velocity_deg_s = float(vel)
-            goal.acceleration_deg_s2 = float(acc)
-            
-            return await self._run_action(self._ac_movej, goal)
-
-    async def call_movel(self, pose: list, vel: float, acc: float) -> dict:
-        """Execute a MoveL action."""
-        if self._command_lock.locked():
-            return {'success': False, 'message': 'Robot is busy'}
-
-        async with self._command_lock:
-            if not self._ac_movel.server_is_ready():
-                loop = asyncio.get_event_loop()
-                ready = await loop.run_in_executor(
-                    None, lambda: self._ac_movel.wait_for_server(timeout_sec=2.0)
-                )
-                if not ready:
-                    return {'success': False, 'message': 'MoveL action server unavailable'}
-
-            goal = MoveL.Goal()
-            goal.x, goal.y, goal.z, goal.rx, goal.ry, goal.rz = [float(p) for p in pose]
-            goal.linear_velocity_mm_s = float(vel)
-            goal.linear_accel_mm_s2 = float(acc)
-            
-            return await self._run_action(self._ac_movel, goal)
-
-    async def call_home(self) -> dict:
-        """Execute a Home move."""
-        if self._command_lock.locked():
-            return {'success': False, 'message': 'Robot is busy'}
-
-        async with self._command_lock:
-            req = Home.Request()
-            req.target = 0 # Mechanical home
-            return await self._run_srv(self._cli_home, req)
-
-    async def call_teaching(self, enable: bool) -> dict:
-        """Toggle direct teaching (manual) mode."""
-        req = Teaching.Request()
-        req.enable = enable
-        return await self._run_srv(self._cli_teaching, req)
-
-    async def call_estop(self) -> dict:
-        """Emergency stop: halt motion and disable servo immediately."""
-        return await self._run_srv(self._cli_estop, EStop.Request())
-
-    async def call_jog_cart_step(self, axis: int, direction: int, step: float) -> bool:
-        """현재 TCP에서 axis 방향으로 step(mm 또는 deg) 만큼 MoveL."""
-        state = self.get_state()
-        tcp = state.get('current_tcp', [0.0] * 6)
-        if len(tcp) < 6 or all(v == 0.0 for v in tcp[:3]):
-            return False
-
-        target = [float(v) for v in tcp]
-        target[axis] += step * direction
-
-        if not self._ac_movel.wait_for_server(timeout_sec=0.5):
-            return False
-
-        goal = MoveL.Goal()
-        goal.x, goal.y, goal.z, goal.rx, goal.ry, goal.rz = target
-        goal.linear_velocity_mm_s = 50.0
-        goal.linear_accel_mm_s2   = 100.0
-
-        send_fut = self._ac_movel.send_goal_async(goal)
-        while not send_fut.done():
-            await asyncio.sleep(0.01)
-
-        handle = send_fut.result()
-        if not handle.accepted:
-            return False
-
-        res_fut = handle.get_result_async()
-        while not res_fut.done():
-            await asyncio.sleep(0.02)
-
-        return bool(res_fut.result().result.success)
-
-    def start_sequence(self, marker_id: int) -> None:
-        msg = Int32()
-        msg.data = marker_id
-        self._pub_seq_start.publish(msg)
-
-    def next_step(self) -> None:
-        self._pub_seq_next.publish(Empty())
-
-    def stop_sequence(self) -> None:
-        self._pub_seq_stop.publish(Empty())
-
-    def start_temp_sequence(self, marker_id: int) -> None:
-        msg = Int32()
-        msg.data = marker_id
-        self._pub_tmp_start.publish(msg)
-
-    def next_temp_step(self) -> None:
-        self._pub_tmp_next.publish(Empty())
-
-    def stop_temp_sequence(self) -> None:
-        self._pub_tmp_stop.publish(Empty())
-
-    async def enter_recovery(self) -> dict:
-        """State 10 복구 진입: Servo ON → MANUAL 모드 → Teaching ON."""
-        servo = await self.call_servo(True)
-        if not servo.get('success'):
-            return servo
-
-        req = SetRobotMode.Request()
-        req.robot_mode = 0  # ROBOT_MODE_MANUAL
-        await self._run_srv(self._cli_set_mode, req)
-
-        teach = await self.call_teaching(True)
-        if not teach.get('success'):
-            return teach
-
+    def _status_cb(self, msg: RobotStatus):
         with self._lock:
-            self._state['recovery_active'] = True
-        return {'success': True, 'message': '안전복구 모드 진입 — 직접교시로 안전 위치로 이동 후 복구 완료 클릭'}
+            self._state['robot_state']     = msg.robot_state
+            self._state['robot_state_str'] = msg.robot_state_str
+            self._state['servo_on']        = msg.servo_on
+            self._state['is_moving']       = msg.is_moving
+            self._state['teaching_mode']   = msg.teaching_mode
+            self._state['current_joints_deg'] = list(msg.current_joints_deg)
+            self._state['current_tcp']     = list(msg.current_tcp)
+            self._state['error_code']      = msg.error_code
+            self._state['error_message']   = msg.error_message
+            # state 10 (RECOVERY_HANDGUIDING) is a special recovery state
+            if msg.robot_state != 10:
+                self._state['recovery_active'] = False
 
-    async def exit_recovery(self) -> dict:
-        """복구 완료: Teaching OFF → AUTONOMOUS 모드."""
-        await self.call_teaching(False)
-
-        req = SetRobotMode.Request()
-        req.robot_mode = 1  # ROBOT_MODE_AUTONOMOUS
-        await self._run_srv(self._cli_set_mode, req)
-
-        with self._lock:
-            self._state['recovery_active'] = False
-        return {'success': True, 'message': '복구 완료 — 자동 모드 복귀'}
-
-    async def call_magnet(self, enabled: bool) -> dict:
-        """전자석 ON(True) / OFF(False)."""
-        req = SetToolDigitalOutput.Request()
-        req.index = 1
-        req.value = 1 if enabled else 0   # 실제 동작: 1=ON(자성 발생), 0=OFF(자성 없음)
-        return await self._run_srv(self._cli_magnet, req)
-
-    def _seq_step_cb(self, msg: String) -> None:
-        with self._lock:
-            self._state['seq_step'] = msg.data
-
-    def _tmp_step_cb(self, msg: String) -> None:
-        with self._lock:
-            self._state['tmp_step'] = msg.data
-
-    def _poll_magnet_state(self) -> None:
-        """DO1 실제 상태를 0.5s 주기로 읽어 _state에 반영."""
-        if not self._cli_magnet_get.service_is_ready():
-            return
-        req = GetToolDigitalOutput.Request()
-        req.index = 1
-        future = self._cli_magnet_get.call_async(req)
-        future.add_done_callback(self._magnet_poll_cb)
-
-    def _magnet_poll_cb(self, future) -> None:
-        try:
-            resp = future.result()
-            if resp is not None and resp.success:
-                # 실제 동작: value=1 → 자성 발생(ON), value=0 → 자성 없음(OFF)
-                with self._lock:
-                    self._state['magnet_on'] = (resp.value == 1)
-        except Exception:
-            pass
-
-    async def _run_action(self, client, goal) -> dict:
-        """Helper to run a ROS2 action and return the result."""
-        # Send goal
-        send_goal_future = client.send_goal_async(goal)
-        while not send_goal_future.done():
-            await asyncio.sleep(0.02)
-        
-        goal_handle = send_goal_future.result()
-        if not goal_handle.accepted:
-            return {'success': False, 'message': 'Goal rejected by server'}
-        
-        # Wait for result
-        result_future = goal_handle.get_result_async()
-        while not result_future.done():
-            await asyncio.sleep(0.05)
-        
-        result = result_future.result().result
-        return {
-            'success': bool(result.success),
-            'message': str(result.message),
-            'time': float(result.execution_time_sec)
-        }
-
-    async def _run_srv(self, client, request) -> dict:
-        """Wait for service and poll the rclpy future in an asyncio-friendly way."""
-        self.get_logger().info(f'Calling service {client.srv_name}...')
-        # service_is_ready() is non-blocking — avoids freezing the asyncio event loop.
-        # If not ready, wait up to 2 s in a thread executor so the loop stays alive.
-        if not client.service_is_ready():
-            loop = asyncio.get_event_loop()
-            ready = await loop.run_in_executor(
-                None, lambda: client.wait_for_service(timeout_sec=2.0)
-            )
-            if not ready:
-                self.get_logger().error(f'Service {client.srv_name} not available')
-                return {'success': False, 'message': f'Service {client.srv_name} not available'}
-        
-        try:
-            future = client.call_async(request)
-            # Poll the ROS future without blocking the asyncio loop
-            # Faster polling (20ms) for better responsiveness in jogging
-            while not future.done():
-                await asyncio.sleep(0.02)
-
-            result = future.result()
-
-            if result is None:
-                return {'success': False, 'message': 'Service returned None'}
-            
-            # Ensure we return a clean dict with strings, not ROS types
-            return {
-                'success': bool(result.success),
-                'message': str(getattr(result, 'message', 'OK'))
-            }
-        except Exception as e:
-            self.get_logger().error(f'Service call exception ({client.srv_name}): {e}')
-            return {'success': False, 'message': f'Internal Error: {str(e)}'}
-
-    def _status_cb(self, msg: RobotStatus) -> None:
-        with self._lock:
-            update = {
-                'robot_state':        msg.robot_state,
-                'robot_state_str':    msg.robot_state_str,
-                'servo_on':           msg.servo_on,
-                'is_moving':          msg.is_moving,
-                'teaching_mode':      msg.teaching_mode,
-                'current_joints_deg': list(msg.current_joints_deg),
-                'error_code':         msg.error_code,
-                'error_message':      msg.error_message,
-            }
-            dsr_tcp = list(msg.current_tcp)
-            if any(v != 0.0 for v in dsr_tcp):
-                update['current_tcp'] = dsr_tcp
-            self._state.update(update)
-
-    def _ready_cb(self, msg: Bool) -> None:
+    def _ready_cb(self, msg: Bool):
         with self._lock:
             self._state['arm_ready'] = msg.data
 
-    def _tcp_pose_cb(self, msg: Float64MultiArray) -> None:
-        # TF2-derived real-time values — display only, NOT used for MoveL input.
-        # DSR-native current_tcp (from status_cb) is the correct source for MoveL.
+    def _seq_step_cb(self, msg: String):
+        with self._lock:
+            self._state['seq_step'] = msg.data
+
+    def _tmp_step_cb(self, msg: String):
+        with self._lock:
+            self._state['tmp_step'] = msg.data
+
+    def _poll_magnet(self):
+        if not self.cli_mag_get.service_is_ready():
+            return
+        req = GetToolDigitalOutput.Request()
+        req.index = 1
+        future = self.cli_mag_get.call_async(req)
+        # Note: We don't block here as this is called from the timer callback
+        future.add_done_callback(self._magnet_resp_cb)
+
+    def _magnet_resp_cb(self, future):
+        try:
+            res = future.result()
+            if res and res.success:
+                with self._lock:
+                    self._state['magnet_on'] = (res.value == 1)
+        except Exception:
+            pass
+
+    def _tcp_rt_cb(self, msg: Float64MultiArray):
         if len(msg.data) >= 6:
             with self._lock:
                 self._state['current_tcp_rt'] = list(msg.data[:6])
@@ -383,11 +138,186 @@ class RobotBridgeNode(Node):
         with self._lock:
             return dict(self._state)
 
+    async def call_servo(self, enable: bool) -> dict:
+        if self._command_lock.locked():
+            return {'success': False, 'message': 'Robot is busy with another command'}
+        async with self._command_lock:
+            req = ServoOn.Request()
+            req.enable = enable
+            return await self._run_srv(self.cli_servo, req)
+
+    async def call_jog(self, joint_index: int, speed: float) -> dict:
+        req = Jog.Request()
+        req.joint_index = joint_index
+        req.speed = speed
+        if speed == 0:
+            return await self._run_srv(self.cli_jog, req)
+        if self._command_lock.locked():
+            return {'success': False, 'message': 'Robot is busy'}
+        async with self._command_lock:
+            return await self._run_srv(self.cli_jog, req)
+
+    async def call_movej(self, joints: list, vel: float, acc: float) -> dict:
+        if self._command_lock.locked():
+            return {'success': False, 'message': 'Robot is busy'}
+        async with self._command_lock:
+            if not await self._wait_for_action(self.act_move_j):
+                return {'success': False, 'message': 'MoveJ action server unavailable'}
+            goal = MoveJ.Goal()
+            goal.joint_angles_deg = [float(j) for j in joints]
+            goal.velocity_deg_s = float(vel)
+            goal.acceleration_deg_s2 = float(acc)
+            return await self._run_action(self.act_move_j, goal)
+
+    async def call_movel(self, pose: list, vel: float, acc: float) -> dict:
+        if self._command_lock.locked():
+            return {'success': False, 'message': 'Robot is busy'}
+        async with self._command_lock:
+            if not await self._wait_for_action(self.act_move_l):
+                return {'success': False, 'message': 'MoveL action server unavailable'}
+            goal = MoveL.Goal()
+            goal.x, goal.y, goal.z, goal.rx, goal.ry, goal.rz = [float(p) for p in pose]
+            goal.linear_velocity_mm_s = float(vel)
+            goal.linear_accel_mm_s2 = float(acc)
+            return await self._run_action(self.act_move_l, goal)
+
+    async def call_home(self) -> dict:
+        if self._command_lock.locked():
+            return {'success': False, 'message': 'Robot is busy'}
+        async with self._command_lock:
+            req = Home.Request()
+            req.target = 0
+            return await self._run_srv(self.cli_home, req)
+
+    async def call_teaching(self, enable: bool) -> dict:
+        req = Teaching.Request()
+        req.enable = enable
+        return await self._run_srv(self.cli_teaching, req)
+
+    async def call_estop(self) -> dict:
+        return await self._run_srv(self.cli_estop, EStop.Request())
+
+    async def call_jog_cart_step(self, axis: int, direction: int, step: float) -> bool:
+        tcp = self.get_state().get('current_tcp', [0.0] * 6)
+        if len(tcp) < 6 or all(v == 0.0 for v in tcp[:3]):
+            return False
+        target = [float(v) for v in tcp]
+        target[axis] += step * direction
+        result = await self.call_movel(target, 50.0, 100.0)
+        return bool(result.get('success'))
+
+    def start_sequence(self, marker_id: int) -> None:
+        self.pub_seq_start.publish(Int32(data=marker_id))
+
+    def next_step(self) -> None:
+        self.pub_seq_next.publish(Empty())
+
+    def stop_sequence(self) -> None:
+        self.pub_seq_stop.publish(Empty())
+        with self._lock:
+            self._state['seq_step'] = 'RESETTING'
+
+    def reset_sequence(self) -> None:
+        self.pub_seq_reset.publish(Empty())
+        with self._lock:
+            self._state['seq_step'] = 'RESETTING'
+
+    def start_temp_sequence(self, marker_id: int) -> None:
+        self.pub_tmp_start.publish(Int32(data=marker_id))
+
+    def next_temp_step(self) -> None:
+        self.pub_tmp_next.publish(Empty())
+
+    def stop_temp_sequence(self) -> None:
+        self.pub_tmp_stop.publish(Empty())
+
+    async def enter_recovery(self) -> dict:
+        servo = await self.call_servo(True)
+        if not servo.get('success'):
+            return servo
+        req = SetRobotMode.Request()
+        req.robot_mode = 0
+        await self._run_srv(self.cli_mode, req)
+        teaching = await self.call_teaching(True)
+        if not teaching.get('success'):
+            return teaching
+        with self._lock:
+            self._state['recovery_active'] = True
+        return {'success': True, 'message': '안전복구 모드 진입'}
+
+    async def exit_recovery(self) -> dict:
+        await self.call_teaching(False)
+        req = SetRobotMode.Request()
+        req.robot_mode = 1
+        await self._run_srv(self.cli_mode, req)
+        with self._lock:
+            self._state['recovery_active'] = False
+        return {'success': True, 'message': '복구 완료'}
+
+    async def call_magnet(self, enabled: bool) -> dict:
+        req = SetToolDigitalOutput.Request()
+        req.index = 1
+        req.value = 1 if enabled else 0
+        return await self._run_srv(self.cli_magnet, req)
+
+    async def _wait_for_action(self, client) -> bool:
+        if client.server_is_ready():
+            return True
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: client.wait_for_server(timeout_sec=2.0)
+        )
+
+    async def _run_action(self, client, goal) -> dict:
+        send_future = client.send_goal_async(goal)
+        while not send_future.done():
+            await asyncio.sleep(0.02)
+        handle = send_future.result()
+        if not handle.accepted:
+            return {'success': False, 'message': 'Goal rejected by server'}
+        result_future = handle.get_result_async()
+        while not result_future.done():
+            await asyncio.sleep(0.05)
+        result = result_future.result().result
+        return {
+            'success': bool(result.success),
+            'message': str(result.message),
+            'time': float(result.execution_time_sec),
+        }
+
+    async def _run_srv(self, client, request) -> dict:
+        if not client.service_is_ready():
+            loop = asyncio.get_running_loop()
+            ready = await loop.run_in_executor(
+                None, lambda: client.wait_for_service(timeout_sec=2.0)
+            )
+            if not ready:
+                return {
+                    'success': False,
+                    'message': f'Service {client.srv_name} not available',
+                }
+        try:
+            future = client.call_async(request)
+            while not future.done():
+                await asyncio.sleep(0.02)
+            result = future.result()
+            if result is None:
+                return {'success': False, 'message': 'Service returned None'}
+            return {
+                'success': bool(result.success),
+                'message': str(getattr(result, 'message', 'OK')),
+            }
+        except Exception as exc:
+            self.get_logger().error(
+                f'Service call exception ({client.srv_name}): {exc}'
+            )
+            return {'success': False, 'message': f'Internal Error: {exc}'}
+
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 
 _node:        Optional[RobotBridgeNode]      = None
-_executor:    Optional[MultiThreadedExecutor] = None
+_executor:    Optional[rclpy.executors.Executor] = None
 _spin_thread: Optional[threading.Thread]     = None
 
 
@@ -396,7 +326,7 @@ def init_ros() -> RobotBridgeNode:
     global _node, _executor, _spin_thread
     rclpy.init()
     _node     = RobotBridgeNode()
-    _executor = MultiThreadedExecutor()
+    _executor = SingleThreadedExecutor()
     _executor.add_node(_node)
     _spin_thread = threading.Thread(target=_executor.spin, daemon=True)
     _spin_thread.start()

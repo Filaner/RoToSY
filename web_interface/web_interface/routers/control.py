@@ -237,6 +237,15 @@ async def stop_sequence() -> dict:
     node.stop_sequence()
     return {'success': True}
 
+@router.post('/motion/reset')
+async def reset_sequence() -> dict:
+    """Stop the current sequence and return it to its initial state."""
+    node = ros.get_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='ROS2 node not initialized')
+    node.reset_sequence()
+    return {'success': True}
+
 
 @router.post('/temp_motion/start')
 async def start_temp_sequence(req: SequenceStartRequest) -> dict:

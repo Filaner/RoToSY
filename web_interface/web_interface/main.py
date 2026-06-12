@@ -9,13 +9,21 @@ Architecture:
 """
 
 import asyncio
+import fcntl
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Set
 
 # 폴링 엔드포인트 access 로그 무음 처리
-_MUTED_PATHS = {'/camera/markers', '/camera/stream', '/api/manual_calib/touch/status'}
+_MUTED_PATHS = {
+    '/camera/markers',
+    '/camera/detections',
+    '/camera/stream',
+    '/api/manual_calib/touch/status',
+}
 
 class _MutePollingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
@@ -38,6 +46,22 @@ from .routers import gripper as gripper_router
 
 STATIC_DIR = Path(__file__).parent / 'static'
 BROADCAST_HZ = 10  # state push rate to WebSocket clients
+_INSTANCE_LOCK_FD = None
+
+
+def _acquire_instance_lock() -> bool:
+    """Prevent duplicate web bridges and duplicate ownership of the camera."""
+    global _INSTANCE_LOCK_FD
+    fd = os.open('/tmp/rotosy_web_server.lock', os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return False
+    os.ftruncate(fd, 0)
+    os.write(fd, str(os.getpid()).encode('ascii'))
+    _INSTANCE_LOCK_FD = fd
+    return True
 
 
 # ── WebSocket connection manager ──────────────────────────────────────────────
@@ -152,6 +176,16 @@ async def camera_markers() -> dict:
     }
 
 
+@app.get('/camera/detections')
+async def camera_detections() -> dict:
+    """Return the latest stabilized YOLO medicine detections."""
+    return {
+        'detections': cam_module.camera.get_detections(),
+        'model_loaded': cam_module.camera.detector_loaded,
+        'error': cam_module.camera.detector_error,
+    }
+
+
 @app.get('/camera/snapshot')
 async def camera_snapshot():
     """Return the latest camera frame as a JPEG image."""
@@ -178,4 +212,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
+    if not _acquire_instance_lock():
+        print(
+            'web_server is already running; refusing duplicate instance.',
+            file=sys.stderr,
+        )
+        return
     uvicorn.run('web_interface.main:app', host='0.0.0.0', port=8000, reload=False)
