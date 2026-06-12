@@ -129,7 +129,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('show_gazebo_client', default_value='true'),
-        DeclareLaunchArgument('auto_start_demo', default_value='true'),
+        DeclareLaunchArgument('auto_start_demo', default_value='false'),
         DeclareLaunchArgument('initial_x', default_value='-4.30'),
         DeclareLaunchArgument('initial_y', default_value='2.05'),
         DeclareLaunchArgument('initial_yaw', default_value='-1.5708'),
@@ -170,6 +170,22 @@ def generate_launch_description():
                               'params_file': nav_params,
                               'autostart': 'True'}.items()
         ),
+        # Localization bootstrap: 약실(spawn) 위치를 initialpose 로 반복 발행해 AMCL
+        # 위치추정을 확정한다. (원래 demo_goal_sender 처럼 지연 없이 즉시 시작 — 5초
+        # 지연을 넣으면 Nav2 activation 이 localization 보다 먼저 타임아웃됨.)
+        # 골 전송은 웹(ros_bridge)이 담당하므로 여기선 안 함.
+        Node(
+            package='mobile_simulation',
+            executable='initial_pose_publisher',
+            name='mobile_initial_pose_publisher',
+            output='screen',
+            parameters=[{'initial_x': initial_x,
+                         'initial_y': initial_y,
+                         'initial_yaw': initial_yaw,
+                         'repetitions': 15},
+                        {'use_sim_time': use_sim_time}]
+        ),
+        # 단독 데모용 — auto_start_demo:=true 일 때만 하드코딩 골을 한 번 전송.
         Node(
             package='mobile_simulation',
             executable='demo_goal_sender',

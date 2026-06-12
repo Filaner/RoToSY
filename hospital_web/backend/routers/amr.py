@@ -14,6 +14,33 @@ class DispatchReq(BaseModel):
     destination: str = ''
 
 
+class GotoReq(BaseModel):
+    x:     float
+    y:     float
+    theta: float = 0.0
+    label: str   = ''
+
+
+# ── 테스트용 직접 이동 (좌표를 그대로 Nav2 골로 전송) ─────────────────────────
+
+@router.post('/test/goto')
+async def test_goto(req: GotoReq):
+    """raw (x, y, theta)로 로봇을 바로 이동시킨다. ward 조회/적재확인 절차 없이 동작."""
+    result = await ros.goto(req.x, req.y, req.theta, req.label)
+    if not result.get('success'):
+        raise HTTPException(status_code=502, detail=result.get('message'))
+    ms.add_audit('admin', 'AMR_TEST_GOTO',
+                 f'({req.x:.2f}, {req.y:.2f}, θ={req.theta:.2f}) {req.label}')
+    return result
+
+
+@router.post('/test/stop')
+async def test_stop():
+    result = await ros.stop()
+    ms.add_audit('admin', 'AMR_TEST_STOP')
+    return result
+
+
 @router.post('/dispatch')
 async def dispatch(req: DispatchReq):
     mission = ms.get_mission()

@@ -123,6 +123,25 @@ async def dispatch(destination: str = '') -> dict:
     return await _node.call_trigger('/amr/dispatch')
 
 
+async def goto(x: float, y: float, theta: float = 0.0, label: str = '') -> dict:
+    """raw 좌표(map frame)로 Nav2 골을 전송한다. (테스트/직접 이동용)"""
+    if not _ros_available or _node is None:
+        with _lock:
+            _state['amr']['status']      = 'DELIVERING'
+            _state['amr']['destination'] = label or f'({x:.2f}, {y:.2f})'
+        return {'success': True, 'message': '[mock] goto (ROS 미연결)'}
+    return await _node.navigate_to(x, y, theta, label)
+
+
+async def stop() -> dict:
+    """진행 중인 Nav2 이동을 취소한다."""
+    if not _ros_available or _node is None:
+        with _lock:
+            _state['amr']['status'] = 'IDLE'
+        return {'success': True, 'message': '[mock] stop'}
+    return await _node.navigate_cancel()
+
+
 async def cancel_mission() -> dict:
     if not _ros_available or _node is None:
         with _lock:
@@ -203,10 +222,97 @@ class _AMRBridgeNode:
         except Exception:
             pass
 
+        # Nav2 위치추정 결과(/amcl_pose)로 로봇 실시간 위치를 받는다.
+        try:
+            from geometry_msgs.msg import PoseWithCovarianceStamped
+            self.node.create_subscription(
+                PoseWithCovarianceStamped, '/amcl_pose', self._amcl_pose_cb, 10)
+        except Exception:
+            pass
+
+        # Nav2 navigate_to_pose 액션 클라이언트 — 웹에서 받은 좌표로 골을 전송한다.
+        from nav2_msgs.action import NavigateToPose
+        from rclpy.action import ActionClient
+        self._nav_client = ActionClient(self.node, NavigateToPose, 'navigate_to_pose')
+        self._nav_goal_handle = None
+
         self.node.get_logger().info('AMR bridge node started')
 
     def destroy_node(self):
         self.node.destroy_node()
+
+    # ── Nav2 navigation ──────────────────────────────────────────────────────
+
+    async def navigate_to(self, x: float, y: float, theta: float = 0.0,
+                          label: str = '') -> dict:
+        import asyncio
+        import math
+        from nav2_msgs.action import NavigateToPose
+
+        if not self._nav_client.wait_for_server(timeout_sec=3.0):
+            return {'success': False,
+                    'message': 'Nav2 navigate_to_pose 액션 서버 없음 — 시뮬레이션이 실행 중인지 확인'}
+
+        goal = NavigateToPose.Goal()
+        goal.pose.header.frame_id = 'map'
+        goal.pose.header.stamp    = self.node.get_clock().now().to_msg()
+        goal.pose.pose.position.x = float(x)
+        goal.pose.pose.position.y = float(y)
+        half = float(theta) * 0.5
+        goal.pose.pose.orientation.z = math.sin(half)
+        goal.pose.pose.orientation.w = math.cos(half)
+
+        send_future = self._nav_client.send_goal_async(goal)
+        while not send_future.done():
+            await asyncio.sleep(0.02)
+        handle = send_future.result()
+        if handle is None or not handle.accepted:
+            return {'success': False, 'message': 'Nav2가 골을 거부했습니다'}
+
+        self._nav_goal_handle = handle
+        with _lock:
+            _state['amr']['status']      = 'DELIVERING'
+            _state['amr']['destination'] = label or f'({x:.2f}, {y:.2f})'
+            _state['amr']['online']      = True
+            _state['amr']['last_seen']   = datetime.now().isoformat()
+        handle.get_result_async().add_done_callback(self._nav_result_cb)
+        return {'success': True, 'message': f'이동 시작 → ({x:.2f}, {y:.2f})'}
+
+    def _nav_result_cb(self, future) -> None:
+        from action_msgs.msg import GoalStatus
+        status = future.result().status
+        with _lock:
+            if status == GoalStatus.STATUS_SUCCEEDED:
+                _state['amr']['status'] = 'ARRIVED'
+            elif status == GoalStatus.STATUS_CANCELED:
+                _state['amr']['status'] = 'IDLE'
+            else:
+                _state['amr']['status'] = 'ERROR'
+            _state['amr']['last_seen'] = datetime.now().isoformat()
+
+    async def navigate_cancel(self) -> dict:
+        import asyncio
+        if self._nav_goal_handle is None:
+            return {'success': True, 'message': '취소할 이동 없음'}
+        cancel_future = self._nav_goal_handle.cancel_goal_async()
+        while not cancel_future.done():
+            await asyncio.sleep(0.02)
+        with _lock:
+            _state['amr']['status'] = 'IDLE'
+        return {'success': True, 'message': '이동 취소됨'}
+
+    def _amcl_pose_cb(self, msg) -> None:
+        import math
+        q = msg.pose.pose.orientation
+        theta = math.atan2(2.0 * (q.w * q.z), 1.0 - 2.0 * (q.z * q.z))
+        with _lock:
+            _state['amr']['pose'] = {
+                'x': msg.pose.pose.position.x,
+                'y': msg.pose.pose.position.y,
+                'theta': theta,
+            }
+            _state['amr']['online']    = True
+            _state['amr']['last_seen'] = datetime.now().isoformat()
 
     def _amr_status_cb(self, msg) -> None:
         with _lock:

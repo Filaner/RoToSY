@@ -30,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'demo_goal_sender = mobile_simulation.demo_goal_sender:main',
+            'initial_pose_publisher = mobile_simulation.initial_pose_publisher:main',
         ],
     },
 )

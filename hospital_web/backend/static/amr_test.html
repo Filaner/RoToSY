@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AMR 이동 테스트</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; background:#11151c; color:#e6e9ef;
+         margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#8b95a5; font-size:13px; margin-bottom:20px; }
+  .card { background:#1a202b; border:1px solid #2a3340; border-radius:10px;
+          padding:18px; max-width:560px; margin-bottom:16px; }
+  label { display:inline-block; width:60px; color:#9fb0c3; font-size:13px; }
+  input { background:#0e1218; border:1px solid #2a3340; color:#e6e9ef;
+          border-radius:6px; padding:7px 9px; width:90px; font-size:14px; }
+  .row { margin-bottom:10px; }
+  button { border:none; border-radius:7px; padding:9px 16px; font-size:14px;
+           font-weight:600; cursor:pointer; margin-right:8px; }
+  .go   { background:#2f81f7; color:#fff; }
+  .stop { background:#d1334a; color:#fff; }
+  .preset { background:#26303d; color:#cdd7e3; font-weight:500; margin:4px 6px 0 0; }
+  .presets { margin-top:6px; }
+  .grid { display:grid; grid-template-columns:auto auto; gap:6px 18px; font-size:14px; }
+  .k { color:#8b95a5; }
+  .v { font-variant-numeric:tabular-nums; }
+  .badge { padding:2px 10px; border-radius:20px; font-size:13px; font-weight:600; }
+  .IDLE{background:#2a3340;color:#cdd7e3;} .DELIVERING{background:#1d4ed8;color:#fff;}
+  .ARRIVED{background:#15803d;color:#fff;} .RETURNING{background:#a16207;color:#fff;}
+  .ERROR{background:#b91c1c;color:#fff;} .OFFLINE{background:#374151;color:#9ca3af;}
+  #log { font-family:ui-monospace,monospace; font-size:12px; color:#8b95a5;
+         white-space:pre-wrap; margin-top:8px; }
+</style>
+</head>
+<body>
+  <h1>🤖 AMR 이동 테스트</h1>
+  <div class="sub">좌표(map frame)를 입력해 로봇을 바로 이동시킵니다. ward 조회·적재확인 없이 Nav2로 직접 골 전송.</div>
+
+  <div class="card">
+    <div class="row"><label>x</label><input id="x" type="number" step="0.05" value="4.20"></div>
+    <div class="row"><label>y</label><input id="y" type="number" step="0.05" value="2.72"></div>
+    <div class="row"><label>theta</label><input id="theta" type="number" step="0.01" value="1.5708"> <span style="color:#8b95a5;font-size:12px">rad</span></div>
+    <div class="row" style="margin-top:14px">
+      <button class="go" onclick="go()">▶ 이동</button>
+      <button class="stop" onclick="stop()">■ 정지</button>
+    </div>
+    <div class="presets">
+      <span style="color:#8b95a5;font-size:12px;">프리셋:</span><br>
+      <button class="preset" onclick="set(-4.30,2.05,-1.5708)">약실(홈)</button>
+      <button class="preset" onclick="set(4.20,2.72,1.5708)">병동 A</button>
+      <button class="preset" onclick="set(4.20,-2.72,-1.5708)">병동 B</button>
+      <button class="preset" onclick="set(0.0,0.0,0.0)">중앙 복도</button>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <div class="card">
+    <div style="margin-bottom:12px;font-weight:600;">실시간 상태 <span id="ws" style="font-size:12px;color:#8b95a5;">(연결 중…)</span></div>
+    <div class="grid">
+      <div class="k">상태</div>     <div><span id="st" class="badge OFFLINE">—</span></div>
+      <div class="k">목적지</div>   <div class="v" id="dest">—</div>
+      <div class="k">위치 x</div>   <div class="v" id="px">—</div>
+      <div class="k">위치 y</div>   <div class="v" id="py">—</div>
+      <div class="k">방향 θ</div>   <div class="v" id="pt">—</div>
+      <div class="k">배터리</div>   <div class="v" id="batt">—</div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+function set(x,y,t){ $('x').value=x; $('y').value=y; $('theta').value=t; }
+function log(m){ $('log').textContent = '› ' + m; }
+
+async function go(){
+  const body = { x:+$('x').value, y:+$('y').value, theta:+$('theta').value, label:'test' };
+  log('이동 요청 전송…');
+  try {
+    const r = await fetch('/api/amr/test/goto', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await r.json();
+    log(r.ok ? ('✅ ' + (d.message||'OK')) : ('❌ ' + (d.detail||r.status)));
+  } catch(e){ log('❌ ' + e); }
+}
+async function stop(){
+  log('정지 요청…');
+  try {
+    const r = await fetch('/api/amr/test/stop', {method:'POST'});
+    const d = await r.json();
+    log(r.ok ? ('🛑 ' + (d.message||'정지')) : ('❌ ' + (d.detail||r.status)));
+  } catch(e){ log('❌ ' + e); }
+}
+
+// 실시간 상태는 기존 /ws 브로드캐스트를 그대로 사용
+(function connect(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen  = () => $('ws').textContent = '(연결됨)';
+  ws.onclose = () => { $('ws').textContent = '(끊김 — 재연결 중)'; setTimeout(connect, 1500); };
+  ws.onmessage = ev => {
+    const s = JSON.parse(ev.data);
+    const a = s.amr || {};
+    const st = a.status || 'OFFLINE';
+    const badge = $('st'); badge.textContent = st; badge.className = 'badge ' + st;
+    $('dest').textContent = a.destination || '—';
+    const p = a.pose || {};
+    $('px').textContent = p.x != null ? p.x.toFixed(3) : '—';
+    $('py').textContent = p.y != null ? p.y.toFixed(3) : '—';
+    $('pt').textContent = p.theta != null ? p.theta.toFixed(3) : '—';
+    $('batt').textContent = a.battery != null ? a.battery.toFixed(0) + '%' : '—';
+  };
+})();
+</script>
+</body>
+</html>

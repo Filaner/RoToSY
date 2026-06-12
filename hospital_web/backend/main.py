@@ -128,6 +128,11 @@ async def admin_dashboard():
     return HTMLResponse((STATIC_DIR / 'admin.html').read_text())
 
 
+@app.get('/admin/test', response_class=HTMLResponse)
+async def amr_test_page():
+    return HTMLResponse((STATIC_DIR / 'amr_test.html').read_text())
+
+
 @app.get('/pharmacist', response_class=HTMLResponse)
 async def pharmacist_dashboard():
     return HTMLResponse((STATIC_DIR / 'pharmacist.html').read_text())
