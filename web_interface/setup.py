@@ -11,7 +11,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
     ],
     package_data={
-        'web_interface': ['static/*'],
+        'web_interface': ['static/*', 'models/*.pt'],
     },
     install_requires=['setuptools'],
     zip_safe=True,

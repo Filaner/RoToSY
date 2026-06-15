@@ -92,9 +92,11 @@ async def recover():
 
 @router.post('/motion/start')
 async def motion_start(req: MotionStartReq):
-    """수동 호출 (옵션 X) — 단일 마커 모션 시퀀스 시작."""
+    """수동 호출 (옵션 X) — 서랍 인덱스(0~5) 모션 시퀀스 시작."""
+    if req.marker_id < 0 or req.marker_id > 5:
+        raise HTTPException(status_code=422, detail='drawer index must be 0..5')
     r = await _proxy('/api/motion/start', {'marker_id': req.marker_id})
-    ms.add_audit('admin', 'MOTION_START', f'마커 {req.marker_id}')
+    ms.add_audit('admin', 'MOTION_START', f'서랍 {req.marker_id + 1} (index {req.marker_id})')
     return r
 
 

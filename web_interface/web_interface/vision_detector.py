@@ -19,7 +19,9 @@ def _model_candidates() -> list[Path]:
     configured = os.environ.get('ROTOSY_VISION_MODEL')
     if configured:
         candidates.append(Path(configured).expanduser())
-    candidates.append(Path(__file__).resolve().parent / 'models' / 'medium_best_version2.pt')
+    models_dir = Path(__file__).resolve().parent / 'models'
+    candidates.append(models_dir / 'best.pt')
+    candidates.append(models_dir / 'medium_best_version2.pt')
     return candidates
 
 
@@ -47,8 +49,8 @@ class VisionDetector:
 
     def __init__(
         self,
-        medicine_conf: float = 0.15,
-        water_pack_conf: float = 0.15,
+        medicine_conf: float = 0.5,
+        water_pack_conf: float = 0.5,
         history_frames: int = 6,
         track_iou: float = 0.5,
         min_votes: int = 2,
@@ -74,7 +76,7 @@ class VisionDetector:
     def load(self) -> bool:
         path = find_model_path()
         if path is None:
-            self.error = 'medium_best_version2.pt not found'
+            self.error = 'best.pt not found'
             return False
         try:
             from ultralytics import YOLO
@@ -203,7 +205,9 @@ class VisionDetector:
             
             # 클래스별 개별 임계값 적용 (통일 작업)
             confidence = float(box.conf[0].item())
-            target_conf = self.medicine_conf if class_name.lower() == MEDICINE_CLASS_NAME else self.water_pack_conf
+            # Use medicine_conf if class is 'medicine' or 'medicine_box'
+            is_medicine = class_name.lower() in [MEDICINE_CLASS_NAME, 'medicine_box']
+            target_conf = self.medicine_conf if is_medicine else self.water_pack_conf
             if confidence < target_conf:
                 continue
 
@@ -322,7 +326,9 @@ class VisionDetector:
         annotated = color.copy()
         for item in detections:
             x1, y1, x2, y2 = item['bbox']
-            color_bgr = (0, 255, 255) if item['class_name'].lower() == MEDICINE_CLASS_NAME else (0, 255, 0)
+            # Yellow for medicine, Green for water_pack
+            is_medicine = item['class_name'].lower() in [MEDICINE_CLASS_NAME, 'medicine_box']
+            color_bgr = (0, 255, 255) if is_medicine else (0, 255, 0)
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color_bgr, 2)
             label = f"{item['class_name']} {item['confidence']:.2f}"
             base = item.get('base_position_m')

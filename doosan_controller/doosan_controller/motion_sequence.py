@@ -685,16 +685,16 @@ class MotionSequenceNode(Node):
         return None
 
     def _get_medicine_target(self, retries: int = 5) -> tuple | None:
-        """web_interface에서 YOLO로 검출된 약품(medicine) 또는 수액(water_pack)의 베이스 좌표를 취득."""
+        """web_interface에서 YOLO로 검출된 약품(medicine, medicine_box) 또는 수액(water_pack)의 베이스 좌표를 취득."""
         for attempt in range(retries):
             try:
                 with urllib.request.urlopen(MEDICINE_DETECTION_API, timeout=3) as resp:
                     data = json.loads(resp.read())
 
-                # 'medicine' 또는 'water_pack' 클래스 중 유효한 좌표가 있는 대상을 모두 선택
+                # 'medicine', 'medicine_box' 또는 'water_pack' 클래스 중 유효한 좌표가 있는 대상을 모두 선택
                 targets = [
                     d for d in data.get('detections', [])
-                    if d['class_name'].lower() in ['medicine', 'water_pack']
+                    if d['class_name'].lower() in ['medicine', 'medicine_box', 'water_pack']
                     and d.get('base_position_m') is not None
                 ]
 
