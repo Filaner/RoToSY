@@ -1,0 +1,38 @@
+# Drawer contact calibration observations in the robot base frame.
+# Pose values are XYZ only, in millimeters, measured after motion step 3.
+# correction_mm = target_tcp_mm - measured_tcp_mm
+drawer_tcp_calibration:
+  frame: base_link
+  step: 3
+  unit: mm
+  observations:
+    drawer_1:
+      slot_index: 0
+      measured_tcp_mm: [689.60, -136.70, 406.00]
+      target_tcp_mm: [697.72, -230.67, 406.71]
+      correction_mm: [8.12, -93.97, 0.71]
+    drawer_2:
+      slot_index: 1
+      measured_tcp_mm: [462.10, -131.70, 406.60]
+      target_tcp_mm: [468.10, -222.90, 404.90]
+      correction_mm: [6.00, -91.20, -1.70]
+    drawer_3:
+      slot_index: 2
+      measured_tcp_mm: [689.60, -136.73, 294.00]
+      target_tcp_mm: [697.60, -226.89, 294.00]
+      correction_mm: [8.00, -90.16, 0.00]
+    drawer_4:
+      slot_index: 3
+      measured_tcp_mm: [462.60, -136.70, 294.00]
+      target_tcp_mm: [468.10, -222.90, 294.00]
+      correction_mm: [5.50, -86.20, 0.00]
+    drawer_5:
+      slot_index: 4
+      measured_tcp_mm: [689.60, -136.70, 182.01]
+      target_tcp_mm: [697.60, -226.89, 182.01]
+      correction_mm: [8.00, -90.19, 0.00]
+    drawer_6:
+      slot_index: 5
+      measured_tcp_mm: [462.69, -136.44, 183.01]
+      target_tcp_mm: [468.10, -222.90, 183.01]
+      correction_mm: [5.41, -86.46, 0.00]

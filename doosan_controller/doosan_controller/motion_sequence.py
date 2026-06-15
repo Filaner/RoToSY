@@ -5,7 +5,7 @@ Usage:
   1. Persistent Node:
      ros2 run doosan_controller motion_sequence
   2. One-shot CLI:
-     ros2 run doosan_controller motion_sequence <marker_id> [--step]
+     ros2 run doosan_controller motion_sequence <drawer_index> [--step]
 """
 
 import base64
@@ -17,6 +17,10 @@ import sys
 import threading
 import time
 import urllib.request
+from pathlib import Path
+
+import yaml
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 
 try:
     from groq import Groq as _Groq
@@ -46,6 +50,9 @@ OCR_VERIFY_API      = 'http://localhost:8080/api/ocr/verify'
 ROBOT_NS            = 'dsr01'
 GROQ_API_KEY        = os.environ.get('GROQ_API_KEY', '')
 
+DEFAULT_MOTION_TOPIC_PREFIX = 'motion'
+DEFAULT_INSTANCE_LOCK_PATH = '/tmp/rotosy_motion_sequence.lock'
+
 VEL_MM           = 30.0
 ACC_MM           = 60.0
 VEL_DEG          = 30.0
@@ -54,24 +61,104 @@ ACC_DEG          = 60.0
 DEFAULT_RADIUS   = 200.0   # MoveC 기본 반지름 (mm)
 DEFAULT_RZ       = 0.0
 
-# Top-view cabinet geometry. /motion/start still receives the existing slot
-# index 0..5, while every slot is located from the fixed cabinet marker ID 1.
-CABINET_MARKER_ID = 1
-DRAWER_REFERENCE_SLOT = 1       # zero-based slot 1 == drawer 2
-DRAWER_REFERENCE_OFFSET_MM = (80.0, 36.0, -60.0)
-DRAWER_COLUMN_PITCH_MM = 227.0
-DRAWER_ROW_PITCH_MM = 112.0
-DRAWER_APPROACH_MM = 30.0
-DRAWER_PULL_MM = 200.0
-GRIPPER_LENGTH_MM = 97.0
-
+DEFAULT_CABINET_GEOMETRY = {
+    'marker_id': 1,
+    'reference_drawer': 6,
+    'coordinate_frame': 'base_link',
+    'marker_to_reference_handle_mm': [0.0, -75.0, 205.0],
+    'pull_direction_base': [0.0, 1.0, 0.0],
+    'column_pitch_mm': 227.0,
+    'row_pitch_mm': 112.0,
+    'approach_mm': 30.0,
+    'pull_mm': 200.0,
+    'gripper_length_mm': 97.0,
+}
 _INSTANCE_LOCK_FD = None
 
 
-def _acquire_instance_lock() -> bool:
+def _cabinet_geometry_candidates() -> list[Path]:
+    candidates = []
+    config_dir = os.environ.get('ROTOSY_DOOSAN_CONFIG_DIR')
+    if config_dir:
+        candidates.append(Path(config_dir).expanduser() / 'cabinet_geometry.yaml')
+    candidates.append(Path.cwd() / 'doosan_controller' / 'config' / 'cabinet_geometry.yaml')
+    candidates.append(
+        Path.home() / 'ros2_ws' / 'src' / 'RoToSY'
+        / 'doosan_controller' / 'config' / 'cabinet_geometry.yaml'
+    )
+    try:
+        candidates.append(
+            Path(get_package_share_directory('doosan_controller'))
+            / 'config' / 'cabinet_geometry.yaml'
+        )
+    except PackageNotFoundError:
+        pass
+    return candidates
+
+
+def _load_cabinet_geometry() -> tuple[dict, Path | None]:
+    geometry = dict(DEFAULT_CABINET_GEOMETRY)
+    for path in _cabinet_geometry_candidates():
+        if not path.exists():
+            continue
+        with path.open(encoding='utf-8') as stream:
+            loaded = yaml.safe_load(stream) or {}
+        geometry.update(loaded.get('cabinet_geometry', {}))
+        return geometry, path
+    return geometry, None
+
+
+def _drawer_calibration_candidates() -> list[Path]:
+    candidates = []
+    config_dir = os.environ.get('ROTOSY_DOOSAN_CONFIG_DIR')
+    if config_dir:
+        candidates.append(Path(config_dir).expanduser() / 'drawer_tcp_calibration.yaml')
+    candidates.append(Path.cwd() / 'doosan_controller' / 'config' / 'drawer_tcp_calibration.yaml')
+    candidates.append(
+        Path.home() / 'ros2_ws' / 'src' / 'RoToSY'
+        / 'doosan_controller' / 'config' / 'drawer_tcp_calibration.yaml'
+    )
+    try:
+        candidates.append(
+            Path(get_package_share_directory('doosan_controller'))
+            / 'config' / 'drawer_tcp_calibration.yaml'
+        )
+    except PackageNotFoundError:
+        pass
+    return candidates
+
+
+def _load_drawer_corrections() -> tuple[dict[int, tuple[float, float, float]], Path | None]:
+    for path in _drawer_calibration_candidates():
+        if not path.exists():
+            continue
+        with path.open(encoding='utf-8') as stream:
+            loaded = yaml.safe_load(stream) or {}
+        observations = (
+            loaded.get('drawer_tcp_calibration', {}).get('observations', {}) or {}
+        )
+        corrections = {}
+        for observation in observations.values():
+            if not isinstance(observation, dict):
+                continue
+            slot_index = observation.get('slot_index')
+            correction = observation.get('correction_mm')
+            if not isinstance(slot_index, int) or not 0 <= slot_index <= 5:
+                continue
+            if not isinstance(correction, list) or len(correction) != 3:
+                continue
+            values = tuple(float(value) for value in correction)
+            if not all(math.isfinite(value) for value in values):
+                continue
+            corrections[slot_index] = values
+        return corrections, path
+    return {}, None
+
+
+def _acquire_instance_lock(lock_path: str = DEFAULT_INSTANCE_LOCK_PATH) -> bool:
     """Prevent duplicate sequence nodes from subscribing to command topics."""
     global _INSTANCE_LOCK_FD
-    fd = os.open('/tmp/rotosy_motion_sequence.lock', os.O_CREAT | os.O_RDWR, 0o644)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -86,10 +173,14 @@ def _acquire_instance_lock() -> bool:
 class MotionSequenceNode(Node):
     """실시간 시퀀스 제어가 가능한 동작 시퀀스 노드."""
 
-    def __init__(self):
-        super().__init__('motion_sequence_node')
+    def __init__(
+        self,
+        topic_prefix: str = DEFAULT_MOTION_TOPIC_PREFIX,
+        node_name: str = 'motion_sequence_node',
+    ):
+        super().__init__(node_name)
         self._cb_group = ReentrantCallbackGroup()
-
+        self._topic_prefix = topic_prefix.strip('/') or DEFAULT_MOTION_TOPIC_PREFIX
         # Clients
         self._home_cli   = self.create_client(Home, '/arm/home', callback_group=self._cb_group)
         self._movel      = ActionClient(self, MoveL, '/arm/move_l', callback_group=self._cb_group)
@@ -104,20 +195,20 @@ class MotionSequenceNode(Node):
             RobotStatus, '/arm/status', self._status_cb, 10
         )
         self._next_sub = self.create_subscription(
-            Empty, '/motion/next_step', self._next_step_cb, 10, callback_group=self._cb_group
+            Empty, self._topic('next_step'), self._next_step_cb, 10, callback_group=self._cb_group
         )
         self._start_sub = self.create_subscription(
-            Int32, '/motion/start', self._start_cb, 10, callback_group=self._cb_group
+            Int32, self._topic('start'), self._start_cb, 10, callback_group=self._cb_group
         )
         self._stop_sub = self.create_subscription(
-            Empty, '/motion/stop', self._stop_cb, 10, callback_group=self._cb_group
+            Empty, self._topic('stop'), self._stop_cb, 10, callback_group=self._cb_group
         )
         self._reset_sub = self.create_subscription(
-            Empty, '/motion/reset', self._reset_cb, 10, callback_group=self._cb_group
+            Empty, self._topic('reset'), self._reset_cb, 10, callback_group=self._cb_group
         )
 
         # Publishers
-        self._step_info_pub = self.create_publisher(String, '/motion/step_info', 10)
+        self._step_info_pub = self.create_publisher(String, self._topic('step_info'), 10)
 
         # State
         self._tcp    = None   # [x, y, z, rx, ry, rz] mm / deg
@@ -130,6 +221,20 @@ class MotionSequenceNode(Node):
         self._is_running = False
         self._active_goal_handle = None
         self._state_lock = threading.Lock()
+        self._reset_worker_running = False
+        self._cabinet_geometry, geometry_path = _load_cabinet_geometry()
+        self._drawer_corrections, calibration_path = _load_drawer_corrections()
+        self.get_logger().info(
+            f'Cabinet geometry loaded from {geometry_path or "built-in defaults"}'
+        )
+        self.get_logger().info(
+            f'Drawer TCP corrections loaded from '
+            f'{calibration_path or "no calibration file"}: '
+            f'{len(self._drawer_corrections)} drawer(s)'
+        )
+
+    def _topic(self, suffix: str) -> str:
+        return f'/{self._topic_prefix}/{suffix}'
 
     # ── 콜백 ─────────────────────────────────────────────────────────────────
 
@@ -156,31 +261,36 @@ class MotionSequenceNode(Node):
 
         with self._state_lock:
             handle = self._active_goal_handle
+            if self._reset_worker_running:
+                return
+            self._reset_worker_running = True
         if handle is not None:
             try:
                 handle.cancel_goal_async()
             except Exception as exc:
                 self.get_logger().warning(f'Active goal cancel failed: {exc}')
 
-        if not self._set_magnet(False):
-            self.get_logger().error('Failed to turn gripper OFF while stopping sequence')
-
         thread = self._current_sequence_thread
-        if thread is None or not thread.is_alive():
-            self._finish_reset()
-            return
-
         threading.Thread(
-            target=self._wait_for_reset, args=(thread,), daemon=True
+            target=self._complete_reset, args=(thread,), daemon=True
         ).start()
 
-    def _wait_for_reset(self, thread):
-        thread.join(timeout=10.0)
-        if thread.is_alive():
-            self.get_logger().warning('Sequence is still stopping')
-            self._step_info_pub.publish(String(data='STOPPING'))
-            return
-        self._finish_reset()
+    def _complete_reset(self, thread):
+        try:
+            if not self._set_magnet(False):
+                self.get_logger().error('Failed to turn gripper OFF while stopping sequence')
+
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=10.0)
+                if thread.is_alive():
+                    self.get_logger().warning('Sequence is still stopping')
+                    self._step_info_pub.publish(String(data='STOPPING'))
+                    thread.join()
+
+            self._finish_reset()
+        finally:
+            with self._state_lock:
+                self._reset_worker_running = False
 
     def _finish_reset(self):
         self._is_running = False
@@ -200,13 +310,24 @@ class MotionSequenceNode(Node):
                     self._step_info_pub.publish(String(data='STOPPING'))
                     return
 
-        marker_id = msg.data
+        drawer_index = msg.data
+        if drawer_index < 0 or drawer_index > 5:
+            self.get_logger().error(
+                f'Invalid drawer index {drawer_index}; expected 0..5'
+            )
+            self._step_info_pub.publish(String(data='IDLE'))
+            return
         self._step_mode = True
         self._stop_requested = False
 
-        self.get_logger().info(f'Starting sequence for marker {marker_id} (Step Mode: {self._step_mode})')
+        reference_marker_id = int(self._cabinet_geometry['marker_id'])
+        self.get_logger().info(
+            f'Starting drawer {drawer_index + 1} (index={drawer_index}) using '
+            f'fixed ArUco marker ID {reference_marker_id} '
+            f'(Step Mode: {self._step_mode})'
+        )
         self._current_sequence_thread = threading.Thread(
-            target=self.run_sequence, args=(marker_id, DEFAULT_RADIUS)
+            target=self.run_sequence, args=(drawer_index, DEFAULT_RADIUS)
         )
         self._current_sequence_thread.start()
 
@@ -589,6 +710,14 @@ class MotionSequenceNode(Node):
             time.sleep(0.5)
         return None
 
+    def _on_missing_medicine(
+        self,
+        contact: tuple[float, float, float],
+        pull_dir: tuple[float, float, float],
+    ) -> tuple[float, float, float] | None:
+        """Hook for subclasses that want to continue without a detected box."""
+        return None
+
     # ── 시퀀스 ───────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -596,21 +725,18 @@ class MotionSequenceNode(Node):
         return tuple(sum(float(R[row][col]) * v[col] for col in range(3)) for row in range(3))
 
     def _drawer_offset(self, slot_index: int) -> tuple | None:
-        """Return handle-center offset in the cabinet marker frame.
-
-        Cabinet axes are +X left, +Y toward the robot/drawer pull direction,
-        and +Z upward. Slot numbering remains row-major 0..5.
-        """
+        """Return handle-center offset from the marker in robot base axes."""
         if slot_index < 0 or slot_index > 5:
             self.get_logger().error(f'서랍 번호 범위 초과: {slot_index} (0~5 필요)')
             return None
 
         row, col = divmod(slot_index, 2)
-        ref_row, ref_col = divmod(DRAWER_REFERENCE_SLOT, 2)
-        ref_x, ref_y, ref_z = DRAWER_REFERENCE_OFFSET_MM
-        x = ref_x + (ref_col - col) * DRAWER_COLUMN_PITCH_MM
-        z = ref_z - (row - ref_row) * DRAWER_ROW_PITCH_MM
-        return x, ref_y, z
+        reference_slot = int(self._cabinet_geometry['reference_drawer']) - 1
+        ref_row, ref_col = divmod(reference_slot, 2)
+        ref_x, ref_y, ref_z = self._cabinet_geometry['marker_to_reference_handle_mm']
+        x = float(ref_x) + (ref_col - col) * float(self._cabinet_geometry['column_pitch_mm'])
+        z = float(ref_z) + (ref_row - row) * float(self._cabinet_geometry['row_pitch_mm'])
+        return x, float(ref_y), z
 
     def _get_drawer_target(self, slot_index: int) -> tuple | None:
         """Compute handle and flange targets from the top-view cabinet marker."""
@@ -619,42 +745,40 @@ class MotionSequenceNode(Node):
             return None
 
         self.get_logger().info(
-            f'[서랍 {slot_index + 1}] 기준 마커 ID {CABINET_MARKER_ID} 좌표 취득 중...'
+            f'[서랍 {slot_index + 1}] 전면 기준 마커 좌표 취득 중...'
         )
-        marker = self._get_marker(CABINET_MARKER_ID)
+        marker_id = int(self._cabinet_geometry['marker_id'])
+        marker = self._get_marker(marker_id)
         if marker is None:
             self.get_logger().error(
-                f'ID {CABINET_MARKER_ID} 마커 위치/회전 미수신'
+                f'ID {marker_id} 마커 위치/회전 미수신'
             )
             return None
 
-        R_marker = marker['rotation_matrix_base']
-        # OpenCV marker axes: +X right, +Y marker top(back), +Z upward.
-        # Cabinet axes requested here: +X left, +Y front/pull, +Z upward.
-        R_cabinet = [
-            [-float(R_marker[row][0]), -float(R_marker[row][1]), float(R_marker[row][2])]
-            for row in range(3)
-        ]
-        world_offset = self._mat_vec(R_cabinet, offset)
         marker_pos = (float(marker['x_mm']), float(marker['y_mm']), float(marker['z_mm']))
-        handle = tuple(marker_pos[i] + world_offset[i] for i in range(3))
+        handle = tuple(marker_pos[i] + offset[i] for i in range(3))
+        drawer_correction = self._drawer_corrections.get(slot_index, (0.0, 0.0, 0.0))
+        handle = tuple(handle[i] + drawer_correction[i] for i in range(3))
 
-        pull_dir = self._mat_vec(R_cabinet, (0.0, 1.0, 0.0))
-        # Existing pose points the 97 mm gripper opposite the pull direction.
-        contact_flange = tuple(handle[i] + pull_dir[i] * GRIPPER_LENGTH_MM for i in range(3))
+        pull_dir = tuple(float(v) for v in self._cabinet_geometry['pull_direction_base'])
+        gripper_length = float(self._cabinet_geometry['gripper_length_mm'])
+        approach_distance = float(self._cabinet_geometry['approach_mm'])
+        contact_flange = tuple(handle[i] + pull_dir[i] * gripper_length for i in range(3))
         approach_flange = tuple(
-            contact_flange[i] + pull_dir[i] * DRAWER_APPROACH_MM for i in range(3)
+            contact_flange[i] + pull_dir[i] * approach_distance for i in range(3)
         )
 
         self.get_logger().info(
             f'마커=({marker_pos[0]:.1f},{marker_pos[1]:.1f},{marker_pos[2]:.1f}) '
-            f'오프셋=({offset[0]:.1f},{offset[1]:.1f},{offset[2]:.1f}) '
+            f'베이스축 오프셋=({offset[0]:.1f},{offset[1]:.1f},{offset[2]:.1f}) '
+            f'서랍별 보정=({drawer_correction[0]:+.2f},'
+            f'{drawer_correction[1]:+.2f},{drawer_correction[2]:+.2f}) '
             f'손잡이=({handle[0]:.1f},{handle[1]:.1f},{handle[2]:.1f}) '
             f'접근 플랜지=({approach_flange[0]:.1f},{approach_flange[1]:.1f},{approach_flange[2]:.1f})'
         )
         return approach_flange, contact_flange, pull_dir
 
-    def run_sequence(self, marker_id: int, radius_mm: float):
+    def run_sequence(self, drawer_index: int, radius_mm: float):
         self._is_running = True
         try:
             # 1. 홈
@@ -666,8 +790,8 @@ class MotionSequenceNode(Node):
                 return
 
             # 2. 탑뷰 마커에서 선택한 서랍의 안전 접근점 계산 및 이동
-            if not self._wait_for_step(f'2. 서랍 {marker_id + 1} 접근점으로 이동'): return
-            result = self._get_drawer_target(marker_id)
+            if not self._wait_for_step(f'2. 서랍 {drawer_index + 1} 접근점으로 이동'): return
+            result = self._get_drawer_target(drawer_index)
             if result is None: return
             approach, contact, pull_dir = result
             if not self._move_l(*approach, 90.0, -90.0, 0.0): return
@@ -683,7 +807,8 @@ class MotionSequenceNode(Node):
             if not self._set_magnet(True): return
 
             # 5. 사물함 앞쪽으로 200mm 당김
-            pull_target = tuple(contact[i] + pull_dir[i] * DRAWER_PULL_MM for i in range(3))
+            pull_distance = float(self._cabinet_geometry['pull_mm'])
+            pull_target = tuple(contact[i] + pull_dir[i] * pull_distance for i in range(3))
             if not self._wait_for_step('5. 서랍 200mm 당김'): return
             if not self._move_l(*pull_target, 90.0, -90.0, 0.0): return
             cx, cy, cz = pull_target
@@ -694,108 +819,118 @@ class MotionSequenceNode(Node):
 
             # 7. 열린 서랍 손잡이에서 30mm 후퇴
             released_target = tuple(
-                pull_target[i] + pull_dir[i] * DRAWER_APPROACH_MM for i in range(3)
+                pull_target[i] + pull_dir[i] * float(self._cabinet_geometry['approach_mm'])
+                for i in range(3)
             )
             if not self._wait_for_step('7. 손잡이에서 30mm 후퇴'): return
             if not self._move_l(*released_target, 90.0, -90.0, 0.0): return
             cx, cy, cz = released_target
 
-            # ── [Vision] 약품 검출 로직 삽입 ──
+            # ── [Vision] 약품 검출 로직 ──
             self.get_logger().info('[Vision] 약품 위치 측정 중...')
             box_pos = self._get_medicine_target()
 
-            if box_pos is not None:
-                bx, by, bz = box_pos
-                # 웹 인터페이스에 약품 좌표 표시 (WAIT/RUN 라벨 활용)
-                coord_str = f"약품 감지 (X:{bx:.1f}, Y:{by:.1f}, Z:{bz:.1f})"
-                self.get_logger().info(coord_str)
-                self._step_info_pub.publish(String(data=f'WAIT:{coord_str}'))
-
-                # MoveC 시작 전 실제 TCP 전체(위치+자세) 기억
-                if not self._wait_tcp():
-                    self.get_logger().error('MoveC 전 TCP 위치 미수신')
+            fallback_used = False
+            if box_pos is None:
+                fallback_box_pos = self._on_missing_medicine(contact, pull_dir)
+                if fallback_box_pos is None:
+                    self.get_logger().error(
+                        '약품 감지 실패 — 시퀀스를 종료합니다. '
+                        '약품이 없으면 다음 단계로 진행하지 않습니다.'
+                    )
+                    self._step_info_pub.publish(String(data='Vision 실패 — 약품 미감지'))
                     return
-                pre_movec_pos = tuple(self._tcp[:6])  # (x, y, z, rx, ry, rz)
-                cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
+                box_pos = fallback_box_pos
+                fallback_used = True
 
-                # 8. MoveC 호 이동
-                if not self._wait_for_step(f'8. MoveC r={radius_mm:.0f} 호 이동'): return
-                end_pos = self._move_c(radius_mm, -1)
-                if end_pos is None:
-                    self._step_info_pub.publish(String(data='MoveC 실패 — 작업 공간 초과 가능'))
-                    return
-                cx, cy, cz = end_pos
+            bx, by, bz = box_pos
+            coord_str = (
+                f"약품 감지(대체)" if fallback_used else "약품 감지"
+            ) + f" (X:{bx:.1f}, Y:{by:.1f}, Z:{bz:.1f})"
+            self.get_logger().info(coord_str)
+            self._step_info_pub.publish(String(data=f'WAIT:{coord_str}'))
 
-                # 8.5 약품 X, Y 위치로 정렬 (현재 높이 유지)
-                # TCP 스윙으로 인한 그리퍼 끝단 Y 오차 수동 보정 (기존 -97mm + 추가 -23mm = -120mm)
-                gripper_x_offset = 0.0
-                gripper_y_offset = -120.0
-                target_x = bx + gripper_x_offset
-                target_y = by + gripper_y_offset
+            # MoveC 시작 전 실제 TCP 전체(위치+자세) 기억
+            if not self._wait_tcp():
+                self.get_logger().error('MoveC 전 TCP 위치 미수신')
+                return
+            pre_movec_pos = tuple(self._tcp[:6])  # (x, y, z, rx, ry, rz)
+            cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
 
-                if not self._wait_for_step(f'8.5 약품 XY 정렬 (X:{target_x:.0f}, Y:{target_y:.0f})'): return
-                # 호 이동이 끝나면 카메라가 아래를 보는 자세(rx=90, ry=-180, rz=0)가 됨. 이 자세 유지.
-                if not self._move_l(target_x, target_y, cz, 90.0, -180.0, 0.0): return
-                cx, cy = target_x, target_y # 이제 현재 위치는 약품 바로 위
+            # 8. MoveC 호 이동
+            if not self._wait_for_step(f'8. MoveC r={radius_mm:.0f} 호 이동'): return
+            end_pos = self._move_c(radius_mm, -1)
+            if end_pos is None:
+                self._step_info_pub.publish(String(data='MoveC 실패 — 작업 공간 초과 가능'))
+                return
+            cx, cy, cz = end_pos
 
-                # 9. Z 하강 (비전 좌표 + 그리퍼 길이 보정 + 수동 보정)
-                # 그리퍼 길이 97mm + 안전거리 5mm 에, 추가로 12mm 더 깊게 하강 (-12mm 보정)
-                gripper_z_offset = 97.0
-                target_z = bz + 5.0 + gripper_z_offset - 12.0
-                if not self._wait_for_step(f'9. Z 하강 (목표 Z={target_z:.1f})'): return
-                if not self._move_l(cx, cy, target_z, 90.0, -180.0, 0.0): return
-                cz = target_z
+            # 8.5 약품 X, Y 위치로 정렬 (현재 높이 유지)
+            # TCP 스윙으로 인한 그리퍼 끝단 Y 오차 수동 보정 (기존 -97mm + 추가 -23mm = -120mm)
+            gripper_x_offset = 0.0
+            gripper_y_offset = -120.0
+            target_x = bx + gripper_x_offset
+            target_y = by + gripper_y_offset
 
-                # 10. 전자석 ON
-                if not self._wait_for_step('10. 전자석 ON'): return
-                if not self._set_magnet(True): return
+            if not self._wait_for_step(f'8.5 약품 XY 정렬 (X:{target_x:.0f}, Y:{target_y:.0f})'): return
+            # 호 이동이 끝나면 카메라가 아래를 보는 자세(rx=90, ry=-180, rz=0)가 됨. 이 자세 유지.
+            if not self._move_l(target_x, target_y, cz, 90.0, -180.0, 0.0): return
+            cx, cy = target_x, target_y # 이제 현재 위치는 약품 바로 위
 
-                # 11. Z +100mm 상승
-                if not self._wait_for_step('11. Z +100mm 상승'): return
-                if not self._move_l(0, 0, 100, relative=True): return
-                cz += 100
+            # 9. Z 하강 (비전 좌표 + 그리퍼 길이 보정 + 수동 보정)
+            # 그리퍼 길이 97mm + 안전거리 5mm 에, 추가로 12mm 더 깊게 하강 (-12mm 보정)
+            gripper_z_offset = 97.0
+            target_z = bz + 5.0 + gripper_z_offset - 12.0
+            if not self._wait_for_step(f'9. Z 하강 (목표 Z={target_z:.1f})'): return
+            if not self._move_l(cx, cy, target_z, 90.0, -180.0, 0.0): return
+            cz = target_z
 
-                # 12. Y+50 Z+50 이동
-                if not self._wait_for_step('12. Y+50 Z+50 이동'): return
-                if not self._move_l(0, 50, 50, relative=True): return
-                cy += 50
-                cz += 50
+            # 10. 전자석 ON
+            if not self._wait_for_step('10. 전자석 ON'): return
+            if not self._set_magnet(True): return
 
-                # 13. MoveJ 카메라 앞 정렬
-                if not self._wait_for_step('13. MoveJ 카메라 앞 정렬'): return
-                if not self._move_j([20.44, 53.45, 49.27, 158.82, 97.28, -25.6]): return
+            # 11. Z +100mm 상승
+            if not self._wait_for_step('11. Z +100mm 상승'): return
+            if not self._move_l(0, 0, 100, relative=True): return
+            cz += 100
 
-                # 13.5. OCR & JSON 파싱
-                if not self._wait_for_step('13.5. OCR & JSON 파싱'): return
-                self._ocr_and_parse()
+            # 12. Y+50 Z+50 이동
+            if not self._wait_for_step('12. Y+50 Z+50 이동'): return
+            if not self._move_l(0, 50, 50, relative=True): return
+            cy += 50
+            cz += 50
 
-                # 14. MoveJ 병동 박스 정렬
-                if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return
-                if not self._move_j([31.04, 48.6, 38.63, 0.0, 92.77, 121.04]): return
+            # 13. MoveJ 카메라 앞 정렬
+            if not self._wait_for_step('13. MoveJ 카메라 앞 정렬'): return
+            if not self._move_j([-1.09, 43.16, 55.92, 3.78, -98.59, -184.22]): return
 
-                # 15. Z -150mm 하강
-                if not self._wait_for_step('15. Z -150mm 하강'): return
-                if not self._move_l(0, 0, -150, relative=True): return
-                cz -= 150
+            # 13.5. OCR & JSON 파싱
+            if not self._wait_for_step('13.5. OCR & JSON 파싱'): return
+            self._ocr_and_parse()
 
-                # 16. 전자석 OFF (배치)
-                if not self._wait_for_step('16. 전자석 OFF'): return
-                if not self._set_magnet(False): return
+            # 14. MoveJ 병동 박스 정렬
+            if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return
+            if not self._move_j([31.04, 48.6, 38.63, 0.0, 92.77, 121.04]): return
 
-                # 17. Z +150mm 상승
-                if not self._wait_for_step('17. Z +150mm 상승'): return
-                if not self._move_l(0, 0, 150, relative=True): return
-                cz += 150
+            # 15. Z -150mm 하강
+            if not self._wait_for_step('15. Z -150mm 하강'): return
+            if not self._move_l(0, 0, -150, relative=True): return
+            cz -= 150
 
-                # 18. MoveC 전 위치로 복귀
-                if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return
-                if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
-                                    pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
-                cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
+            # 16. 전자석 OFF (배치)
+            if not self._wait_for_step('16. 전자석 OFF'): return
+            if not self._set_magnet(False): return
 
-            else:
-                self.get_logger().warn('약품 감지 실패 — 파싱 시퀀스 건너뛰고 서랍 닫기로 이동')
-                self._step_info_pub.publish(String(data='Vision 실패 — 약품 미감지'))
+            # 17. Z +150mm 상승
+            if not self._wait_for_step('17. Z +150mm 상승'): return
+            if not self._move_l(0, 0, 150, relative=True): return
+            cz += 150
+
+            # 18. MoveC 전 위치로 복귀
+            if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return
+            if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
+                                pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
+            cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
 
             # 19. 열린 서랍의 손잡이 위치로 재접근
             if not self._wait_for_step('19. 열린 서랍 손잡이 재접근'): return
@@ -849,10 +984,10 @@ def main(args=None):
 
     # CLI 지원
     if len(sys.argv) > 1 and sys.argv[1].isdigit():
-        marker_id = int(sys.argv[1])
+        drawer_index = int(sys.argv[1])
         radius = float(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_RADIUS
         node._step_mode = '--step' in sys.argv
-        seq_thread = threading.Thread(target=node.run_sequence, args=(marker_id, radius))
+        seq_thread = threading.Thread(target=node.run_sequence, args=(drawer_index, radius))
         seq_thread.start()
 
     try:

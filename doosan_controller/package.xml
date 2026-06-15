@@ -20,6 +20,9 @@
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>action_msgs</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
 
   <!-- Custom interfaces (this repo) -->
   <depend>robot_arm_interfaces</depend>

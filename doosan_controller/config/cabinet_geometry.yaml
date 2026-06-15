@@ -1,0 +1,18 @@
+# Cabinet geometry relative to the ArUco marker, expressed in robot base axes.
+cabinet_geometry:
+  marker_id: 1
+  reference_drawer: 6
+  coordinate_frame: base_link
+  marker_to_reference_handle_mm: [0.0, -75.0, 205.0]
+  pull_direction_base: [0.0, 1.0, 0.0]
+  column_pitch_mm: 227.0
+  row_pitch_mm: 112.0
+  approach_mm: 30.0
+  pull_mm: 200.0
+  gripper_length_mm: 97.0
+
+  # Add repeated measurements here. The calibrator will replace the reference
+  # offset above with the sample mean and report axis standard deviations.
+  samples: []
+  sample_mean_mm: [0.0, -75.0, 205.0]
+  sample_stddev_mm: [0.0, 0.0, 0.0]

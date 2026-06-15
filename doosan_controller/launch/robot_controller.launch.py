@@ -12,10 +12,14 @@ Usage (virtual / emulator):
   ros2 launch doosan_controller robot_controller.launch.py mode:=virtual
 """
 
+import fcntl
+import os
+
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    OpaqueFunction,
     TimerAction,
 )
 from launch.conditions import IfCondition
@@ -23,6 +27,30 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
+
+_launch_lock_fd = None
+
+
+def _acquire_launch_lock(_context):
+    """Prevent two full stacks from controlling the same robot namespace."""
+    global _launch_lock_fd
+
+    lock_path = '/tmp/rotosy_robot_controller.lock'
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        os.close(fd)
+        raise RuntimeError(
+            'robot_controller.launch.py is already running. '
+            'Stop the existing launch before starting another one.'
+        ) from exc
+
+    os.ftruncate(fd, 0)
+    os.write(fd, str(os.getpid()).encode('ascii'))
+    _launch_lock_fd = fd
+    return []
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -84,8 +112,6 @@ def generate_launch_description() -> LaunchDescription:
 
     # ── arm_controller node ──────────────────────────────────────────────────
     # Delayed 3 s to give dsr_bringup2 time to register its services.
-    # /arm/move_l is remapped to /arm/move_l_real so that hybrid_ik_node can
-    # intercept /arm/move_l and forward to /arm/move_l_real after CCD IK.
     arm_controller = TimerAction(
         period=3.0,
         actions=[
@@ -100,24 +126,6 @@ def generate_launch_description() -> LaunchDescription:
                     'motion_timeout':  LaunchConfiguration('motion_timeout'),
                     'servo_on_retries': 3,
                 }],
-                remappings = [('/arm/move_l', '/arm/move_l_real')],
-            )
-        ],
-    )
-
-    # ── hybrid_ik node ───────────────────────────────────────────────────────
-    # Delayed 4 s — needs arm_controller's /arm/move_j and /arm/move_l_real.
-    # Provides /arm/move_l (public); uses DSR ikin service for full 6-DOF IK
-    # (position + orientation) so the wrist is already aligned before final MoveL.
-    hybrid_ik = TimerAction(
-        period=4.0,
-        actions=[
-            Node(
-                package    = 'doosan_controller',
-                executable = 'hybrid_ik',
-                name       = 'hybrid_ik_node',
-                output     = 'screen',
-                parameters = [{'robot_ns': LaunchConfiguration('name')}],
             )
         ],
     )
@@ -151,8 +159,8 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # ── motion_sequence_node ─────────────────────────────────────────────────
-    # Delayed 6 s — needs arm_controller services to be available.
-    # Bypasses hybrid_ik_node by remapping /arm/move_l directly to /arm/move_l_real.
+    # Legacy motion topic namespace (/motion/*). Kept alongside temp_sequence
+    # so the old flow remains available.
     motion_sequence = TimerAction(
         period=6.0,
         actions=[
@@ -161,23 +169,34 @@ def generate_launch_description() -> LaunchDescription:
                 executable = 'motion_sequence',
                 name       = 'motion_sequence_node',
                 output     = 'screen',
-                remappings = [('/arm/move_l', '/arm/move_l_real')],
             )
         ],
     )
 
     # ── temp_sequence_node ───────────────────────────────────────────────────
     # Delayed 6 s — needs arm_controller services to be available.
-    # temp_sequence = TimerAction(
-    #     period=6.0,
-    #     actions=[
-    #         Node(
-    #             package    = 'doosan_controller',
-    #             executable = 'temp_sequence',
-    #             name       = 'temp_sequence_node',
-    #             output     = 'screen',
-    #         )
-    #     ],
-    # )
+    # Uses the latest drawer-motion logic, but keeps /temp_motion/* separate
+    # from the /motion/* namespace used by the legacy node.
+    temp_sequence = TimerAction(
+        period=6.0,
+        actions=[
+            Node(
+                package    = 'doosan_controller',
+                executable = 'temp_sequence',
+                name       = 'temp_sequence_node',
+                output     = 'screen',
+            )
+        ],
+    )
 
-    return LaunchDescription(args + [dsr_bringup, arm_controller, hybrid_ik, tcp_monitor, web_server, motion_sequence])
+    return LaunchDescription(
+        args + [
+            OpaqueFunction(function=_acquire_launch_lock),
+            dsr_bringup,
+            arm_controller,
+            tcp_monitor,
+            web_server,
+            motion_sequence,
+            temp_sequence,
+        ]
+    )

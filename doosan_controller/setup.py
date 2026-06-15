@@ -33,6 +33,7 @@ setup(
             'temp_sequence   = doosan_controller.temp_sequence:main',
             'tcp_monitor     = doosan_controller.tcp_monitor:main',
             'hybrid_ik       = doosan_controller.hybrid_ik_node:main',
+            'cabinet_geometry_calibrator = doosan_controller.cabinet_geometry_calibrator:main',
         ],
     },
 )

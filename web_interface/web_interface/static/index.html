@@ -619,7 +619,7 @@
     <div class="card-title">Motion Sequence Control</div>
     <div style="display:flex; gap:1.5rem; align-items:center;">
       <div style="display:flex; align-items:center; gap:0.5rem;">
-        <span class="status-label">Marker ID</span>
+        <span class="status-label">Drawer Index (0~5)</span>
         <input type="number" id="seq-marker-id" min="0" max="5"
           style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
       </div>
@@ -642,7 +642,7 @@
     <div class="card-title">Temp Sequence Control</div>
     <div style="display:flex; gap:1.5rem; align-items:center;">
       <div style="display:flex; align-items:center; gap:0.5rem;">
-        <span class="status-label">Marker ID</span>
+        <span class="status-label">Drawer Index (0~5)</span>
         <input type="number" id="tmp-marker-id" min="0" max="5"
           style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
       </div>
@@ -1293,11 +1293,11 @@
   async function startMotionSeq() {
     const markerId = parseInt(document.getElementById('seq-marker-id').value);
     const feedback = document.getElementById('control-feedback');
-    if (!Number.isInteger(markerId)) {
-      showAlert('마커 ID를 입력하세요.');
+    if (!Number.isInteger(markerId) || markerId < 0 || markerId > 5) {
+      showAlert('서랍 인덱스(0~5)를 입력하세요.');
       return;
     }
-    feedback.textContent = `시퀀스 시작 명령 전송 (마커 ${markerId})...`;
+    feedback.textContent = `시퀀스 시작 명령 전송 (서랍 ${markerId + 1}, index ${markerId})...`;
     try {
       const resp = await fetch('/api/motion/start', {
         method: 'POST',
