@@ -1,13 +1,26 @@
-"""Vision AI & 카메라 스트림 API."""
+"""Vision AI & 카메라 스트림 API.
 
+카메라/YOLO 는 web_interface(RoToSY, :8000) 가 단독 소유한다.
+여기서는 그쪽 출력을 그대로 프록시해서 병원 웹(:8080)에 노출만 한다.
+(robot_proxy 와 동일한 패턴 — hospital_web 은 RealSense 를 직접 열지 않는다.)
+"""
+
+import asyncio
+import datetime
+
+import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-import time
 
 from .. import drawer_metadata
+from .. import robot_proxy
 
 router = APIRouter(prefix='/api/vision', tags=['vision'])
 
+_ROTOSY_BASE = robot_proxy.ROTOSY_BASE   # 'http://localhost:8000'
+
+
+# ── DB 기반 서랍 정보 (카메라 무관) ───────────────────────────────────────────
 
 @router.get('/drawers')
 async def get_drawers():
@@ -36,70 +49,87 @@ async def get_by_aruco(aruco_id: int):
     return info
 
 
-# ── 카메라 스트림 (MJPEG, 현재는 플레이스홀더) ──────────────────────────────
+# ── 카메라 스트림 (web_interface MJPEG relay) ─────────────────────────────────
 
-_mock_frame_counter = 0
-
-
-def _generate_placeholder_mjpeg():
-    """카메라 연결 전까지 플레이스홀더 JPEG 생성."""
-    global _mock_frame_counter
+async def _placeholder_mjpeg():
+    """web_interface(:8000) 연결 불가 시 보여줄 대기 화면 (YOLO 박스 영상 대체)."""
     import io
     from PIL import Image, ImageDraw
 
+    n = 0
     while True:
-        _mock_frame_counter += 1
+        n += 1
         img = Image.new('RGB', (640, 480), color=(200, 200, 200))
         draw = ImageDraw.Draw(img)
-
-        # 카메라 없음 표시
         draw.text((150, 200), 'RealSense D455', fill=(100, 100, 100), font=None)
-        draw.text((140, 240), '카메라 연결 대기 중...', fill=(150, 150, 150), font=None)
-        draw.text((200, 400), f'Frame: {_mock_frame_counter}', fill=(100, 100, 100), font=None)
+        draw.text((110, 240), 'web_interface(:8000) 대기 중...', fill=(150, 150, 150), font=None)
+        draw.text((220, 400), f'Frame: {n}', fill=(100, 100, 100), font=None)
 
-        # JPEG로 인코딩
         buf = io.BytesIO()
         img.save(buf, format='JPEG', quality=80)
-        buf.seek(0)
-        jpeg_data = buf.getvalue()
-
-        # MJPEG 경계선
-        header = f'--frame\r\nContent-Type: image/jpeg\r\nContent-length: {len(jpeg_data)}\r\n\r\n'.encode()
-        yield header + jpeg_data + b'\r\n'
-        time.sleep(0.03)  # ~30 FPS
+        jpeg = buf.getvalue()
+        yield (
+            b'--frame\r\nContent-Type: image/jpeg\r\n'
+            b'Content-Length: ' + str(len(jpeg)).encode() + b'\r\n\r\n'
+            + jpeg + b'\r\n'
+        )
+        await asyncio.sleep(0.1)
 
 
 @router.get('/stream')
 async def camera_stream():
-    """MJPEG 카메라 스트림 (현재는 placeholder)."""
+    """web_interface 의 /camera/stream 을 그대로 중계. 끊기면 placeholder 로 fallback.
+
+    web_interface 가 내보내는 프레임에는 이미 YOLO 검출 박스가 그려져 있으므로,
+    이 스트림 하나로 '카메라 영상 + 약품 인식 결과'가 같이 보인다.
+    """
+    async def relay():
+        try:
+            async with httpx.AsyncClient(timeout=None) as cli:
+                async with cli.stream('GET', f'{_ROTOSY_BASE}/camera/stream') as up:
+                    if up.status_code != 200:
+                        async for chunk in _placeholder_mjpeg():
+                            yield chunk
+                        return
+                    async for chunk in up.aiter_bytes():
+                        yield chunk
+        except Exception:
+            # web_interface 미기동/끊김 → 대기 화면으로 폴백
+            async for chunk in _placeholder_mjpeg():
+                yield chunk
+
     return StreamingResponse(
-        _generate_placeholder_mjpeg(),
-        media_type='multipart/x-mixed-replace; boundary=frame'
+        relay(),
+        media_type='multipart/x-mixed-replace; boundary=frame',
     )
 
 
-# ── Vision AI 결과 (현재는 mock) ──────────────────────────────────────────
-
-_mock_detections = {
-    'drawer_001': {'confidence': 0.95, 'aruco': 0, 'detected_at': None},
-    'drawer_002': {'confidence': 0.88, 'aruco': 1, 'detected_at': None},
-    'drawer_003': {'confidence': 0.92, 'aruco': 2, 'detected_at': None},
-}
-
+# ── YOLO 약품 검출 결과 (web_interface /camera/detections proxy) ──────────────
 
 @router.get('/detections')
 async def get_detections():
-    """최근 Vision AI 객체 인식 결과 (ArUco 마커)."""
-    return {
-        'timestamp': __import__('datetime').datetime.now().isoformat(),
-        'detections': _mock_detections,
-        'status': 'OFFLINE',  # 카메라 연결 후 ONLINE으로 변경
-    }
+    """web_interface 의 실제 YOLO 검출 결과를 프록시.
 
-
-@router.post('/detections/update')
-async def update_detections(data: dict):
-    """외부 Vision 노드에서 결과 푸시."""
-    global _mock_detections
-    _mock_detections.update(data.get('detections', {}))
-    return {'success': True, 'count': len(_mock_detections)}
+    반환 detections 는 리스트:
+      [{class_name, confidence, bbox, depth_m, camera_position_m, base_position_m, ...}]
+    """
+    try:
+        async with httpx.AsyncClient(base_url=_ROTOSY_BASE,
+                                     timeout=httpx.Timeout(3.0)) as cli:
+            r = await cli.get('/camera/detections')
+            data = r.json()
+        return {
+            'timestamp':    datetime.datetime.now().isoformat(),
+            'detections':   data.get('detections', []),
+            'model_loaded': bool(data.get('model_loaded')),
+            'status':       'ONLINE' if data.get('model_loaded') else 'OFFLINE',
+            'error':        data.get('error'),
+        }
+    except Exception as exc:
+        return {
+            'timestamp':    datetime.datetime.now().isoformat(),
+            'detections':   [],
+            'model_loaded': False,
+            'status':       'OFFLINE',
+            'error':        f'web_interface(:8000) 연결 불가: {exc}',
+        }

@@ -398,7 +398,7 @@ body{
 
       <!-- Vision AI 결과 -->
       <div class="card" style="flex:0 0 auto;">
-        <div class="card-title">Vision AI — ArUco 마커 인식</div>
+        <div class="card-title">Vision AI — YOLO 약품/수액 인식</div>
         <div id="vision-results" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.75rem;font-size:.85rem;">
           <div style="text-align:center;color:var(--muted);padding:1rem;">
             카메라 연결 대기 중...
@@ -1814,24 +1814,45 @@ function updateVisionResults() {
   fetch('/api/vision/detections')
     .then(r => r.json())
     .then(data => {
+      // 스트림/모델 상태 표시
+      const ss = el('stream-status');
+      if (ss) {
+        if (data.status === 'ONLINE') {
+          ss.textContent = 'LIVE (web_interface :8000)';
+          ss.style.color = 'var(--green)';
+        } else {
+          ss.textContent = data.error ? '오프라인 — web_interface(:8000) 대기 중' : '대기 중';
+          ss.style.color = 'var(--muted)';
+        }
+      }
+
       const container = el('vision-results');
-      const detections = data.detections || {};
-      if (Object.keys(detections).length === 0) {
-        container.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:1rem;">감지 결과 없음</div>';
+      const dets = Array.isArray(data.detections) ? data.detections : [];
+      if (dets.length === 0) {
+        container.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:1rem;">감지된 객체 없음</div>';
         return;
       }
       container.innerHTML = '';
-      Object.entries(detections).forEach(([drawer_id, info]) => {
+      dets.forEach(d => {
+        const cls = String(d.class_name || '').toLowerCase();
+        const isMed = cls === 'medicine';
+        const label = isMed ? '약품' : (cls === 'water_pack' ? '수액팩' : (d.class_name || '객체'));
+        const labelColor = isMed ? 'var(--yellow)' : 'var(--green)';
+        const conf = ((d.confidence || 0) * 100).toFixed(0);
+        const conf_color = d.confidence > 0.7 ? 'var(--green)' : d.confidence > 0.4 ? 'var(--yellow)' : 'var(--red)';
+        const base = d.base_position_m;
+        const pos = Array.isArray(base) && base.length >= 3
+          ? `(${base.map(v => Number(v).toFixed(2)).join(', ')}) m`
+          : '좌표 없음';
         const el_item = document.createElement('div');
         el_item.style.cssText = `
           background:var(--surf2);border:1px solid var(--border);border-radius:.45rem;
           padding:.6rem;text-align:center;
         `;
-        const confidence = (info.confidence * 100).toFixed(0);
-        const conf_color = info.confidence > 0.9 ? 'var(--green)' : info.confidence > 0.7 ? 'var(--yellow)' : 'var(--red)';
         el_item.innerHTML = `
-          <div style="font-weight:600;font-size:.8rem;color:var(--blue);">ArUco #${info.aruco}</div>
-          <div style="font-size:.75rem;color:${conf_color};margin-top:.25rem;font-weight:700;">${confidence}%</div>
+          <div style="font-weight:700;font-size:.85rem;color:${labelColor};">${label}</div>
+          <div style="font-size:.78rem;color:${conf_color};margin-top:.2rem;font-weight:700;">${conf}%</div>
+          <div style="font-size:.68rem;color:var(--muted);margin-top:.2rem;">${pos}</div>
         `;
         container.appendChild(el_item);
       });
@@ -1839,7 +1860,15 @@ function updateVisionResults() {
     .catch(e => console.log('vision error:', e));
 }
 
+// 카메라 MJPEG 스트림 시작 (web_interface :8000 프록시). 끊기면 백엔드가 대기화면 폴백.
+function initCameraStream() {
+  const img = el('camera-frame');
+  if (!img) return;
+  img.src = '/api/vision/stream?t=' + Date.now();
+}
+
 renderDrawerMap();
+initCameraStream();
 setInterval(updateVisionResults, 2000);
 
 // ════════════════════════════════════════════════════════════════════════════════
