@@ -23,11 +23,10 @@ from .db_schema import init_schema, get_conn
 
 WARDS = [
     # 좌표: mobile_simulation 맵 기준 (단위 m, theta는 rad)
-    #   Wing A: y > 0,  Wing B: y < 0
-    {'name': '1병동', 'goal_x': 1.7, 'goal_y':  3.2, 'goal_theta': 0},  # Wing A 좌측
-    {'name': '2병동', 'goal_x': 4.4, 'goal_y':  3.2, 'goal_theta': 0},  # Wing A 우측
-    {'name': '3병동', 'goal_x': 1.7, 'goal_y': -3.2, 'goal_theta': 0},  # Wing B 좌측
-    {'name': '5병동', 'goal_x': 4.4, 'goal_y': -3.2, 'goal_theta': 0},  # Wing B 우측
+    #   admin/test 프리셋과 일치하는 검증된 좌표. 시뮬에선 병동 A/B 2개만 사용.
+    {'name': '병동A',  'goal_x':  4.20, 'goal_y':  2.72, 'goal_theta':  1.5708},  # Wing A (y>0)
+    {'name': '병동B',  'goal_x':  4.20, 'goal_y': -2.72, 'goal_theta': -1.5708},  # Wing B (y<0)
+    {'name': '약재실', 'goal_x': -4.30, 'goal_y':  2.05, 'goal_theta': -1.5708},  # 홈/복귀 지점
 ]
 
 STAFF = [
@@ -38,10 +37,10 @@ STAFF = [
 ]
 
 PATIENTS = [
-    {'name': '홍길동', 'chart_no': 'PT-2026-0042', 'ward': '3병동'},
-    {'name': '이영희', 'chart_no': 'PT-2026-0039', 'ward': '5병동'},
-    {'name': '최성호', 'chart_no': 'PT-2026-0051', 'ward': '2병동'},
-    {'name': '김민서', 'chart_no': 'PT-2026-0033', 'ward': '1병동'},
+    {'name': '홍길동', 'chart_no': 'PT-2026-0042', 'ward': '병동B'},
+    {'name': '이영희', 'chart_no': 'PT-2026-0039', 'ward': '병동B'},
+    {'name': '최성호', 'chart_no': 'PT-2026-0051', 'ward': '병동A'},
+    {'name': '김민서', 'chart_no': 'PT-2026-0033', 'ward': '병동A'},
 ]
 
 MEDICINES = [
@@ -291,7 +290,8 @@ def reset() -> None:
     """모든 도메인 row 삭제 후 재시딩. sensor_db 테이블은 건드리지 않음."""
     init_schema()
     with get_conn() as c:
-        for t in ('audit_log', 'mission',
+        # FK 순서 주의: ocr_scan/audit_log(자식)을 mission·prescription(부모)보다 먼저 삭제
+        for t in ('ocr_scan', 'audit_log', 'mission',
                   'prescription_item', 'prescription',
                   'cabinet_slot', 'cabinet',
                   'patient', 'staff', 'ward', 'medicine'):

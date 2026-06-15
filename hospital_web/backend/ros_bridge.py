@@ -115,12 +115,23 @@ def shutdown() -> None:
 # ── AMR / Door commands ───────────────────────────────────────────────────────
 
 async def dispatch(destination: str = '') -> dict:
+    """미션 목적지(병동) goal 좌표로 AMR을 출발시킨다.
+
+    (과거엔 /amr/dispatch Trigger 서비스를 호출했으나 제공 노드가 없어 동작하지
+     않았다. ward 테이블에서 목적지 좌표를 읽어 검증된 navigate_to 액션으로 이동.)
+    destination 은 ward.name (예: '병동A', '병동B').
+    """
+    goal = _lookup_ward_goal(destination)
     if not _ros_available or _node is None:
         with _lock:
             _state['amr']['status']      = 'DELIVERING'
             _state['amr']['destination'] = destination
-        return {'success': True, 'message': '[mock] AMR dispatched'}
-    return await _node.call_trigger('/amr/dispatch')
+        return {'success': True, 'message': f'[mock] AMR dispatched → {destination}'}
+    if goal is None:
+        return {'success': False,
+                'message': f"ward 테이블에 '{destination}' 좌표가 없음 — 목적지 확인 필요"}
+    x, y, theta = goal
+    return await _node.navigate_to(x, y, theta, destination)
 
 
 async def goto(x: float, y: float, theta: float = 0.0, label: str = '') -> dict:
@@ -143,19 +154,54 @@ async def stop() -> dict:
 
 
 async def cancel_mission() -> dict:
+    """진행 중인 배송 미션 취소 = 현재 Nav2 이동을 취소(정지)한다.
+
+    (과거엔 없던 /amr/cancel Trigger 서비스를 호출해 동작하지 않았다. stop 과 동일한
+     검증된 navigate_cancel 경로로 교체. 미션 DB 취소는 라우터의
+     ms.cancel_current_mission 이 별도 처리.)
+    """
     if not _ros_available or _node is None:
         with _lock:
-            _state['amr']['status'] = 'RETURNING'
+            _state['amr']['status'] = 'IDLE'
         return {'success': True, 'message': '[mock] AMR mission cancelled'}
-    return await _node.call_trigger('/amr/cancel')
+    return await _node.navigate_cancel()
+
+
+PHARMACY_WARD_NAME = '약재실'
+
+
+def _lookup_ward_goal(name: str):
+    """ward 테이블에서 name의 goal 좌표를 (x, y, theta)로 반환. 없으면 None."""
+    try:
+        from .db_schema import get_conn
+        with get_conn() as c:
+            row = c.execute(
+                'SELECT goal_x, goal_y, goal_theta FROM ward WHERE name=?', (name,)
+            ).fetchone()
+        if row and row['goal_x'] is not None and row['goal_y'] is not None:
+            return float(row['goal_x']), float(row['goal_y']), float(row['goal_theta'] or 0.0)
+    except Exception as e:
+        print(f'[ros_bridge] ward goal lookup failed ({name}): {e}')
+    return None
 
 
 async def return_to_base() -> dict:
+    """AMR을 약재실(홈)으로 복귀. ward 테이블의 '약재실' goal 좌표를 Nav2로 전송한다.
+
+    (과거엔 /amr/return_to_base Trigger 서비스를 호출했으나 그 서비스를 제공하는
+     노드가 없어 동작하지 않았다. 검증된 navigate_to 액션 경로로 교체.)
+    """
+    goal = _lookup_ward_goal(PHARMACY_WARD_NAME)
     if not _ros_available or _node is None:
         with _lock:
-            _state['amr']['status'] = 'RETURNING'
-        return {'success': True, 'message': '[mock] AMR returning'}
-    return await _node.call_trigger('/amr/return_to_base')
+            _state['amr']['status']      = 'RETURNING'
+            _state['amr']['destination'] = PHARMACY_WARD_NAME
+        return {'success': True, 'message': '[mock] AMR returning (약재실)'}
+    if goal is None:
+        return {'success': False,
+                'message': "ward 테이블에 '약재실' 좌표가 없음 — demo_create 재시딩 필요"}
+    x, y, theta = goal
+    return await _node.navigate_to(x, y, theta, '약재실(복귀)')
 
 
 async def door_open() -> dict:
@@ -222,6 +268,14 @@ class _AMRBridgeNode:
         except Exception:
             pass
 
+        # /odom 은 diff_drive가 정지 상태에서도 계속 발행 → "AMR 살아있음" 신호로 사용
+        # (amr_controller ONLINE 판정용. pose는 /amcl_pose가 담당.)
+        try:
+            from nav_msgs.msg import Odometry
+            self.node.create_subscription(Odometry, '/odom', self._odom_cb, 10)
+        except Exception:
+            pass
+
         # Nav2 위치추정 결과(/amcl_pose)로 로봇 실시간 위치를 받는다.
         try:
             from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -281,14 +335,25 @@ class _AMRBridgeNode:
     def _nav_result_cb(self, future) -> None:
         from action_msgs.msg import GoalStatus
         status = future.result().status
+        arrived = False
         with _lock:
             if status == GoalStatus.STATUS_SUCCEEDED:
                 _state['amr']['status'] = 'ARRIVED'
+                arrived = True
             elif status == GoalStatus.STATUS_CANCELED:
                 _state['amr']['status'] = 'IDLE'
             else:
                 _state['amr']['status'] = 'ERROR'
             _state['amr']['last_seen'] = datetime.now().isoformat()
+
+        # 배송 미션 중 도착 → 미션 상태를 ARRIVED로 진행 (파이프라인 '도착/수령' 단계로)
+        if arrived:
+            try:
+                from . import mission_state as ms
+                if ms.get_mission().get('status') == 'DISPATCHED':
+                    ms.update_status('ARRIVED', actor='amr', detail='AMR 목적지 도착')
+            except Exception as e:
+                print(f'[ros_bridge] mission ARRIVED 갱신 실패: {e}')
 
     async def navigate_cancel(self) -> dict:
         import asyncio
@@ -313,6 +378,17 @@ class _AMRBridgeNode:
             }
             _state['amr']['online']    = True
             _state['amr']['last_seen'] = datetime.now().isoformat()
+        # AMCL이 pose를 publish한다 = 시뮬+위치추정 동작 중 → amr_controller ONLINE 처리
+        update_node_seen('amr_controller')
+
+    def _odom_cb(self, msg) -> None:
+        # /odom 은 30Hz로 들어옴 → 1초에 한 번만 갱신 (amr_controller 살아있음 표시)
+        import time as _t
+        now = _t.monotonic()
+        if now - getattr(self, '_odom_last_t', 0.0) < 1.0:
+            return
+        self._odom_last_t = now
+        update_node_seen('amr_controller')
 
     def _amr_status_cb(self, msg) -> None:
         with _lock:

@@ -406,6 +406,17 @@ body{
         </div>
       </div>
 
+      <!-- 로봇 약품 검수 (실시간 OCR) -->
+      <div class="card" style="flex:0 0 auto;">
+        <div class="card-title">로봇 약품 검수 (실시간 OCR)</div>
+        <div id="robot-scan-summary" style="font-size:.85rem;color:var(--muted);margin-bottom:.6rem;">대기 중...</div>
+        <div id="robot-scan-list" style="display:flex;flex-direction:column;gap:.4rem;"></div>
+        <div id="robot-pending-wrap" style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--border);display:none;">
+          <div style="font-size:.75rem;color:var(--muted);margin-bottom:.4rem;">미검증 품목</div>
+          <div id="robot-pending-list" style="display:flex;flex-wrap:wrap;gap:.4rem;"></div>
+        </div>
+      </div>
+
       <!-- 약품 서랍(카비닛) 위치 맵 -->
       <div class="card" style="flex:0 0 auto;">
         <div class="card-title">약품 서랍 위치 맵 (2열 × 3행)</div>
@@ -425,9 +436,8 @@ body{
         <div class="pip-step" id="pip-1"><div class="pip-dot">2</div><div class="pip-label">로봇<br>집기</div></div>
         <div class="pip-step" id="pip-2"><div class="pip-dot">3</div><div class="pip-label">OCR<br>검증</div></div>
         <div class="pip-step" id="pip-3"><div class="pip-dot">4</div><div class="pip-label">적재<br>확인</div></div>
-        <div class="pip-step" id="pip-4"><div class="pip-dot">5</div><div class="pip-label">AMR<br>출발</div></div>
-        <div class="pip-step" id="pip-5"><div class="pip-dot">6</div><div class="pip-label">이동 중</div></div>
-        <div class="pip-step" id="pip-6"><div class="pip-dot">7</div><div class="pip-label">도착/<br>수령</div></div>
+        <div class="pip-step" id="pip-4"><div class="pip-dot">5</div><div class="pip-label">이동 중</div></div>
+        <div class="pip-step" id="pip-5"><div class="pip-dot">6</div><div class="pip-label">도착/<br>수령</div></div>
       </div>
 
       <div class="grid-2">
@@ -1156,10 +1166,10 @@ const MISSION_PIPELINE = {
   'IDLE':            -1,
   'AWAITING_CONFIRM': 3,
   'CONFIRMED':        3,
-  'DISPATCHED':       4,
-  'DELIVERING':       5,
-  'ARRIVED':          6,
-  'COMPLETED':        6,
+  'DISPATCHED':       4,   // 이동 중
+  'DELIVERING':       4,   // 이동 중
+  'ARRIVED':          5,   // 도착/수령
+  'COMPLETED':        5,
 };
 
 function applyMission(m) {
@@ -1191,7 +1201,7 @@ function applyMission(m) {
 
   // Pipeline steps
   const activeStep = MISSION_PIPELINE[m.status] ?? -1;
-  for (let i = 0; i <= 6; i++) {
+  for (let i = 0; i <= 5; i++) {
     const pip = el('pip-' + i);
     if (!pip) continue;
     pip.className = 'pip-step';
@@ -1199,7 +1209,7 @@ function applyMission(m) {
     else if (i === activeStep) pip.classList.add('active');
   }
   if (m.status === 'COMPLETED') {
-    for (let i = 0; i <= 6; i++) {
+    for (let i = 0; i <= 5; i++) {
       const pip = el('pip-' + i);
       if (pip) { pip.className = 'pip-step done'; }
     }
@@ -1870,6 +1880,45 @@ function initCameraStream() {
 renderDrawerMap();
 initCameraStream();
 setInterval(updateVisionResults, 2000);
+
+// ── 로봇 약품 검수 (실시간 OCR, /api/ocr/current) ──────────────────────────────
+async function updateRobotScans() {
+  try {
+    const r = await fetch('/api/ocr/current');
+    const d = await r.json();
+    const summary = el('robot-scan-summary');
+    if (!summary) return;
+    const list = el('robot-scan-list'), pendWrap = el('robot-pending-wrap'), pendList = el('robot-pending-list');
+    const scans = d.scans || [], pending = d.pending || [];
+    if (!d.mission_code) {
+      summary.textContent = '진행 중인 미션 없음';
+      summary.style.color = 'var(--muted)';
+      list.innerHTML = ''; pendWrap.style.display = 'none'; return;
+    }
+    const matched = scans.filter(s => s.match_status === 'MATCHED').length;
+    const mism    = scans.filter(s => s.match_status === 'MISMATCH').length;
+    summary.innerHTML = `미션 ${d.mission_code} · 검수 ${scans.length}건 (일치 ${matched} / 불일치 ${mism}) · 미검증 ${d.pending_count}`;
+    summary.style.color = d.all_matched ? 'var(--green)' : 'var(--muted)';
+    list.innerHTML = scans.length ? scans.map(s => {
+      const ok = s.match_status === 'MATCHED', ng = s.match_status === 'MISMATCH';
+      const color = ok ? 'var(--green)' : ng ? 'var(--red)' : 'var(--muted)';
+      const badge = ok ? '일치' : ng ? '불일치' : '확인필요';
+      const t = (s.scanned_at || '').replace('T', ' ').slice(5, 16);
+      return `<div style="display:flex;align-items:center;gap:.5rem;background:var(--surf2);border:1px solid var(--border);border-left:3px solid ${color};border-radius:.4rem;padding:.5rem .7rem;font-size:.85rem;">
+          <span style="font-weight:700;flex:1;">${s.medicine_name || '(이름없음)'}</span>
+          <span style="color:${color};font-weight:700;">${badge}</span>
+          <span style="color:var(--muted);font-family:var(--mono);font-size:.75rem;">${t}</span>
+        </div>` +
+        (ng && s.mismatch_reason ? `<div style="font-size:.75rem;color:var(--red);padding:0 .7rem;">└ ${s.mismatch_reason}</div>` : '');
+    }).join('') : '<div style="color:var(--muted);font-size:.85rem;">아직 스캔된 약품 없음</div>';
+    pendWrap.style.display = pending.length ? '' : 'none';
+    pendList.innerHTML = pending.map(p =>
+      `<span style="background:var(--surf2);border:1px solid var(--border);border-radius:.35rem;padding:.25rem .6rem;font-size:.78rem;">${p.medicine_name}${p.quantity ? ` ×${p.quantity}` : ''}</span>`
+    ).join('');
+  } catch (e) { console.log('robot scan error:', e); }
+}
+updateRobotScans();
+setInterval(updateRobotScans, 2000);
 
 // ════════════════════════════════════════════════════════════════════════════════
 // Sensor (온습도)
