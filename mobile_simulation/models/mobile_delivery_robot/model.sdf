@@ -837,7 +837,56 @@
       <update_rate>30</update_rate>
       <joint_name>wheel_left_joint</joint_name>
       <joint_name>wheel_right_joint</joint_name>
-    </plugin>    
+    </plugin>
+
+    <!-- ════════ 약품 캐비넷 뚜껑 (경첩식 ON/OFF) ════════ -->
+    <!-- 트레이 뒤쪽 모서리(x=-0.255)에 경첩, 앞쪽이 위로 열림. -->
+    <link name="cabinet_lid_link">
+      <pose>-0.255 0 0.300 0 0 0</pose>
+      <gravity>0</gravity>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>0.0005</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0005</iyy><iyz>0</iyz><izz>0.0005</izz>
+        </inertia>
+      </inertial>
+      <visual name="lid_visual">
+        <pose>0.200 0 0 0 0 0</pose>
+        <geometry><box><size>0.40 0.33 0.018</size></box></geometry>
+        <material>
+          <ambient>0.85 0.88 0.92 1</ambient>
+          <diffuse>0.85 0.88 0.92 1</diffuse>
+        </material>
+      </visual>
+      <visual name="lid_handle_visual">
+        <pose>0.380 0 0.020 0 0 0</pose>
+        <geometry><box><size>0.05 0.10 0.022</size></box></geometry>
+        <material>
+          <ambient>0.10 0.30 0.78 1</ambient>
+          <diffuse>0.10 0.30 0.78 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- 경첩: +각도 = 앞쪽 들림(열림), 0 = 닫힘. axis (0 -1 0) -->
+    <joint name="cabinet_lid_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>cabinet_lid_link</child>
+      <axis>
+        <xyz>0 -1 0</xyz>
+        <limit><lower>0.0</lower><upper>1.6</upper></limit>
+        <dynamics><damping>0.5</damping></dynamics>
+      </axis>
+    </joint>
+
+    <!-- 뚜껑 조인트 위치 제어: /cabinet/set_joint_trajectory 로 열림/닫힘 명령 -->
+    <plugin name="cabinet_lid_control" filename="libgazebo_ros_joint_pose_trajectory.so">
+      <ros>
+        <namespace>/cabinet</namespace>
+      </ros>
+      <update_rate>20</update_rate>
+    </plugin>
 
   </model>
 </sdf>

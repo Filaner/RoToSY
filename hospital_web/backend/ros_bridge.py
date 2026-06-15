@@ -205,19 +205,21 @@ async def return_to_base() -> dict:
 
 
 async def door_open() -> dict:
+    """적재함 뚜껑 열기. (과거 /door/open Trigger 서비스 → 실제 뚜껑 조인트 제어로 교체)"""
     if not _ros_available or _node is None:
         with _lock:
             _state['door']['status'] = 'OPEN'
-        return {'success': True, 'message': '[mock] Door opened'}
-    return await _node.call_trigger('/door/open')
+        return {'success': True, 'message': '[mock] 적재함 뚜껑 열림'}
+    return _node.set_lid(True)
 
 
 async def door_close() -> dict:
+    """적재함 뚜껑 닫기."""
     if not _ros_available or _node is None:
         with _lock:
             _state['door']['status'] = 'CLOSED'
-        return {'success': True, 'message': '[mock] Door closed'}
-    return await _node.call_trigger('/door/close')
+        return {'success': True, 'message': '[mock] 적재함 뚜껑 닫힘'}
+    return _node.set_lid(False)
 
 
 # ── Node health helper ────────────────────────────────────────────────────────
@@ -289,6 +291,14 @@ class _AMRBridgeNode:
         from rclpy.action import ActionClient
         self._nav_client = ActionClient(self.node, NavigateToPose, 'navigate_to_pose')
         self._nav_goal_handle = None
+
+        # 적재함 뚜껑(cabinet_lid_joint) 제어 퍼블리셔 — gazebo joint_pose_trajectory 플러그인으로 전송
+        try:
+            from trajectory_msgs.msg import JointTrajectory
+            self._lid_pub = self.node.create_publisher(
+                JointTrajectory, '/cabinet/set_joint_trajectory', 10)
+        except Exception:
+            self._lid_pub = None
 
         self.node.get_logger().info('AMR bridge node started')
 
@@ -365,6 +375,25 @@ class _AMRBridgeNode:
         with _lock:
             _state['amr']['status'] = 'IDLE'
         return {'success': True, 'message': '이동 취소됨'}
+
+    def set_lid(self, open_lid: bool) -> dict:
+        """적재함 뚜껑을 열거나(약 1.5rad) 닫는다(0). gazebo 조인트 플러그인으로 전송."""
+        if self._lid_pub is None:
+            return {'success': False, 'message': '뚜껑 퍼블리셔 미초기화'}
+        from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+        from builtin_interfaces.msg import Duration
+        msg = JointTrajectory()
+        msg.header.frame_id = 'base_link'
+        msg.joint_names = ['cabinet_lid_joint']
+        pt = JointTrajectoryPoint()
+        pt.positions = [1.5 if open_lid else 0.0]
+        pt.time_from_start = Duration(sec=1, nanosec=0)
+        msg.points = [pt]
+        self._lid_pub.publish(msg)
+        with _lock:
+            _state['door']['status'] = 'OPEN' if open_lid else 'CLOSED'
+        return {'success': True,
+                'message': f"적재함 뚜껑 {'열림' if open_lid else '닫힘'} 명령 전송"}
 
     def _amcl_pose_cb(self, msg) -> None:
         import math

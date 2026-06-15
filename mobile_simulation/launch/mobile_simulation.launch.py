@@ -43,13 +43,13 @@ def _write_demo_map(context):
     rect(-6.0, -4.0, 6.0, -3.94)
     rect(-6.0, -4.0, -5.94, 4.0)
     rect(5.94, -4.0, 6.0, 4.0)
-    rect(-5.50, 1.45, -4.76, 1.55)
-    rect(-3.84, 1.45, -0.90, 1.55)
+    rect(-5.50, 1.45, -4.85, 1.55)   # 약재실 문 좌측벽 (문틈 1.1m로 확장)
+    rect(-3.75, 1.45, -0.90, 1.55)   # 약재실 문 우측벽
     rect(-0.95, 1.50, -0.85, 4.00)
-    rect(0.75, 1.65, 3.25, 1.75)
-    rect(4.00, 1.65, 5.25, 1.75)
-    rect(0.75, -1.75, 3.25, -1.65)
-    rect(4.00, -1.75, 5.25, -1.65)
+    rect(0.75, 1.65, 3.075, 1.75)    # A동 문 좌측벽 (문틈 1.1m로 확장)
+    rect(4.175, 1.65, 5.25, 1.75)    # A동 문 우측벽
+    rect(0.75, -1.75, 3.075, -1.65)  # B동 문 좌측벽 (문틈 1.1m로 확장)
+    rect(4.175, -1.75, 5.25, -1.65)  # B동 문 우측벽
     rect(2.95, 1.75, 3.05, 3.95)
     rect(2.95, -3.95, 3.05, -1.75)
 
@@ -131,7 +131,7 @@ def generate_launch_description():
         DeclareLaunchArgument('show_gazebo_client', default_value='true'),
         DeclareLaunchArgument('auto_start_demo', default_value='false'),
         DeclareLaunchArgument('initial_x', default_value='-4.30'),
-        DeclareLaunchArgument('initial_y', default_value='2.05'),
+        DeclareLaunchArgument('initial_y', default_value='2.5'),
         DeclareLaunchArgument('initial_yaw', default_value='-1.5708'),
         DeclareLaunchArgument('goal_x', default_value='4.20'),
         DeclareLaunchArgument('goal_y', default_value='2.72'),

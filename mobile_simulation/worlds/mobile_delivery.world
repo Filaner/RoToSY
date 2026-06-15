@@ -177,14 +177,14 @@
         <visual name="visual"><geometry><box><size>0.12 8.0 1.1</size></box></geometry><material><ambient>0.93 0.94 0.92 1</ambient><diffuse>0.93 0.94 0.92 1</diffuse></material></visual>
       </link>
       <link name="storage_partition_left">
-        <pose>-5.13 1.48 0.55 0 0 0</pose>
-        <collision name="collision"><geometry><box><size>0.74 0.10 1.1</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>0.74 0.10 1.1</size></box></geometry><material><ambient>0.48 0.70 0.86 1</ambient><diffuse>0.48 0.70 0.86 1</diffuse></material></visual>
+        <pose>-5.175 1.48 0.55 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>0.65 0.10 1.1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.65 0.10 1.1</size></box></geometry><material><ambient>0.48 0.70 0.86 1</ambient><diffuse>0.48 0.70 0.86 1</diffuse></material></visual>
       </link>
       <link name="storage_partition_right">
-        <pose>-2.37 1.48 0.55 0 0 0</pose>
-        <collision name="collision"><geometry><box><size>2.94 0.10 1.1</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>2.94 0.10 1.1</size></box></geometry><material><ambient>0.48 0.70 0.86 1</ambient><diffuse>0.48 0.70 0.86 1</diffuse></material></visual>
+        <pose>-2.325 1.48 0.55 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>2.85 0.10 1.1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>2.85 0.10 1.1</size></box></geometry><material><ambient>0.48 0.70 0.86 1</ambient><diffuse>0.48 0.70 0.86 1</diffuse></material></visual>
       </link>
       <link name="storage_east_wall">
         <pose>-0.90 2.75 0.55 0 0 0</pose>
@@ -193,32 +193,32 @@
       </link>
       <link name="storage_door_frame">
         <pose>-4.30 1.43 0.56 0 0 0</pose>
-        <collision name="left_jamb_collision"><pose>-0.46 0 0 0 0 0</pose><geometry><box><size>0.055 0.055 0.86</size></box></geometry></collision>
-        <collision name="right_jamb_collision"><pose>0.46 0 0 0 0 0</pose><geometry><box><size>0.055 0.055 0.86</size></box></geometry></collision>
-        <collision name="header_collision"><pose>0 0 0.43 0 0 0</pose><geometry><box><size>0.98 0.055 0.055</size></box></geometry></collision>
-        <visual name="left_jamb"><pose>-0.46 0 0 0 0 0</pose><geometry><box><size>0.055 0.055 0.86</size></box></geometry><material><ambient>0.22 0.36 0.48 1</ambient><diffuse>0.22 0.36 0.48 1</diffuse></material></visual>
-        <visual name="right_jamb"><pose>0.46 0 0 0 0 0</pose><geometry><box><size>0.055 0.055 0.86</size></box></geometry><material><ambient>0.22 0.36 0.48 1</ambient><diffuse>0.22 0.36 0.48 1</diffuse></material></visual>
-        <visual name="header"><pose>0 0 0.43 0 0 0</pose><geometry><box><size>0.98 0.055 0.055</size></box></geometry><material><ambient>0.22 0.36 0.48 1</ambient><diffuse>0.22 0.36 0.48 1</diffuse></material></visual>
+        <collision name="left_jamb_collision"><pose>-0.55 0 0 0 0 0</pose><geometry><box><size>0.055 0.055 0.86</size></box></geometry></collision>
+        <collision name="right_jamb_collision"><pose>0.55 0 0 0 0 0</pose><geometry><box><size>0.055 0.055 0.86</size></box></geometry></collision>
+        <collision name="header_collision"><pose>0 0 0.43 0 0 0</pose><geometry><box><size>1.16 0.055 0.055</size></box></geometry></collision>
+        <visual name="left_jamb"><pose>-0.55 0 0 0 0 0</pose><geometry><box><size>0.055 0.055 0.86</size></box></geometry><material><ambient>0.22 0.36 0.48 1</ambient><diffuse>0.22 0.36 0.48 1</diffuse></material></visual>
+        <visual name="right_jamb"><pose>0.55 0 0 0 0 0</pose><geometry><box><size>0.055 0.055 0.86</size></box></geometry><material><ambient>0.22 0.36 0.48 1</ambient><diffuse>0.22 0.36 0.48 1</diffuse></material></visual>
+        <visual name="header"><pose>0 0 0.43 0 0 0</pose><geometry><box><size>1.16 0.055 0.055</size></box></geometry><material><ambient>0.22 0.36 0.48 1</ambient><diffuse>0.22 0.36 0.48 1</diffuse></material></visual>
       </link>
       <link name="wing_a_med_room_front_wall_left">
-        <pose>1.975 1.7 0.55 0 0 0</pose>
-        <collision name="collision"><geometry><box><size>2.55 0.10 1.1</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>2.55 0.10 1.1</size></box></geometry><material><ambient>0.90 0.64 0.48 1</ambient><diffuse>0.90 0.64 0.48 1</diffuse></material></visual>
+        <pose>1.8875 1.7 0.55 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>2.375 0.10 1.1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>2.375 0.10 1.1</size></box></geometry><material><ambient>0.90 0.64 0.48 1</ambient><diffuse>0.90 0.64 0.48 1</diffuse></material></visual>
       </link>
       <link name="wing_a_med_room_front_wall_right">
-        <pose>4.675 1.7 0.55 0 0 0</pose>
-        <collision name="collision"><geometry><box><size>1.35 0.10 1.1</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>1.35 0.10 1.1</size></box></geometry><material><ambient>0.90 0.64 0.48 1</ambient><diffuse>0.90 0.64 0.48 1</diffuse></material></visual>
+        <pose>4.7625 1.7 0.55 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>1.175 0.10 1.1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>1.175 0.10 1.1</size></box></geometry><material><ambient>0.90 0.64 0.48 1</ambient><diffuse>0.90 0.64 0.48 1</diffuse></material></visual>
       </link>
       <link name="wing_b_med_room_front_wall_left">
-        <pose>1.975 -1.7 0.55 0 0 0</pose>
-        <collision name="collision"><geometry><box><size>2.55 0.10 1.1</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>2.55 0.10 1.1</size></box></geometry><material><ambient>0.50 0.76 0.54 1</ambient><diffuse>0.50 0.76 0.54 1</diffuse></material></visual>
+        <pose>1.8875 -1.7 0.55 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>2.375 0.10 1.1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>2.375 0.10 1.1</size></box></geometry><material><ambient>0.50 0.76 0.54 1</ambient><diffuse>0.50 0.76 0.54 1</diffuse></material></visual>
       </link>
       <link name="wing_b_med_room_front_wall_right">
-        <pose>4.675 -1.7 0.55 0 0 0</pose>
-        <collision name="collision"><geometry><box><size>1.35 0.10 1.1</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>1.35 0.10 1.1</size></box></geometry><material><ambient>0.50 0.76 0.54 1</ambient><diffuse>0.50 0.76 0.54 1</diffuse></material></visual>
+        <pose>4.7625 -1.7 0.55 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>1.175 0.10 1.1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>1.175 0.10 1.1</size></box></geometry><material><ambient>0.50 0.76 0.54 1</ambient><diffuse>0.50 0.76 0.54 1</diffuse></material></visual>
       </link>
       <link name="wing_a_med_room_partition">
         <pose>3.0 2.85 0.55 0 0 0</pose>
@@ -242,25 +242,25 @@
       </link>
       <link name="wing_a_med_room_door">
         <pose>3.65 1.63 0.08 0 0 0</pose>
-        <visual name="visual"><geometry><box><size>0.72 0.06 0.07</size></box></geometry><material><ambient>0.10 0.12 0.14 1</ambient><diffuse>0.10 0.12 0.14 1</diffuse></material></visual>
+        <visual name="visual"><geometry><box><size>1.04 0.06 0.07</size></box></geometry><material><ambient>0.10 0.12 0.14 1</ambient><diffuse>0.10 0.12 0.14 1</diffuse></material></visual>
       </link>
       <link name="wing_a_med_room_door_frame">
         <pose>3.65 1.585 0.56 0 0 0</pose>
-        <visual name="left_jamb"><pose>-0.41 0 0 0 0 0</pose><geometry><box><size>0.055 0.045 0.88</size></box></geometry><material><ambient>0.95 0.66 0.40 1</ambient><diffuse>0.95 0.66 0.40 1</diffuse></material></visual>
-        <visual name="right_jamb"><pose>0.41 0 0 0 0 0</pose><geometry><box><size>0.055 0.045 0.88</size></box></geometry><material><ambient>0.95 0.66 0.40 1</ambient><diffuse>0.95 0.66 0.40 1</diffuse></material></visual>
-        <visual name="header"><pose>0 0 0.44 0 0 0</pose><geometry><box><size>0.88 0.045 0.055</size></box></geometry><material><ambient>0.95 0.66 0.40 1</ambient><diffuse>0.95 0.66 0.40 1</diffuse></material></visual>
-        <visual name="handle"><pose>0.27 -0.030 0.05 0 0 0</pose><geometry><box><size>0.12 0.025 0.035</size></box></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
+        <visual name="left_jamb"><pose>-0.55 0 0 0 0 0</pose><geometry><box><size>0.055 0.045 0.88</size></box></geometry><material><ambient>0.95 0.66 0.40 1</ambient><diffuse>0.95 0.66 0.40 1</diffuse></material></visual>
+        <visual name="right_jamb"><pose>0.55 0 0 0 0 0</pose><geometry><box><size>0.055 0.045 0.88</size></box></geometry><material><ambient>0.95 0.66 0.40 1</ambient><diffuse>0.95 0.66 0.40 1</diffuse></material></visual>
+        <visual name="header"><pose>0 0 0.44 0 0 0</pose><geometry><box><size>1.16 0.045 0.055</size></box></geometry><material><ambient>0.95 0.66 0.40 1</ambient><diffuse>0.95 0.66 0.40 1</diffuse></material></visual>
+        <visual name="handle"><pose>0.41 -0.030 0.05 0 0 0</pose><geometry><box><size>0.12 0.025 0.035</size></box></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
       </link>
       <link name="wing_b_med_room_door">
         <pose>3.65 -1.63 0.08 0 0 0</pose>
-        <visual name="visual"><geometry><box><size>0.72 0.06 0.07</size></box></geometry><material><ambient>0.10 0.12 0.14 1</ambient><diffuse>0.10 0.12 0.14 1</diffuse></material></visual>
+        <visual name="visual"><geometry><box><size>1.04 0.06 0.07</size></box></geometry><material><ambient>0.10 0.12 0.14 1</ambient><diffuse>0.10 0.12 0.14 1</diffuse></material></visual>
       </link>
       <link name="wing_b_med_room_door_frame">
         <pose>3.65 -1.585 0.56 0 0 0</pose>
-        <visual name="left_jamb"><pose>-0.41 0 0 0 0 0</pose><geometry><box><size>0.055 0.045 0.88</size></box></geometry><material><ambient>0.36 0.76 0.44 1</ambient><diffuse>0.36 0.76 0.44 1</diffuse></material></visual>
-        <visual name="right_jamb"><pose>0.41 0 0 0 0 0</pose><geometry><box><size>0.055 0.045 0.88</size></box></geometry><material><ambient>0.36 0.76 0.44 1</ambient><diffuse>0.36 0.76 0.44 1</diffuse></material></visual>
-        <visual name="header"><pose>0 0 0.44 0 0 0</pose><geometry><box><size>0.88 0.045 0.055</size></box></geometry><material><ambient>0.36 0.76 0.44 1</ambient><diffuse>0.36 0.76 0.44 1</diffuse></material></visual>
-        <visual name="handle"><pose>0.27 0.030 0.05 0 0 0</pose><geometry><box><size>0.12 0.025 0.035</size></box></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
+        <visual name="left_jamb"><pose>-0.55 0 0 0 0 0</pose><geometry><box><size>0.055 0.045 0.88</size></box></geometry><material><ambient>0.36 0.76 0.44 1</ambient><diffuse>0.36 0.76 0.44 1</diffuse></material></visual>
+        <visual name="right_jamb"><pose>0.55 0 0 0 0 0</pose><geometry><box><size>0.055 0.045 0.88</size></box></geometry><material><ambient>0.36 0.76 0.44 1</ambient><diffuse>0.36 0.76 0.44 1</diffuse></material></visual>
+        <visual name="header"><pose>0 0 0.44 0 0 0</pose><geometry><box><size>1.16 0.045 0.055</size></box></geometry><material><ambient>0.36 0.76 0.44 1</ambient><diffuse>0.36 0.76 0.44 1</diffuse></material></visual>
+        <visual name="handle"><pose>0.41 0.030 0.05 0 0 0</pose><geometry><box><size>0.12 0.025 0.035</size></box></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
       </link>
       <link name="wing_b_service_door">
         <pose>4.65 -1.63 0.08 0 0 0</pose>

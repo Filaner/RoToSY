@@ -27,7 +27,7 @@ class InitialPosePublisher(Node):
 
         self.declare_parameter('map_frame', 'map')
         self.declare_parameter('initial_x', -4.3)
-        self.declare_parameter('initial_y', 2.05)
+        self.declare_parameter('initial_y', 2.5)
         self.declare_parameter('initial_yaw', -1.5708)
         self.declare_parameter('repetitions', 6)
         self.declare_parameter('period_sec', 1.0)

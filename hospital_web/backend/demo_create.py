@@ -25,8 +25,8 @@ WARDS = [
     # 좌표: mobile_simulation 맵 기준 (단위 m, theta는 rad)
     #   admin/test 프리셋과 일치하는 검증된 좌표. 시뮬에선 병동 A/B 2개만 사용.
     {'name': '병동A',  'goal_x':  4.20, 'goal_y':  2.72, 'goal_theta':  1.5708},  # Wing A (y>0)
-    {'name': '병동B',  'goal_x':  4.20, 'goal_y': -2.72, 'goal_theta': -1.5708},  # Wing B (y<0)
-    {'name': '약재실', 'goal_x': -4.30, 'goal_y':  2.05, 'goal_theta': -1.5708},  # 홈/복귀 지점
+    {'name': '병동B',  'goal_x':  3.60, 'goal_y': -2.50, 'goal_theta': -1.5708},  # Wing B (corrected to -2.5)
+    {'name': '약재실', 'goal_x': -4.30, 'goal_y':  2.50, 'goal_theta': -1.5708},  # 홈/복귀 지점
 ]
 
 STAFF = [

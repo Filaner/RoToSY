@@ -756,25 +756,25 @@ body{
           <div class="feedback" id="amr-feedback"></div>
         </div>
 
-        <!-- 출입 도어 -->
+        <!-- 적재함 뚜껑 -->
         <div class="card">
-          <div class="card-title">출입 도어 제어</div>
+          <div class="card-title">적재함 뚜껑 제어</div>
           <div style="display:flex;align-items:center;gap:.85rem;margin-bottom:1.25rem;padding:.75rem 1rem;background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;">
             <div id="door-dot" style="width:12px;height:12px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background .3s;"></div>
             <div>
-              <div class="st-label" style="margin-bottom:.15rem;">현재 도어 상태</div>
+              <div class="st-label" style="margin-bottom:.15rem;">현재 뚜껑 상태</div>
               <div class="st-val" id="door-status" style="font-size:1rem;">—</div>
             </div>
           </div>
 
           <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:.75rem;margin-bottom:1rem;font-size:.92rem;color:var(--muted);">
-            AMR 도착 후 자동 개방을 시도합니다.<br>
-            3초 내 개방 확인이 없으면 강제 개방 버튼이 활성화됩니다.
+            AMR 도착 + 간호사 인증 후 적재함 뚜껑이 열립니다.<br>
+            수동으로 열기/닫기 제어도 가능합니다.
           </div>
 
           <div class="btn-group">
-            <button class="btn btn-green btn-full" id="btn-door-open" onclick="doorOpen()">강제 개방</button>
-            <button class="btn btn-ghost btn-full" onclick="doorClose()">강제 닫힘</button>
+            <button class="btn btn-green btn-full" id="btn-door-open" onclick="doorOpen()">뚜껑 열기</button>
+            <button class="btn btn-ghost btn-full" onclick="doorClose()">뚜껑 닫기</button>
           </div>
           <div class="feedback" id="door-feedback"></div>
         </div>
@@ -1444,12 +1444,12 @@ async function amrReturn() {
 
 async function doorOpen() {
   await apiPost('/api/amr/door/open', null, 'door-feedback');
-  addAlert('warn', '도어 강제 개방 명령 전송');
+  addAlert('warn', '적재함 뚜껑 열기 명령 전송');
 }
 
 async function doorClose() {
   await apiPost('/api/amr/door/close', null, 'door-feedback');
-  addAlert('info', '도어 닫힘 명령 전송');
+  addAlert('info', '적재함 뚜껑 닫기 명령 전송');
 }
 
 async function resetMission() {
