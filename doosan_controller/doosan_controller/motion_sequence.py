@@ -317,7 +317,10 @@ class MotionSequenceNode(Node):
             )
             self._step_info_pub.publish(String(data='IDLE'))
             return
-        self._step_mode = True
+        # 웹(조제시작) 트리거 = 자동 진행(모든 스텝 연속 실행). 수동 스텝은 CLI --step 으로만.
+        # (과거엔 True로 강제돼서 첫 스텝 후 /motion/next_step 신호를 무한 대기 → 멈춤)
+        # self._step_mode = False  # 웹에서 조제시작 버튼 눌렀을 때 알아서 돌릴거면 False해야함!
+        self._step_mode = True # Debugging 용
         self._stop_requested = False
 
         reference_marker_id = int(self._cabinet_geometry['marker_id'])

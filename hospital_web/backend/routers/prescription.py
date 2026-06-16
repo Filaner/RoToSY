@@ -6,9 +6,29 @@ from typing import Optional
 
 from .. import prescription_state as ps
 from .. import mission_state as ms
+from .. import robot_proxy
 from ..db_schema import get_conn
 
+import httpx
+
 router = APIRouter(prefix='/api/prescription', tags=['prescription'])
+
+
+def _trigger_arm_pick(drawer_index: int) -> dict:
+    """로봇팔 피킹 시퀀스를 web_interface(:8000) 게이트웨이를 통해 시작시킨다.
+
+    로봇팔/카메라/모션 시퀀스는 web_interface가 단독 소유하므로, 모든 팔 제어는
+    8000 의 /api/motion/start 로 위임한다(drawer_index 0..5). 8000 미기동/에러여도
+    미션 생성 자체는 막지 않도록 best-effort.
+    """
+    try:
+        with httpx.Client(base_url=robot_proxy.ROTOSY_BASE,
+                          timeout=httpx.Timeout(5.0)) as cli:
+            r = cli.post('/api/motion/start', json={'marker_id': int(drawer_index)})
+            return {'success': r.status_code < 400,
+                    'status': r.status_code, 'detail': r.text[:200]}
+    except Exception as exc:
+        return {'success': False, 'detail': f'web_interface(:8000) 연결 불가: {exc}'}
 
 
 def _build_marker_queue(pid: str) -> tuple[list, list, list]:
@@ -138,21 +158,37 @@ async def start_picking(pid: str):
     if not p['delivery_requested']:
         raise HTTPException(status_code=400, detail='간호사 배송 요청이 먼저 필요합니다.')
 
+    # 1) 처방 약품 → 서랍(drawer index) 큐 빌드. 매핑된 슬롯이 없으면 진행 불가(블록).
+    markers, labels, missing = _build_marker_queue(pid)
+    if not markers:
+        raise HTTPException(
+            status_code=400,
+            detail=f'조제할 약품의 서랍 매핑이 없습니다 (미매핑: {", ".join(missing) or "전체"}). '
+                   '약품-서랍(cabinet_slot) 매핑을 확인하세요.')
+
+    # 2) 로봇팔 피킹 트리거(web_interface :8000). 실패하면 미션을 만들지 않고 즉시 에러(블록).
+    arm = _trigger_arm_pick(markers[0])
+    if not arm.get('success'):
+        raise HTTPException(
+            status_code=502,
+            detail=f'로봇팔 피킹 시작 실패 — web_interface(:8000) 확인 필요. ({arm.get("detail")})')
+
+    # 3) 트리거 성공 → 미션 생성 + 상태/큐/감사 기록
     mission = ms.new_mission(p['ward'], pid)
     ps.set_status(pid, 'awaiting_load_confirm')
-
-    # 자동 시퀀스(Y)용 마커 큐 빌드 — 처방 → cabinet_slot.aruco_marker_id
-    markers, labels, missing = _build_marker_queue(pid)
     queue = ms.set_marker_queue(markers, labels)
 
     detail = f'{pid} 조제 시작 — {p["patient_name"]} ({p["ward"]}) · 마커큐 {markers}'
     if missing:
         detail += f' · 슬롯 미매핑: {", ".join(missing)}'
     ms.add_audit('admin', 'START_PICKING', detail)
+    ms.add_audit('robot', 'ARM_PICK_TRIGGER',
+                 f'{pid} — drawer index {markers[0]} 피킹 시작 ({arm})')
 
     return {
         'prescription': ps.get(pid),
         'mission':      mission,
         'marker_queue': queue,
         'missing':      missing,
+        'arm_trigger':  arm,
     }

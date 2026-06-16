@@ -1487,7 +1487,10 @@ async function loadTodayDeliveries() {
 }
 
 function renderTodayDeliveries(list) {
-  const today = new Date().toISOString().substring(0, 10);
+  // created_at은 서버 로컬시간(datetime.now)이므로 today도 로컬 날짜로 비교해야 함
+  // (toISOString()은 UTC라 한국 오전엔 전날로 빠져서 전부 걸러지는 버그가 있었음)
+  const _d = new Date();
+  const today = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, '0')}-${String(_d.getDate()).padStart(2, '0')}`;
   const todayItems = list.filter(p => p.created_at && p.created_at.startsWith(today));
   const countEl = el('delivery-req-count');
   const container = el('today-delivery-list');
@@ -2059,17 +2062,9 @@ updateAlertList();
 setInterval(updateSensorHistory, 60000);  // 1분마다
 setInterval(updateAlertList, 60000);
 
-// WebSocket 업데이트 시 센서값 동기화
-const orig_onmessage = ws ? ws.onmessage : null;
-if (ws) {
-  ws.onmessage = (ev) => {
-    if (orig_onmessage) orig_onmessage(ev);
-    try {
-      const state = JSON.parse(ev.data);
-      updateSensorValues(state);
-    } catch (e) {}
-  };
-}
+// (센서값 동기화는 applyState() 안에서 updateSensorValues(s) 로 이미 처리됨.
+//  과거 여기 있던 top-level ws 재후킹 블록은 ws가 connect() 지역변수라 ReferenceError를
+//  일으켜 이후 스크립트 전체를 죽였음 → 제거.)
 </script>
 </body>
 </html>
