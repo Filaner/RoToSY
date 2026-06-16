@@ -27,6 +27,7 @@ WARDS = [
     {'name': '병동A',  'goal_x':  4.20, 'goal_y':  2.72, 'goal_theta':  1.5708},  # Wing A (y>0)
     {'name': '병동B',  'goal_x':  3.60, 'goal_y': -2.50, 'goal_theta': -1.5708},  # Wing B (corrected to -2.5)
     {'name': '약재실', 'goal_x': -4.30, 'goal_y':  2.50, 'goal_theta': -1.5708},  # 홈/복귀 지점
+    {'name': '간호스테이션', 'goal_x': -2.50, 'goal_y': -3.20, 'goal_theta': 0.0},     # 추가: 간호사 수령 지점
 ]
 
 STAFF = [

@@ -713,10 +713,10 @@ class MotionSequenceNode(Node):
                 self.get_logger().warn(
                     f'[OCR] 불일치: {verify.get("mismatch_reason", "")}'
                 )
+            return status # status 반환 추가
         except Exception as e:
             self.get_logger().warn(f'[OCR] hospital_web 전송 실패 (계속 진행): {e}')
-
-        return result
+            return 'UNKNOWN'
 
     def _get_marker(self, marker_id: int, retries: int = 5):
         for attempt in range(retries):
@@ -961,30 +961,57 @@ class MotionSequenceNode(Node):
 
             # 13.5. OCR & JSON 파싱
             if not self._wait_for_step('13.5. OCR & JSON 파싱'): return
-            self._ocr_and_parse()
+            ocr_status = self._ocr_and_parse()
 
-            # 14. MoveJ 병동 박스 정렬
-            if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return
-            if not self._move_j([31.04, 48.6, 38.63, 0.0, 92.77, 121.04]): return
+            # [핵심] OCR 결과에 따른 분기 로직 (Rollback)
+            if ocr_status == 'MISMATCH':
+                self.get_logger().error('[🚨반전] OCR 불일치 감지! 약품을 원래 서랍으로 되돌립니다.')
+                self._step_info_pub.publish(String(data='ROLLBACK:OCR 불일치 - 원위치 복구 중'))
+                
+                # 14-R. MoveC 전 위치(서랍 앞)로 복귀
+                if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
+                                    pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
+                
+                # 15-R. 다시 서랍 안 약품 집었던 XY 위치로 이동
+                if not self._move_l(cx, cy, pre_movec_pos[2], 90.0, -180.0, 0.0): return
+                
+                # 16-R. 원래 깊이(cz)까지 내려가기
+                if not self._move_l(cx, cy, cz, 90.0, -180.0, 0.0): return
+                
+                # 17-R. 전자석 OFF (원래 위치에 내려놓음)
+                if not self._set_magnet(False): return
+                
+                # 18-R. 다시 서랍 앞(pre_movec_pos)으로 복귀하여 서랍 닫기 단계로 합류
+                if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
+                                    pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
+                
+                # 이후 19번 단계(서랍 닫기 재접근)부터 마저 수행됨
+            
+            else:
+                # 정상 시나리오 (MATCHED 또는 UNKNOWN)
+                # 14. MoveJ 병동 박스 정렬
+                if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return
+                if not self._move_j([31.04, 48.6, 38.63, 0.0, 92.77, 121.04]): return
 
-            # 15. Z -150mm 하강
-            if not self._wait_for_step('15. Z -150mm 하강'): return
-            if not self._move_l(0, 0, -150, relative=True): return
-            cz -= 150
+                # 15. Z -150mm 하강
+                if not self._wait_for_step('15. Z -150mm 하강'): return
+                if not self._move_l(0, 0, -150, relative=True): return
+                # (중략 - 기존 적재 로직 계속)
+                
+                # 16. 전자석 OFF (배치)
+                if not self._wait_for_step('16. 전자석 OFF'): return
+                if not self._set_magnet(False): return
 
-            # 16. 전자석 OFF (배치)
-            if not self._wait_for_step('16. 전자석 OFF'): return
-            if not self._set_magnet(False): return
+                # 17. Z +150mm 상승
+                if not self._wait_for_step('17. Z +150mm 상승'): return
+                if not self._move_l(0, 0, 150, relative=True): return
 
-            # 17. Z +150mm 상승
-            if not self._wait_for_step('17. Z +150mm 상승'): return
-            if not self._move_l(0, 0, 150, relative=True): return
-            cz += 150
+                # 18. MoveC 전 위치로 복귀
+                if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return
+                if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
+                                    pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
 
-            # 18. MoveC 전 위치로 복귀
-            if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return
-            if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
-                                pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
+            # [공통] 이제 서랍 닫기 공통 단계로 진입 (19번부터)
             cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
 
             # 19. 열린 서랍의 손잡이 위치로 재접근
