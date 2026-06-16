@@ -364,12 +364,21 @@ class _AMRBridgeNode:
                 _state['amr']['status'] = 'ERROR'
             _state['amr']['last_seen'] = datetime.now().isoformat()
 
-        # 배송 미션 중 도착 → 미션 상태를 ARRIVED로 진행 (파이프라인 '도착/수령' 단계로)
+        # 배송 미션 중 도착 → 미션 상태를 진행
         if arrived:
             try:
                 from . import mission_state as ms
-                if ms.get_mission().get('status') == 'DISPATCHED':
-                    ms.update_status('ARRIVED', actor='amr', detail='AMR 목적지 도착')
+                curr_mission = ms.get_mission()
+                if curr_mission.get('status') == 'DISPATCHED':
+                    with _lock:
+                        dest = _state['amr'].get('destination', '')
+                    # 1차 목적지(간호스테이션) 도착 시
+                    if dest == '간호스테이션':
+                        ms.update_status('ARRIVED', actor='amr', detail='간호스테이션 도착 (수령 대기)')
+                    # 2차 목적지(병동) 도착 시
+                    else:
+                        ms.update_status('ARRIVED', actor='amr', detail=f'최종 목적지({dest}) 도착 (투약 대기)')
+                        # 0616_todo 4-3: 병동 도착 시 COMPLETED 자동 처리하지 않음 (간호사가 투약 후 수동 처리하도록 둠)
             except Exception as e:
                 print(f'[ros_bridge] mission ARRIVED 갱신 실패: {e}')
 

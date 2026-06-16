@@ -1063,7 +1063,19 @@ function applySequence(s) {
   setText('seq-progress',       total ? `${Math.min(idx+1, total)} / ${total}` : '— / —');
   setText('seq-current-marker', q.current !== null && q.current !== undefined ? q.current : '—');
   setText('seq-current-label',  (q.labels && q.labels[idx]) || '—');
-  setText('seq-motion-step',    step);
+  const stepEl = document.getElementById('seq-motion-step');
+  stepEl.textContent = step;
+  if (step.startsWith('OCR_WARN')) {
+    stepEl.style.color = 'var(--yellow)';
+    stepEl.style.fontWeight = '700';
+  } else if (step.startsWith('ROLLBACK')) {
+    stepEl.style.color = 'var(--red)';
+    stepEl.style.fontWeight = '700';
+  } else {
+    stepEl.style.color = 'inherit';
+    stepEl.style.fontWeight = 'normal';
+  }
+
   setText('magnet-state',       mag ? 'ON' : 'OFF');
   setValColor('magnet-state',   mag ? 'ON' : 'OFF', mag ? 'good' : '');
 

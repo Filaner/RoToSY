@@ -44,17 +44,34 @@ async def test_stop():
 @router.post('/dispatch')
 async def dispatch(req: DispatchReq):
     mission = ms.get_mission()
-    if not mission['can_dispatch']:
+    # 1. 적재 확인 안 됐으면 출발 불가
+    if not mission['can_dispatch'] and mission['status'] != 'PICKED_UP':
         raise HTTPException(
             status_code=409,
             detail='약사와 관리자 모두 적재 확인을 완료해야 출발할 수 있습니다.'
         )
-    result = await ros.dispatch(req.destination or mission['destination'])
+
+    target_destination = req.destination or mission['destination']
+    actual_nav_target = target_destination
+
+    # 2. 스테이션 경유 로직 (0616_todo 2번 반영)
+    # 현재 상태가 CONFIRMED(적재 완료 직후)이면 1차 목적지는 무조건 '간호스테이션'
+    if mission['status'] == 'CONFIRMED':
+        actual_nav_target = '간호스테이션'
+        detail_msg = f'1차 목적지: 간호스테이션 (최종: {target_destination})'
+    # 간호사가 수령(PICKED_UP)한 뒤면 최종 목적지로 출발
+    elif mission['status'] == 'PICKED_UP':
+        detail_msg = f'2차(최종) 목적지: {target_destination}'
+    else:
+        detail_msg = f'목적지: {target_destination}'
+
+    result = await ros.dispatch(actual_nav_target)
     if not result.get('success'):
         raise HTTPException(status_code=500, detail=result.get('message'))
-    ms.update_status('DISPATCHED', actor='admin',
-                     detail=f'목적지: {req.destination or mission["destination"]}')
-    ms.add_audit('admin', 'AMR_DISPATCH', f'목적지: {req.destination or mission["destination"]}')
+    
+    # 3. DB 업데이트 (상태는 DELIVERING이 아니라 DISPATCHED 사용)
+    ms.update_status('DISPATCHED', actor='admin', detail=detail_msg)
+    ms.add_audit('admin', 'AMR_DISPATCH', detail_msg)
     return result
 
 

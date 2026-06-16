@@ -684,7 +684,6 @@ function renderQueue() {
     const prioLabel = {emergency:'긴급',general:'일반',scheduled:'정기'}[p.priority] || p.priority;
     const prioCls   = `prio prio-${p.priority}`;
     const sdotCls   = `sdot sdot-${p.status}`;
-    const isOcr     = p.ocr && p.ocr.confidence < 85;
     return `
       <div class="presc-card${p.id === selectedId ? ' selected' : ''}" onclick="selectPrescription('${p.id}')">
         <div class="pc-top">
@@ -694,7 +693,7 @@ function renderQueue() {
           </div>
           <span class="${prioCls}">${prioLabel}</span>
         </div>
-        <div class="pc-ward">${p.ward} · ${p.doctor} 의사${isOcr ? ' &nbsp;<span style="color:var(--red);font-size:.65rem;font-weight:700;">[!] OCR 낮음</span>' : ''}</div>
+        <div class="pc-ward">${p.ward} · ${p.doctor} 의사</div>
         <div class="pc-drugs">${drugNames}</div>
       </div>`;
   }).join('');

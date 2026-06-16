@@ -79,6 +79,7 @@ async def teaching(req: TeachingReq):
 async def estop():
     r = await _proxy('/api/estop')
     ms.add_audit('admin', 'ROBOT_ESTOP', '로봇 암 비상정지')
+    ms.cancel_current_mission(actor='admin', detail='E-STOP: 미션 상태 강제 초기화')
     return r
 
 @router.post('/recover')
@@ -111,6 +112,7 @@ async def motion_next():
 async def motion_stop():
     r = await _proxy('/api/motion/stop')
     ms.add_audit('admin', 'MOTION_STOP')
+    ms.cancel_current_mission(actor='admin', detail='시퀀스 정지: 미션 상태 초기화')
     return r
 
 
@@ -178,8 +180,9 @@ async def auto_next():
 
 @router.post('/auto/stop')
 async def auto_stop():
-    """자동 시퀀스 중단 — motion/stop + 큐 리셋."""
+    """자동 시퀀스 중단 — motion/stop + 큐 리셋 및 미션 초기화."""
     r = await _proxy('/api/motion/stop')
-    ms.queue_clear()
+    # ms.queue_clear()는 cancel_current_mission() 내부에서 자동 호출됨
+    ms.cancel_current_mission(actor='admin', detail='자동 시퀀스 중단: 미션 초기화 (다시 시작 가능)')
     ms.add_audit('admin', 'AUTO_STOP', '자동 시퀀스 중단')
     return r

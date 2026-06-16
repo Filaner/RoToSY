@@ -678,25 +678,33 @@ function applyMission(m) {
 // ═══════════════════════════════════════════════
 const PIPELINE = [
   {key:'IDLE',            label:'처방 수신'},
-  {key:'AWAITING_CONFIRM',label:'로봇 조제'},
-  {key:'CONFIRMED',       label:'적재 확인'},
-  {key:'DISPATCHED',      label:'AMR 출발'},
-  {key:'DELIVERING',      label:'이동 중'},
-  {key:'ARRIVED',         label:'도착'},
-  {key:'COMPLETED',       label:'수령 완료'},
+  {key:'AWAITING_CONFIRM',label:'조제 및 이중 검수'},
+  {key:'DISPATCHED',      label:'1차 이동 (스테이션 향)'},
+  {key:'ARRIVED',         label:'스테이션 도착 (수령 대기)'},
+  {key:'PICKED_UP',       label:'간호사 수령 완료'},
+  {key:'DISPATCHED_2',    label:'2차 이동 (병동 향)'},
+  {key:'COMPLETED',       label:'병동 도착 및 투약 완료'},
 ];
-const STATUS_ORDER = ['IDLE','AWAITING_CONFIRM','CONFIRMED','DISPATCHED','DELIVERING','ARRIVED','COMPLETED'];
 
 function renderTimeline() {
   const tl  = el('delivery-timeline');
   if (!tl) return;
   const mStatus = missionState.status || 'IDLE';
-  const curIdx  = STATUS_ORDER.indexOf(amrState.status === 'ARRIVED' ? 'ARRIVED' : mStatus);
+  const dest    = amrState.destination || '';
+  
+  let curIdx = 0;
+  if (mStatus === 'AWAITING_CONFIRM' || mStatus === 'CONFIRMED') curIdx = 1;
+  else if (mStatus === 'DISPATCHED' && dest === '간호스테이션') curIdx = 2;
+  else if (mStatus === 'ARRIVED' && dest === '간호스테이션') curIdx = 3;
+  else if (mStatus === 'PICKED_UP') curIdx = 4;
+  else if (mStatus === 'DISPATCHED' && dest !== '간호스테이션') curIdx = 5;
+  else if (mStatus === 'ARRIVED' && dest !== '간호스테이션') curIdx = 6;
+  else if (mStatus === 'COMPLETED') curIdx = 6;
 
   tl.innerHTML = PIPELINE.map((step, i) => {
     let cls = 'tl-waiting';
-    if (i < curIdx)  cls = 'tl-done';
-    if (i === curIdx) cls = 'tl-active';
+    if (i < curIdx || (curIdx === 6 && mStatus === 'COMPLETED'))  cls = 'tl-done';
+    if (i === curIdx && mStatus !== 'COMPLETED') cls = 'tl-active';
     const isLast = i === PIPELINE.length - 1;
     return `
     <div class="tl-item ${cls}">
@@ -967,39 +975,100 @@ function renderScanLog() {
 }
 
 // ═══════════════════════════════════════════════
-// Receipt confirmation
+// Receipt confirmation & Dispatch to Ward
 // ═══════════════════════════════════════════════
+// 이 버튼은 두 가지 상태를 가집니다:
+// 1. 수령 확인 (뚜껑 열기)
+// 2. 뚜껑 닫고 병동으로 출발
+let isReceiptPhase = true;
+
 async function confirmReceipt() {
-  if (amrState.status !== 'ARRIVED') return;
+  const btn = el('receipt-btn');
   const fb = el('receipt-feedback');
-  fb.style.color = 'var(--teal)';
-  fb.textContent = '수령 확인 처리 중...';
 
-  // 수령 이력 추가 (demo: 서버 연동 없이 로컬 처리)
-  const now = new Date().toTimeString().substring(0,8);
-  receiptLog.unshift({
-    time: now,
-    dest: amrState.destination || '3병동',
-    drugs: ['아세트아미노펜 500mg × 3', '이부프로펜 400mg × 2'],
-  });
-  renderReceiptHistory();
+  if (isReceiptPhase) {
+    if (amrState.status !== 'ARRIVED' || missionState.status !== 'ARRIVED') return;
+    
+    fb.style.color = 'var(--teal)';
+    fb.textContent = '적재함 개방 및 수령 확인 처리 중...';
+    btn.disabled = true;
 
-  // Update receive drug list
-  el('receive-drug-list').innerHTML = `
-    <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:1rem;margin-bottom:.5rem;">
-      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem;">수령된 약품</div>
-      <div style="font-size:.85rem;color:var(--green);font-weight:600;margin-bottom:.25rem;"> 수령 완료 — ${now}</div>
-      ${receiptLog[0].drugs.map(d => `<div style="font-size:.85rem;padding:.25rem 0;border-bottom:1px solid var(--border);"> ${d}</div>`).join('')}
-    </div>`;
+    try {
+      // 1. 적재함 뚜껑 열기
+      await fetch('/api/amr/door/open', {method: 'POST'});
+      
+      // 2. 미션 상태 업데이트 (PICKED_UP) -> 이 상태가 되면 2차 목적지 출발 가능
+      await fetch('/api/system/mission/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status: 'PICKED_UP', detail: '간호사 수령 및 검수 완료'})
+      });
 
-  fb.style.color = 'var(--green)';
-  fb.textContent = `V 수령 확인 완료 (${now})`;
+      // 수령 이력 추가 (로컬 렌더링)
+      const now = new Date().toTimeString().substring(0,8);
+      receiptLog.unshift({
+        time: now,
+        dest: amrState.destination || '간호스테이션',
+        drugs: ['수령 완료된 약품'],
+      });
+      renderReceiptHistory();
 
-  el('receipt-btn').className = 'not-ready';
-  el('receipt-btn').disabled  = true;
-  el('amr-arrival-banner').classList.remove('visible');
+      fb.style.color = 'var(--green)';
+      fb.textContent = `V 적재함 개방 완료 (${now})`;
 
-  setTimeout(() => { fb.textContent = ''; }, 5000);
+      // 버튼 상태 변경: 2차 배송 트리거 모드
+      isReceiptPhase = false;
+      btn.className = 'ready'; // 다시 클릭 가능하게
+      btn.disabled = false;
+      btn.textContent = '뚜껑 닫고 병동으로 출발';
+      btn.style.background = 'var(--blue)';
+      btn.style.borderColor = 'var(--blue)';
+      btn.style.color = '#fff';
+      
+      el('amr-arrival-banner').classList.remove('visible');
+
+      setTimeout(() => { fb.textContent = ''; }, 5000);
+    } catch (e) {
+      fb.style.color = 'var(--red)';
+      fb.textContent = `오류: ${e.message}`;
+      btn.disabled = false;
+    }
+
+  } else {
+    // Phase 2: Dispatch to final ward
+    fb.style.color = 'var(--blue)';
+    fb.textContent = '적재함 닫기 및 병동 출발 처리 중...';
+    btn.disabled = true;
+
+    try {
+      // 1. 적재함 뚜껑 닫기
+      await fetch('/api/amr/door/close', {method: 'POST'});
+      
+      // 2. 최종 목적지(병동)로 출발
+      await fetch('/api/amr/dispatch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({destination: ''}) // 백엔드에서 mission['destination']을 알아서 사용함
+      });
+
+      fb.style.color = 'var(--green)';
+      fb.textContent = `V 병동 출발 완료`;
+
+      // 버튼 초기화
+      isReceiptPhase = true;
+      btn.className = 'not-ready';
+      btn.textContent = '수령 확인 (도착 대기 중)';
+      btn.style.background = '';
+      btn.style.borderColor = '';
+      btn.style.color = '';
+
+      setTimeout(() => { fb.textContent = ''; }, 5000);
+    } catch (e) {
+      fb.style.color = 'var(--red)';
+      fb.textContent = `출발 오류: ${e.message}`;
+      btn.disabled = false;
+    }
+  }
 }
 
 function renderReceiptHistory() {
