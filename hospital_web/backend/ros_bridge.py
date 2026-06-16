@@ -254,7 +254,7 @@ class _AMRBridgeNode:
     executor management via the `.node` property.
     """
     def __init__(self):
-        from std_msgs.msg import String, Float32
+        from std_msgs.msg import String, Float32, Bool
         import rclpy
 
         # Create a real rclpy Node so the executor can access .subscriptions etc.
@@ -286,8 +286,13 @@ class _AMRBridgeNode:
         except Exception:
             pass
 
-        # [추가] 비전 노드 온라인 판정용 구독 (web_interface가 발행하는 step_info 활용)
-        self.node.create_subscription(String, '/motion/step_info', self._vision_heartbeat_cb, 10)
+        # arm_controller heartbeat: arm_controller_node가 /arm/ready(Bool)를 10Hz로
+        # 상시 발행한다 → 로봇팔 노드가 떠 있으면 시퀀스와 무관하게 계속 ONLINE.
+        self.node.create_subscription(Bool, '/arm/ready', self._arm_heartbeat_cb, 10)
+        # 시퀀스 진행 신호(step_info)도 arm 활성 신호로 보조 사용.
+        self.node.create_subscription(String, '/motion/step_info', self._arm_heartbeat_cb, 10)
+        # NOTE: vision_node 는 ROS 토픽이 아니라 web_interface(:8000) 카메라(HTTP)다.
+        #       → robot_proxy.poll_loop 에서 /camera/markers 폴링으로 ONLINE 판정.
 
         # Nav2 navigate_to_pose 액션 클라이언트 — 웹에서 받은 좌표로 골을 전송한다.
         from nav2_msgs.action import NavigateToPose
@@ -428,12 +433,9 @@ class _AMRBridgeNode:
             _state['amr']['online']    = True
             _state['amr']['last_seen'] = datetime.now().isoformat()
         update_node_seen('amr_controller')
-        # arm status가 들어온다 = arm_controller 노드가 살아있다
-        update_node_seen('arm_controller')
 
-    def _vision_heartbeat_cb(self, msg) -> None:
-        """/motion/step_info 토픽이 수신되면 비전/팔 노드가 살아있는 것으로 간주."""
-        update_node_seen('vision_node')
+    def _arm_heartbeat_cb(self, msg) -> None:
+        """/arm/ready(10Hz) 또는 /motion/step_info 수신 = 로봇팔 노드 살아있음."""
         update_node_seen('arm_controller')
 
     def _amr_battery_cb(self, msg) -> None:

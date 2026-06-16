@@ -33,6 +33,8 @@ def is_online() -> bool:
 
 async def poll_loop() -> None:
     global _online
+    from . import ros_bridge  # vision_node heartbeat 갱신용 (지연 import로 순환참조 회피)
+    cam_tick = 0
     async with httpx.AsyncClient(base_url=ROTOSY_BASE, timeout=_TIMEOUT) as client:
         while True:
             try:
@@ -45,6 +47,19 @@ async def poll_loop() -> None:
                     _online = False
             except Exception:
                 _online = False
+
+            # vision_node = web_interface(:8000) 카메라(HTTP). ROS 토픽이 아니라
+            # 게이트웨이 HTTP로 살아있나 확인 → 카메라 켜져있으면 계속 ONLINE.
+            # 2Hz로만 체크(POLL_HZ=10 → 5사이클마다)해서 트래픽 절약.
+            cam_tick = (cam_tick + 1) % 5
+            if cam_tick == 0:
+                try:
+                    cr = await client.get('/camera/markers')
+                    if cr.status_code == 200 and not cr.json().get('error'):
+                        ros_bridge.update_node_seen('vision_node')
+                except Exception:
+                    pass
+
             await asyncio.sleep(1.0 / POLL_HZ)
 
 
