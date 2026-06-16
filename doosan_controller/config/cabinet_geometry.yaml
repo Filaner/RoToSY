@@ -1,18 +1,33 @@
 # Cabinet geometry relative to the ArUco marker, expressed in robot base axes.
+#
+# Layout (slot index):
+#   [0=1번][1=2번]  ← marker_id 1 부착 위치 (2번 캐비닛 위)
+#   [2=3번][3=4번]
+#   [4=5번][5=6번]
+#
+# Calibrated 2026-06-16: marker=(478,-213,456), TCP contact 2번=(486.11,-188.69,402.42)
+#   handle = TCP - pull_dir*gripper_length = (486.11,-285.69,402.42)
+#   marker_to_reference_handle = handle - marker = (8.11,-72.69,-53.58)
+#
+# Offsets from marker to each handle:
+#   1번: x=+238.11, y=-72.69, z=-53.58
+#   2번: x= +8.11,  y=-72.69, z=-53.58  (reference)
+#   3번: x=+238.11, y=-72.69, z=-163.58
+#   4번: x= +8.11,  y=-72.69, z=-163.58
+#   5번: x=+238.11, y=-72.69, z=-273.58
+#   6번: x= +8.11,  y=-72.69, z=-273.58
 cabinet_geometry:
   marker_id: 1
-  reference_drawer: 6
+  reference_drawer: 2
   coordinate_frame: base_link
-  marker_to_reference_handle_mm: [0.0, -75.0, 205.0]
+  marker_to_reference_handle_mm: [8.11, -72.69, -53.58]
   pull_direction_base: [0.0, 1.0, 0.0]
-  column_pitch_mm: 227.0
-  row_pitch_mm: 112.0
+  column_pitch_mm: 230.0
+  row_pitch_mm: 110.0
   approach_mm: 30.0
   pull_mm: 200.0
   gripper_length_mm: 97.0
 
-  # Add repeated measurements here. The calibrator will replace the reference
-  # offset above with the sample mean and report axis standard deviations.
   samples: []
-  sample_mean_mm: [0.0, -75.0, 205.0]
+  sample_mean_mm: [8.11, -72.69, -53.58]
   sample_stddev_mm: [0.0, 0.0, 0.0]
