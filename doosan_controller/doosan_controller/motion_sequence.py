@@ -37,7 +37,7 @@ from std_msgs.msg import Float64MultiArray, Empty, String, Int32
 
 from dsr_msgs2.srv import MoveCircle
 from robot_arm_interfaces.action import MoveJ, MoveL
-from robot_arm_interfaces.msg import RobotStatus
+from robot_arm_interfaces.msg import PlcCommand, RobotStatus
 from robot_arm_interfaces.srv import Home
 from rotosy_gripper_control.keyboard_electromagnet_gripper import KeyboardElectromagnetGripper
 
@@ -209,10 +209,12 @@ class MotionSequenceNode(Node):
 
         # Publishers
         self._step_info_pub = self.create_publisher(String, self._topic('step_info'), 10)
+        self._plc_pub = self.create_publisher(PlcCommand, '/plc_command', 10)
 
         # State
         self._tcp    = None   # [x, y, z, rx, ry, rz] mm / deg
         self._joints = None   # [j1..j6] deg
+        self._prev_servo_on = False
 
         self._step_mode = False
         self._next_step_event = threading.Event()
@@ -239,8 +241,13 @@ class MotionSequenceNode(Node):
     # ── 콜백 ─────────────────────────────────────────────────────────────────
 
     def _status_cb(self, msg: RobotStatus):
+        prev = self._prev_servo_on
+        self._prev_servo_on = msg.servo_on
         self._tcp    = list(msg.current_tcp)
         self._joints = list(msg.current_joints_deg)
+        if prev and not msg.servo_on:
+            self.get_logger().warn('[안전] 서보 OFF 감지 — PLC M20/M21/M23 차단')
+            self._plc_safety_off()
 
     def _next_step_cb(self, msg: Empty):
         self.get_logger().info('Next step signal received')
@@ -317,10 +324,7 @@ class MotionSequenceNode(Node):
             )
             self._step_info_pub.publish(String(data='IDLE'))
             return
-        # 웹(조제시작) 트리거 = 자동 진행(모든 스텝 연속 실행). 수동 스텝은 CLI --step 으로만.
-        # (과거엔 True로 강제돼서 첫 스텝 후 /motion/next_step 신호를 무한 대기 → 멈춤)
-        # self._step_mode = False  # 웹에서 조제시작 버튼 눌렀을 때 알아서 돌릴거면 False해야함!
-        self._step_mode = True # Debugging 용
+        self._step_mode = True
         self._stop_requested = False
 
         reference_marker_id = int(self._cabinet_geometry['marker_id'])
@@ -489,6 +493,50 @@ class MotionSequenceNode(Node):
     def _set_magnet(self, enabled: bool) -> bool:
         """전자석 ON(enabled=True) / OFF(enabled=False)."""
         return self._gripper.set_gripper(enabled)
+
+    def _plc_safety_off(self):
+        """서보 OFF 또는 노드 종료 시 PLC 안전 코일 일괄 차단."""
+        for addr in (0x20, 0x21, 0x23):
+            self._set_plc_coil(addr, False)
+
+    def _set_plc_coil(self, address: int, value: bool, slave_id: int = 1, target: str = 'PLC'):
+        """PLC 코일(M 릴레이) ON/OFF. 주소는 hex 기준 (M20 → 0x20)."""
+        msg = PlcCommand()
+        msg.target   = target
+        msg.command  = 'COIL'
+        msg.address  = address
+        msg.value    = int(value)
+        msg.slave_id = slave_id
+        self._plc_pub.publish(msg)
+        self.get_logger().info(
+            f'[PLC] {target} 코일 0x{address:02X} → {"ON" if value else "OFF"}'
+        )
+
+    def _set_inverter_freq(self, freq: int):
+        """인버터 목표 주파수 설정. freq 단위: 0.01 Hz (3000 = 30.00 Hz)."""
+        msg = PlcCommand()
+        msg.target   = 'INVERTER'
+        msg.command  = 'REGISTER'
+        msg.address  = 4          # M100 인버터 주파수 설정 레지스터
+        msg.value    = freq
+        msg.slave_id = 2          # 인버터 Modbus 국번
+        self._plc_pub.publish(msg)
+        self.get_logger().info(f'[INV] 주파수 설정 → {freq / 100:.2f} Hz')
+
+    def _set_inverter_run(self, run: bool):
+        """인버터 RUN(run=True) / STOP(run=False) + PLC M21 연동."""
+        msg = PlcCommand()
+        msg.target   = 'INVERTER'
+        msg.command  = 'REGISTER'
+        msg.address  = 5          # M100 인버터 운전 명령 레지스터
+        msg.value    = 2 if run else 1   # 2=RUN, 1=STOP
+        msg.slave_id = 2
+        self._plc_pub.publish(msg)
+        self.get_logger().info(f'[INV] {"RUN" if run else "STOP"}')
+
+        # M21 연동 (인버터 운전 상태 표시 릴레이)
+        time.sleep(0.1)
+        self._set_plc_coil(0x21, run, target='PLC')   # M21 ON/OFF
 
     def _move_circle(self, via: list, end: list) -> bool:
         if not self._cli_circle.wait_for_service(timeout_sec=5.0):
@@ -787,6 +835,7 @@ class MotionSequenceNode(Node):
             # 1. 홈
             if not self._wait_for_step('1. 홈 이동'): return
             if not self._home(): return
+            self._set_plc_coil(0x20, True)   # M20 ON — 시퀀스 시작
 
             if not self._wait_tcp():
                 self.get_logger().error('TCP 위치 미수신')
@@ -799,6 +848,8 @@ class MotionSequenceNode(Node):
             approach, contact, pull_dir = result
             if not self._move_l(*approach, 90.0, -90.0, 0.0): return
             cx, cy, cz = approach
+            self._set_inverter_freq(3000)   # 컨베이어 주파수 30.00 Hz 설정
+            self._set_inverter_run(True)    # 컨베이어 RUN
 
             # 3. 마커 기준 앞/뒤 방향을 반영해 손잡이에 접촉
             if not self._wait_for_step('3. 손잡이 접촉'): return
@@ -808,6 +859,7 @@ class MotionSequenceNode(Node):
             # 4. 전자석 ON (픽)
             if not self._wait_for_step('4. 전자석 ON'): return
             if not self._set_magnet(True): return
+            self._set_inverter_run(False)   # 컨베이어 STOP
 
             # 5. 사물함 앞쪽으로 200mm 당김
             pull_distance = float(self._cabinet_geometry['pull_mm'])
@@ -962,6 +1014,7 @@ class MotionSequenceNode(Node):
             # 24. 최종 홈 정렬
             if not self._wait_for_step('24. 최종 홈 정렬'): return
             if not self._home(): return
+            self._set_plc_coil(0x20, False)  # M20 OFF — 시퀀스 종료
 
             self.get_logger().info('시퀀스 완료')
             self._wait_for_step('시퀀스 완료')
@@ -998,5 +1051,11 @@ def main(args=None):
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
+        node._stop_requested = True
+        node._next_step_event.set()
+        thread = node._current_sequence_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
+        node._plc_safety_off()
         node.destroy_node()
         rclpy.shutdown()

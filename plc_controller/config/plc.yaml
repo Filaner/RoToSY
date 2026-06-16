@@ -1,5 +1,7 @@
-plc_bridge:
+plc_controller_node:
   ros__parameters:
+    port: "/dev/ttyUSB0"
+
     # XBC-DR10E 네트워크 설정 (XG5000에서 확인/설정)
     plc_ip:   "192.168.1.10"
     plc_port: 502

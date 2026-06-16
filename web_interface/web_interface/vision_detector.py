@@ -15,13 +15,13 @@ WATER_PACK_CLASS_NAME = 'water_pack'
 
 
 def _model_candidates() -> list[Path]:
+    _models_dir = Path(__file__).resolve().parent / 'models'
     candidates = []
     configured = os.environ.get('ROTOSY_VISION_MODEL')
     if configured:
         candidates.append(Path(configured).expanduser())
-    models_dir = Path(__file__).resolve().parent / 'models'
-    candidates.append(models_dir / 'best.pt')
-    candidates.append(models_dir / 'medium_best_version2.pt')
+    candidates.append(_models_dir / 'best.pt')
+    candidates.append(_models_dir / 'medium_best_version2.pt')
     return candidates
 
 
@@ -76,7 +76,7 @@ class VisionDetector:
     def load(self) -> bool:
         path = find_model_path()
         if path is None:
-            self.error = 'best.pt not found'
+            self.error = 'YOLO 모델 파일 없음 — best.pt 를 web_interface/models/ 에 넣으세요'
             return False
         try:
             from ultralytics import YOLO

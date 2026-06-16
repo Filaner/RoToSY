@@ -2,16 +2,17 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>plc_controller</name>
-  <version>0.1.0</version>
-  <description>LS ELECTRIC XBC-DR10E PLC bridge node (Modbus TCP). Reads DI sensors and controls DO outputs (conveyor etc.).</description>
+  <version>0.2.0</version>
+  <description>LS PLC + M100 인버터 Modbus RTU 브리지 (RS-485 멀티드롭)</description>
   <maintainer email="cjfgml0221@naver.com">RoToSY</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
 
   <depend>rclpy</depend>
-  <depend>std_msgs</depend>
   <depend>robot_arm_interfaces</depend>
+
+  <exec_depend>pymodbus</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

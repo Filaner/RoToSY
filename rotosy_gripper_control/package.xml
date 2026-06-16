@@ -11,6 +11,7 @@
 
   <depend>rclpy</depend>
   <depend>dsr_msgs2</depend>
+  <depend>robot_arm_interfaces</depend>
 
   <export>
     <build_type>ament_python</build_type>

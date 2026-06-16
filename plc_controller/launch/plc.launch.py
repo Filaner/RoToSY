@@ -15,14 +15,10 @@ def generate_launch_description():
 
         Node(
             package='plc_controller',
-            executable='plc_bridge',
-            name='plc_bridge',
+            executable='plc_controller_node',
+            name='plc_controller_node',
             parameters=[
                 os.path.join(pkg, 'config', 'plc.yaml'),
-                {
-                    'plc_ip':   LaunchConfiguration('plc_ip'),
-                    'plc_port': LaunchConfiguration('plc_port'),
-                },
             ],
             output='screen',
         ),

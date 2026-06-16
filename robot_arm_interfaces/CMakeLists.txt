@@ -9,6 +9,7 @@ find_package(action_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotStatus.msg"
   "msg/PlcStatus.msg"
+  "msg/PlcCommand.msg"
   "srv/ServoOn.srv"
   "srv/WaitDuration.srv"
   "srv/Jog.srv"

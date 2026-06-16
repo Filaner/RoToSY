@@ -43,6 +43,7 @@ from .routers import status as status_router
 from .routers import control as control_router
 from .routers import manual_calib as manual_calib_router
 from .routers import gripper as gripper_router
+from .routers import inverter as inverter_router
 
 STATIC_DIR = Path(__file__).parent / 'static'
 BROADCAST_HZ = 10  # state push rate to WebSocket clients
@@ -130,6 +131,7 @@ app.include_router(status_router.router, prefix='/api')
 app.include_router(control_router.router, prefix='/api')
 app.include_router(manual_calib_router.router)
 app.include_router(gripper_router.router)
+app.include_router(inverter_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')
@@ -146,20 +148,21 @@ async def camera_stream():
     from fastapi import HTTPException as _HTTPException
     if not cam_module.camera.available:
         raise _HTTPException(status_code=503, detail='pyrealsense2 not installed')
-    if cam_module.camera.error:
-        raise _HTTPException(status_code=503, detail=cam_module.camera.error)
 
     async def generate():
+        last_frame: bytes | None = None
         while True:
             frame = cam_module.camera.get_jpeg()
             if frame:
+                last_frame = frame
+            if last_frame:
                 yield (
                     b'--frame\r\n'
                     b'Content-Type: image/jpeg\r\n\r\n'
-                    + frame +
+                    + last_frame +
                     b'\r\n'
                 )
-            await asyncio.sleep(1 / 60)
+            await asyncio.sleep(1 / 30)
 
     return StreamingResponse(
         generate(),

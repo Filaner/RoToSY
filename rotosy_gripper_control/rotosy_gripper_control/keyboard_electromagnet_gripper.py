@@ -9,10 +9,14 @@ import rclpy
 from rclpy.node import Node
 
 from dsr_msgs2.srv import SetToolDigitalOutput
+from robot_arm_interfaces.msg import PlcCommand
 
 
 DOOSAN_TOOL_DO_ON = 1   # 실제 동작: 1=ON(자성 발생)
 DOOSAN_TOOL_DO_OFF = 0  # 실제 동작: 0=OFF(자성 없음)
+
+# 전자석과 연동되는 PLC M 릴레이 코일 주소 (PLC 모델에 따라 조정)
+_M23_COIL_ADDR = 0x23  # M23
 
 
 class KeyboardElectromagnetGripper:
@@ -44,6 +48,7 @@ class KeyboardElectromagnetGripper:
             SetToolDigitalOutput,
             f'{self._robot_ns}/io/set_tool_digital_output',
         )
+        self._plc_pub = self._node.create_publisher(PlcCommand, '/plc_command', 10)
         self._is_on = False
 
         self._node.get_logger().info(
@@ -93,6 +98,18 @@ class KeyboardElectromagnetGripper:
             f'Electromagnet gripper {"ON" if enabled else "OFF"} '
             f'(DO{self._tool_do_index}, {"12V output" if enabled else "open output"})'
         )
+
+        msg = PlcCommand()
+        msg.target   = 'PLC'
+        msg.command  = 'COIL'
+        msg.address  = _M23_COIL_ADDR
+        msg.value    = int(enabled)
+        msg.slave_id = 1
+        self._plc_pub.publish(msg)
+        self._node.get_logger().info(
+            f'[PLC] M23(0x{_M23_COIL_ADDR:02X}) → {"ON" if enabled else "OFF"}'
+        )
+
         return True
 
     def shutdown(self) -> None:

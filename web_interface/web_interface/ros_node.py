@@ -19,7 +19,7 @@ from rclpy.action import ActionClient
 from std_msgs.msg import Bool, Float64MultiArray, String, Int32, Empty
 
 # Custom interfaces
-from robot_arm_interfaces.msg import RobotStatus
+from robot_arm_interfaces.msg import PlcCommand, RobotStatus
 from robot_arm_interfaces.srv import ServoOn, Jog, Home, Teaching, EStop
 from robot_arm_interfaces.action import MoveJ, MoveL
 from dsr_msgs2.srv import SetToolDigitalOutput, GetToolDigitalOutput, SetRobotMode
@@ -47,6 +47,8 @@ class RobotBridgeNode(Node):
             'recovery_active': False,
             'seq_step':        'IDLE',
             'tmp_step':        'IDLE',
+            'inverter_running': False,
+            'inverter_freq':    0,
         }
 
         # Subscribers
@@ -70,7 +72,8 @@ class RobotBridgeNode(Node):
         self.act_move_j   = ActionClient(self, MoveJ, '/arm/move_j')
         self.act_move_l   = ActionClient(self, MoveL, '/arm/move_l')
 
-        # Publishers (for triggering sequence steps)
+        # Publishers
+        self.pub_plc       = self.create_publisher(PlcCommand, '/plc_command', 10)
         self.pub_seq_start = self.create_publisher(Int32, '/motion/start', 10)
         self.pub_seq_next  = self.create_publisher(Empty, '/motion/next_step', 10)
         self.pub_seq_stop  = self.create_publisher(Empty, '/motion/stop', 10)
@@ -258,7 +261,32 @@ class RobotBridgeNode(Node):
         req = SetToolDigitalOutput.Request()
         req.index = 1
         req.value = 1 if enabled else 0
-        return await self._run_srv(self.cli_magnet, req)
+        result = await self._run_srv(self.cli_magnet, req)
+        if result.get('success'):
+            self._pub_plc('PLC', 'COIL', 0x23, int(enabled), 1)
+        return result
+
+    def _pub_plc(self, target: str, command: str, address: int, value: int, slave_id: int):
+        msg = PlcCommand()
+        msg.target   = target
+        msg.command  = command
+        msg.address  = address
+        msg.value    = value
+        msg.slave_id = slave_id
+        self.pub_plc.publish(msg)
+
+    def publish_inverter_freq(self, freq: int) -> None:
+        """인버터 목표 주파수 설정 (0~6000, 단위 0.01 Hz)."""
+        self._pub_plc('INVERTER', 'REGISTER', 4, freq, 2)
+        with self._lock:
+            self._state['inverter_freq'] = freq
+
+    def publish_inverter_run(self, run: bool) -> None:
+        """인버터 RUN/STOP 명령 + M21 PLC 코일 연동."""
+        self._pub_plc('INVERTER', 'REGISTER', 5, 2 if run else 1, 2)
+        self._pub_plc('PLC', 'COIL', 0x21, int(run), 1)
+        with self._lock:
+            self._state['inverter_running'] = run
 
     async def _wait_for_action(self, client) -> bool:
         if client.server_is_ready():

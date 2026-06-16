@@ -659,6 +659,48 @@
     </div>
   </div>
 
+  <!-- 컨베이어 인버터 제어 -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">컨베이어 인버터 제어
+      <span style="margin-left:0.6rem; font-size:0.72rem; color:var(--muted); text-transform:none; letter-spacing:0; font-weight:400;">LS M100 · plc_controller_node 실행 필요</span>
+    </div>
+    <div style="display:flex; gap:1.5rem; align-items:center; flex-wrap:wrap;">
+
+      <!-- 주파수 설정 -->
+      <div style="display:flex; align-items:center; gap:0.6rem;">
+        <span class="status-label">주파수</span>
+        <input type="number" id="inv-freq" min="0" max="6000" step="100" value="3000"
+          style="width:5.5rem; background:var(--bg); border:1px solid var(--border); color:var(--text);
+                 padding:0.4rem 0.5rem; border-radius:4px; font-family:var(--mono); font-size:0.9rem;">
+        <span style="font-size:0.75rem; color:var(--muted);">× 0.01 Hz</span>
+        <span id="inv-freq-hz" style="font-family:var(--mono); font-size:0.85rem; color:var(--blue); min-width:4rem;">30.00 Hz</span>
+        <button class="btn btn-teach" onclick="invSetFreq()" style="flex:none; padding:0.6rem 1.1rem;">주파수 적용</button>
+      </div>
+
+      <!-- 구분선 -->
+      <div style="width:1px; height:2.5rem; background:var(--border); flex-shrink:0;"></div>
+
+      <!-- RUN / STOP -->
+      <div style="display:flex; align-items:center; gap:0.65rem;">
+        <button id="btn-inv-run"  class="btn btn-on"  onclick="invRun(true)"  style="flex:none; padding:0.6rem 1.4rem;">▶ RUN</button>
+        <button id="btn-inv-stop" class="btn btn-off" onclick="invRun(false)" style="flex:none; padding:0.6rem 1.4rem;">■ STOP</button>
+        <div id="inv-state-badge" style="
+          padding:0.3rem 0.9rem; border-radius:9999px; font-size:0.8rem; font-weight:700;
+          letter-spacing:0.06em; font-family:var(--mono);
+          background:#1e3a5f33; border:1px solid var(--border); color:var(--muted);">
+          STOP
+        </div>
+      </div>
+
+      <!-- 피드백 -->
+      <span id="inv-feedback" style="font-family:var(--mono); font-size:0.75rem; color:var(--muted); flex:1; min-width:0;"></span>
+    </div>
+    <div style="margin-top:0.75rem; font-size:0.72rem; color:var(--muted);">
+      ※ <code>plc_controller_node</code>가 실행 중이어야 Modbus RTU로 인버터에 전달됩니다.
+         RUN 시 M21 코일도 자동 연동됩니다.
+    </div>
+  </div>
+
   <!-- Manual Point Calibration -->
   <div class="card" style="grid-column: 1 / -1;">
     <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
@@ -2137,6 +2179,85 @@
   }
 
   heRefreshList();
+
+  // ── 인버터 제어 ──────────────────────────────────────────────────────────────
+
+  document.getElementById('inv-freq').addEventListener('input', function () {
+    const hz = (parseFloat(this.value) / 100).toFixed(2);
+    document.getElementById('inv-freq-hz').textContent = isNaN(hz) ? '—' : hz + ' Hz';
+  });
+
+  function _invFeedback(msg, color) {
+    const fb = document.getElementById('inv-feedback');
+    fb.style.color = color;
+    fb.textContent = msg;
+    setTimeout(() => { fb.textContent = ''; }, 4000);
+  }
+
+  function _invSetStateBadge(running) {
+    const badge = document.getElementById('inv-state-badge');
+    if (running) {
+      badge.textContent    = 'RUN';
+      badge.style.background  = '#14532d33';
+      badge.style.borderColor = 'rgba(34,197,94,0.5)';
+      badge.style.color       = 'var(--green)';
+    } else {
+      badge.textContent    = 'STOP';
+      badge.style.background  = '#1e3a5f33';
+      badge.style.borderColor = 'var(--border)';
+      badge.style.color       = 'var(--muted)';
+    }
+  }
+
+  async function invSetFreq() {
+    const freq = parseInt(document.getElementById('inv-freq').value);
+    if (isNaN(freq) || freq < 0 || freq > 6000) {
+      _invFeedback('주파수 범위: 0~6000 (0.01 Hz 단위)', 'var(--red)'); return;
+    }
+    try {
+      const resp = await fetch('/api/inverter/freq', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ freq }),
+      });
+      const d = await resp.json();
+      if (resp.ok) {
+        _invFeedback(`주파수 설정 완료: ${d.hz} Hz`, 'var(--blue)');
+      } else {
+        _invFeedback(d.detail || '주파수 설정 실패', 'var(--red)');
+      }
+    } catch (e) { _invFeedback(e.message, 'var(--red)'); }
+  }
+
+  async function invRun(run) {
+    try {
+      const resp = await fetch('/api/inverter/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run }),
+      });
+      const d = await resp.json();
+      if (resp.ok) {
+        _invSetStateBadge(run);
+        _invFeedback(run ? '컨베이어 RUN' : '컨베이어 STOP', run ? 'var(--green)' : 'var(--yellow)');
+      } else {
+        _invFeedback(d.detail || '명령 실패', 'var(--red)');
+      }
+    } catch (e) { _invFeedback(e.message, 'var(--red)'); }
+  }
+
+  // 페이지 로드 시 인버터 상태 초기화
+  (async () => {
+    try {
+      const d = await (await fetch('/api/inverter/status')).json();
+      _invSetStateBadge(d.inverter_running);
+      if (d.inverter_freq) {
+        document.getElementById('inv-freq').value = d.inverter_freq;
+        document.getElementById('inv-freq-hz').textContent = (d.inverter_freq / 100).toFixed(2) + ' Hz';
+      }
+    } catch (_) {}
+  })();
+
 </script>
 </body>
 </html>

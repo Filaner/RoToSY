@@ -9,6 +9,7 @@ RealSense camera manager.
 """
 
 import os
+import queue
 import threading
 from pathlib import Path
 from typing import Optional
@@ -100,6 +101,9 @@ class CameraManager:
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._yolo_thread: Optional[threading.Thread] = None
+        # maxsize=1: YOLO 스레드가 바쁘면 최신 프레임으로 교체
+        self._yolo_queue: queue.Queue = queue.Queue(maxsize=1)
         self._error: Optional[str] = None
 
         self._detector = VisionDetector()
@@ -124,13 +128,18 @@ class CameraManager:
             self._error = 'pyrealsense2 not installed'
             return
         self._running = True
-        self._thread  = threading.Thread(target=self._capture_loop, daemon=True)
+        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
+        if self._detector_loaded:
+            self._yolo_thread = threading.Thread(target=self._yolo_loop, daemon=True)
+            self._yolo_thread.start()
 
     def stop(self) -> None:
         self._running = False
         if self._thread:
             self._thread.join(timeout=4.0)
+        if self._yolo_thread:
+            self._yolo_thread.join(timeout=6.0)
 
     def get_jpeg(self) -> Optional[bytes]:
         with self._lock:
@@ -165,6 +174,19 @@ class CameraManager:
         return _RS_AVAILABLE
 
     # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _yolo_loop(self) -> None:
+        """YOLO 추론 전담 스레드 — 카메라 루프와 완전히 분리되어 블로킹하지 않음."""
+        while self._running:
+            try:
+                frame, depth_data, depth_scale, intrinsics = self._yolo_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            stable_dets, _ = self._detector.process(
+                frame, depth_data, depth_scale, intrinsics, self._T_base_camera
+            )
+            with self._aruco_lock:
+                self._detections = stable_dets
 
     def _init_aruco(self):
         try:
@@ -281,8 +303,8 @@ class CameraManager:
                     depth_filtered = temporal.process(depth_filtered)
                     depth_filtered = hole_filling.process(depth_filtered)
 
-                    depth_data = np.asanyarray(depth_filtered.get_data())
-                    frame      = np.asanyarray(color_frame.get_data())
+                    depth_data = np.asanyarray(depth_filtered.get_data()).copy()
+                    frame      = np.asanyarray(color_frame.get_data()).copy()
 
                     markers_out: list = []
 
@@ -365,25 +387,25 @@ class CameraManager:
                     with self._aruco_lock:
                         self._aruco_markers = markers_out
 
-                    # ── YOLO 약품 검출 ──────────────────────────────────────────
+                    # ── YOLO: 큐에 프레임을 넘기고 즉시 반환 (블로킹 없음) ────────
                     if self._detector_loaded:
-                        stable_dets, annotated = self._detector.process(
-                            frame, depth_data, depth_scale, intrinsics, self._T_base_camera
+                        try:
+                            # 큐가 가득 차면 이전 대기 프레임을 버리고 최신으로 교체
+                            self._yolo_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        self._yolo_queue.put_nowait(
+                            (frame.copy(), depth_data, depth_scale, intrinsics)
                         )
-                        frame = annotated  # 시각화된 프레임 사용
+                        # 마지막 YOLO 결과로 현재 프레임에 박스 오버레이
                         with self._aruco_lock:
-                            self._detections = stable_dets
-                    else:
-                        with self._aruco_lock:
-                            self._detections = []
+                            current_dets = list(self._detections)
+                        frame = self._detector._annotate(frame, current_dets)
 
                     ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     if ok:
                         with self._lock:
                             self._jpeg = jpeg.tobytes()
-
-                    # GIL 해제 및 CPU 점유율 조절을 위해 명시적 슬립 추가
-                    _t.sleep(0.01)
 
             finally:
                 try:
