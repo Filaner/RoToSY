@@ -286,6 +286,9 @@ class _AMRBridgeNode:
         except Exception:
             pass
 
+        # [추가] 비전 노드 온라인 판정용 구독 (web_interface가 발행하는 step_info 활용)
+        self.node.create_subscription(String, '/motion/step_info', self._vision_heartbeat_cb, 10)
+
         # Nav2 navigate_to_pose 액션 클라이언트 — 웹에서 받은 좌표로 골을 전송한다.
         from nav2_msgs.action import NavigateToPose
         from rclpy.action import ActionClient
@@ -419,12 +422,19 @@ class _AMRBridgeNode:
         self._odom_last_t = now
         update_node_seen('amr_controller')
 
-    def _amr_status_cb(self, msg) -> None:
+    def _status_cb(self, msg) -> None:
         with _lock:
             _state['amr']['status']    = msg.data
             _state['amr']['online']    = True
             _state['amr']['last_seen'] = datetime.now().isoformat()
         update_node_seen('amr_controller')
+        # arm status가 들어온다 = arm_controller 노드가 살아있다
+        update_node_seen('arm_controller')
+
+    def _vision_heartbeat_cb(self, msg: String) -> None:
+        """/motion/step_info 토픽이 수신되면 비전/팔 노드가 살아있는 것으로 간주."""
+        update_node_seen('vision_node')
+        update_node_seen('arm_controller')
 
     def _amr_battery_cb(self, msg) -> None:
         with _lock:
