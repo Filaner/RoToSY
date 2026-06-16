@@ -324,7 +324,7 @@ class MotionSequenceNode(Node):
             )
             self._step_info_pub.publish(String(data='IDLE'))
             return
-        self._step_mode = True
+        self._step_mode = False # for Debugging 
         self._stop_requested = False
 
         reference_marker_id = int(self._cabinet_geometry['marker_id'])

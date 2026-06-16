@@ -260,7 +260,7 @@ class _AMRBridgeNode:
         # Create a real rclpy Node so the executor can access .subscriptions etc.
         self.node = rclpy.create_node('hospital_web_amr_bridge')
 
-        self.node.create_subscription(String,  '/amr/status',  self._amr_status_cb,  10)
+        self.node.create_subscription(String,  '/amr/status',  self._status_cb,  10)
         self.node.create_subscription(Float32, '/amr/battery', self._amr_battery_cb, 10)
         self.node.create_subscription(String,  '/door/status', self._door_status_cb, 10)
 
@@ -431,7 +431,7 @@ class _AMRBridgeNode:
         # arm status가 들어온다 = arm_controller 노드가 살아있다
         update_node_seen('arm_controller')
 
-    def _vision_heartbeat_cb(self, msg: String) -> None:
+    def _vision_heartbeat_cb(self, msg) -> None:
         """/motion/step_info 토픽이 수신되면 비전/팔 노드가 살아있는 것으로 간주."""
         update_node_seen('vision_node')
         update_node_seen('arm_controller')
