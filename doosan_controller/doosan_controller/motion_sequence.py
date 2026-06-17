@@ -411,6 +411,14 @@ class MotionSequenceNode(Node):
             time.sleep(0.1)
         return False
 
+    def _wait_joints(self, timeout: float = 5.0) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._joints and len(self._joints) >= 6:
+                return True
+            time.sleep(0.1)
+        return False
+
     # ── 동작 헬퍼 ────────────────────────────────────────────────────────────
 
     def _home(self) -> bool:
@@ -653,6 +661,48 @@ class MotionSequenceNode(Node):
         end_pos = (x0, Cy, Cz + r)
         self.get_logger().info(f'호 이동 완료  end=({end_pos[0]:.1f},{end_pos[1]:.1f},{end_pos[2]:.1f})')
         return end_pos
+
+    def _move_c_reverse_from_end(self, start_pose: tuple, radius: float) -> bool:
+        """Step 8 MoveC(-1)의 분할 경로를 끝점에서 시작점으로 역재생."""
+        if len(start_pose) < 3:
+            self.get_logger().error('역방향 MoveC: 시작 pose 정보 부족')
+            return False
+
+        x0, y0, z0 = float(start_pose[0]), float(start_pose[1]), float(start_pose[2])
+        r = float(radius)
+        N = 6
+        BLEND = 20.0
+        Cy, Cz = y0 - r, z0
+
+        self.get_logger().info(
+            f'역방향 호 이동(MoveL×{N})  start=({x0:.1f},{Cy:.1f},{Cz + r:.1f})'
+            f'  end=({x0:.1f},{y0:.1f},{z0:.1f})  r={r:.0f}mm'
+        )
+
+        for idx, i in enumerate(range(N - 1, -1, -1), start=1):
+            theta_deg = i * 90.0 / N
+            theta_rad = math.radians(theta_deg)
+
+            px = x0
+            py = Cy + r * math.cos(theta_rad)
+            pz = Cz + r * math.sin(theta_rad)
+
+            r_x = 90.0
+            r_y = -90.0 - theta_deg
+            r_z = 0.0
+
+            blend = 0.0 if i == 0 else BLEND
+            self.get_logger().info(
+                f'  [rev {idx}/{N}] θ={theta_deg:.0f}°'
+                f'  pos=({px:.1f},{py:.1f},{pz:.1f})'
+                f'  ori=({r_x:.0f},{r_y:.0f},{r_z:.0f})'
+            )
+
+            if not self._move_l(px, py, pz, r_x, r_y, r_z, blend_radius=blend):
+                self.get_logger().error(f'역방향 호 이동 실패 θ={theta_deg:.0f}°')
+                return False
+
+        return True
 
     # ── OCR 파이프라인 ────────────────────────────────────────────────────────
 
@@ -954,8 +1004,8 @@ class MotionSequenceNode(Node):
 
             # 8.5 약품 X, Y 위치로 정렬 (현재 높이 유지)
             # TCP 스윙으로 인한 그리퍼 끝단 Y 오차 수동 보정 (기존 -97mm + 추가 -23mm = -120mm)
-            gripper_x_offset = 0.0
-            gripper_y_offset = -120.0
+            gripper_x_offset = -8.12
+            gripper_y_offset = -104.0
             target_x = bx + gripper_x_offset
             target_y = by + gripper_y_offset
 
@@ -967,7 +1017,7 @@ class MotionSequenceNode(Node):
             # 9. Z 하강 (비전 좌표 + 그리퍼 길이 보정 + 수동 보정)
             # 그리퍼 길이 97mm + 안전거리 5mm 에, 추가로 12mm 더 깊게 하강 (-12mm 보정)
             gripper_z_offset = 97.0
-            target_z = bz + 5.0 + gripper_z_offset - 12.0
+            target_z = bz + 5.0 + gripper_z_offset - 13.87
             if not self._wait_for_step(f'9. Z 하강 (목표 Z={target_z:.1f})'): return
             if not self._move_l(cx, cy, target_z, 90.0, -180.0, 0.0): return
             cz = target_z
@@ -988,8 +1038,12 @@ class MotionSequenceNode(Node):
             cz += 50
 
             # 13. MoveJ 카메라 앞 정렬
+            if not self._wait_joints():
+                self.get_logger().error('13번 전 관절 위치 미수신')
+                return
+            pre_camera_joints = tuple(self._joints[:6])
             if not self._wait_for_step('13. MoveJ 카메라 앞 정렬'): return
-            if not self._move_j([-1.09, 43.16, 55.92, 3.78, -98.59, -184.22]): return
+            if not self._move_j([-2.21, 44.37, 61.78, -0.00, -107.20, -182.00]): return
 
             # 13.5. OCR & JSON 파싱
             if not self._wait_for_step('13.5. OCR & JSON 파싱'): return
@@ -1007,13 +1061,13 @@ class MotionSequenceNode(Node):
                     self.get_logger().info('관리자가 원위치 복구를 선택. 약품을 서랍으로 되돌립니다.')
                     self._step_info_pub.publish(String(data='ROLLBACK:원위치 복구 중'))
                     ocr_rollback = True
-                    if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
-                                        pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
-                    if not self._move_l(cx, cy, pre_movec_pos[2], 90.0, -180.0, 0.0): return
-                    if not self._move_l(cx, cy, cz, 90.0, -180.0, 0.0): return
+                    if not self._move_j(list(pre_camera_joints)): return
+                    if not self._move_l(0, -50, -50, relative=True): return
+                    if not self._move_l(0, 0, -100, relative=True): return
                     if not self._set_magnet(False): return
-                    if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
-                                        pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
+                    if not self._move_l(target_x, target_y, end_pos[2], 90.0, -180.0, 0.0): return
+                    if not self._move_l(end_pos[0], end_pos[1], end_pos[2], 90.0, -180.0, 0.0): return
+                    if not self._move_c_reverse_from_end(pre_movec_pos, radius_mm): return
                     # 약품을 서랍에 되돌렸으니 배송(14~18)은 건너뛰고 서랍 닫기(19)로 합류
                 else:
                     self.get_logger().info('관리자가 강제 진행을 선택. 배송 박스로 이동합니다.')

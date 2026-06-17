@@ -2,10 +2,10 @@ camera_extrinsic:
   ros__parameters:
     base_frame: "base_link"
     camera_frame: "camera_color_optical_frame"
-    translation_xyz: [0.62270570, 0.08602302, 0.87020823]
-    rotation_quat_xyzw: [0.72335244, 0.69012262, -0.01827587, 0.01257044]
+    translation_xyz: [0.62383360, 0.10158022, 0.86680679]
+    rotation_quat_xyzw: [0.71047899, 0.70297102, -0.02610549, 0.01923147]
 
-# manual_calib: samples=4  mean=1.67mm  max=2.04mm
+# manual_calib: samples=15  mean=6.38mm  max=10.52mm
 
 hand_eye_result:
   ros__parameters:
