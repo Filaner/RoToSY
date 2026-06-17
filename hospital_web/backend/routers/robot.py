@@ -116,6 +116,15 @@ async def motion_stop():
     return r
 
 
+@router.post('/motion/reset')
+async def motion_reset():
+    """OCR 미일치 시 '원위치 복구' — motion_sequence 가 약품을 서랍에 되돌린다.
+    (비상정지가 아니라 곱게 롤백하는 경로. _reset_cb 가 OCR 대기 중이면 rollback 결정으로 처리.)"""
+    r = await _proxy('/api/motion/reset')
+    ms.add_audit('admin', 'MOTION_OCR_ROLLBACK', 'OCR 미일치 → 원위치 복구 선택')
+    return r
+
+
 # ── Gripper / Magnet ─────────────────────────────────────────────────────────
 
 @router.post('/gripper/on')

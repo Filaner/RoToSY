@@ -17,6 +17,11 @@ class MissionReq(BaseModel):
 class ConfirmReq(BaseModel):
     actor: str  # 'admin' | 'pharmacist'
 
+class StatusUpdateReq(BaseModel):
+    status: str
+    detail: str = ''
+    actor: str = 'nurse'
+
 
 @router.post('/estop_all')
 async def global_estop():
@@ -43,6 +48,14 @@ async def confirm_loading(req: ConfirmReq):
     if req.actor not in ('admin', 'pharmacist'):
         raise HTTPException(status_code=400, detail="actor must be 'admin' or 'pharmacist'")
     return ms.confirm_loading(req.actor)
+
+
+@router.post('/mission/update')
+async def update_mission_status(req: StatusUpdateReq):
+    """임의 상태 전환 (예: 간호사 수령 → PICKED_UP). 2단계 경유 배송 플로우용."""
+    data = ms.update_status(req.status, actor=req.actor, detail=req.detail)
+    ms.add_audit(req.actor, f'MISSION_{req.status}', req.detail)
+    return data
 
 
 @router.post('/mission/complete')

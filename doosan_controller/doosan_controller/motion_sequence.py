@@ -219,6 +219,10 @@ class MotionSequenceNode(Node):
         self._step_mode = False
         self._next_step_event = threading.Event()
         self._stop_requested = False
+        # OCR 미일치 관리자 결정 대기용 (hospital_web 자율모드에서도 항상 정지하기 위해
+        # _step_mode 와 분리된 전용 채널). next_step=강제진행 / reset=원위치복구.
+        self._ocr_pending = False
+        self._ocr_decision = None
         self._current_sequence_thread = None
         self._is_running = False
         self._active_goal_handle = None
@@ -251,6 +255,8 @@ class MotionSequenceNode(Node):
 
     def _next_step_cb(self, msg: Empty):
         self.get_logger().info('Next step signal received')
+        if self._ocr_pending:
+            self._ocr_decision = 'proceed'   # OCR 미일치 → 강제 진행
         self._next_step_event.set()
 
     def _stop_cb(self, msg: Empty):
@@ -259,6 +265,13 @@ class MotionSequenceNode(Node):
 
     def _reset_cb(self, msg: Empty):
         self.get_logger().info('Reset signal received')
+        # OCR 결정 대기 중이면 파괴적 reset 대신 '원위치 복구' 결정으로 처리
+        # (전자석 즉시 OFF로 약품을 떨구지 않고, 시퀀스가 곱게 롤백하도록 둔다)
+        if self._ocr_pending:
+            self.get_logger().info('OCR 대기 중 reset → 원위치 복구로 처리')
+            self._ocr_decision = 'rollback'
+            self._next_step_event.set()
+            return
         self._request_reset()
 
     def _request_reset(self):
@@ -339,6 +352,25 @@ class MotionSequenceNode(Node):
         self._current_sequence_thread.start()
 
     # ── 유틸 ─────────────────────────────────────────────────────────────────
+
+    def _wait_for_ocr_decision(self, detail: str) -> str:
+        """OCR 미일치 시 _step_mode 와 무관하게 항상 관리자 결정을 기다린다.
+        hospital_web 은 자율모드(_step_mode=False)라 _wait_for_step 이 안 멈추므로
+        전용 채널로 블로킹한다.
+        반환: 'proceed'(강제진행) | 'rollback'(원위치복구) | 'abort'(비상정지).
+
+        주의: step_info 를 'OCR_WARN:' 으로 '지속' 발행한다. (WAIT: 로 덮으면 웹이
+        최신 step 을 OCR_WARN 으로 못 보고 팝업이 안 뜬다 — 대기 내내 OCR_WARN 유지.)"""
+        self._ocr_decision = None
+        self._ocr_pending = True
+        self._next_step_event.clear()
+        self._step_info_pub.publish(String(data=f'OCR_WARN:{detail}'))
+        self.get_logger().warn(f'[OCR] 관리자 결정 대기(자율모드 무관 항상 정지): {detail}')
+        self._next_step_event.wait()          # 항상 블록
+        self._ocr_pending = False
+        if self._stop_requested:              # 비상정지(stop)로 깨어난 경우
+            return 'abort'
+        return self._ocr_decision or 'proceed'
 
     def _wait_for_step(self, step_name: str):
         """Step 모드일 경우 신호를 기다림."""
@@ -963,17 +995,18 @@ class MotionSequenceNode(Node):
             if not self._wait_for_step('13.5. OCR & JSON 파싱'): return
             ocr_status = self._ocr_and_parse()
 
-            # [핵심] OCR 결과에 따른 엄격한 분기 로직 (MATCHED가 아니면 무조건 대기/복구)
+            # [핵심] OCR 결과 분기 — hospital_web 은 자율모드(_step_mode=False)라
+            # _wait_for_step 이 안 멈춘다. 전용 결정 대기로 항상 정지하고 관리자 선택을 받는다.
+            ocr_rollback = False
             if ocr_status != 'MATCHED':
-                self.get_logger().error(f'[🚨경고] OCR 결과: {ocr_status}. 작업자의 확인을 기다립니다.')
-                self._step_info_pub.publish(String(data=f'OCR_WARN:{ocr_status} - [강제 진행] 또는 [원위치 복구] 선택 대기'))
-                
-                # 웹 등에서 'motion/next_step' (강제 진행) 또는 'motion/reset' (복구) 신호를 줄 때까지 대기
-                if not self._wait_for_step('13.6. 관리자 검증 대기 (진행/복구)'): 
-                    # 사용자가 복구(Reset/Stop)를 선택한 경우 Rollback 시퀀스 실행
-                    self.get_logger().info('사용자가 복구(Rollback)를 선택했습니다. 약품을 서랍으로 되돌립니다.')
+                self.get_logger().error(f'[🚨경고] OCR 결과: {ocr_status}. 관리자 확인을 기다립니다.')
+                decision = self._wait_for_ocr_decision(f'{ocr_status} - [강제 진행] 또는 [원위치 복구] 선택 대기')
+                if decision == 'abort':
+                    return
+                if decision == 'rollback':
+                    self.get_logger().info('관리자가 원위치 복구를 선택. 약품을 서랍으로 되돌립니다.')
                     self._step_info_pub.publish(String(data='ROLLBACK:원위치 복구 중'))
-                    
+                    ocr_rollback = True
                     if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
                                         pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
                     if not self._move_l(cx, cy, pre_movec_pos[2], 90.0, -180.0, 0.0): return
@@ -981,33 +1014,34 @@ class MotionSequenceNode(Node):
                     if not self._set_magnet(False): return
                     if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
                                         pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
-                    # 이후 서랍 닫기 19번으로 공통 합류
+                    # 약품을 서랍에 되돌렸으니 배송(14~18)은 건너뛰고 서랍 닫기(19)로 합류
                 else:
-                    self.get_logger().info('사용자가 강제 진행을 선택했습니다. 배송 박스로 이동합니다.')
+                    self.get_logger().info('관리자가 강제 진행을 선택. 배송 박스로 이동합니다.')
 
-            # 정상 시나리오 (MATCHED) 또는 강제 진행 선택 시
-            if self._step_mode and self._stop_requested: return # Rollback으로 빠지지 않았는지 재확인
-            
-            # 14. MoveJ 병동 박스 정렬
-            if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return
-            if not self._move_j([31.04, 48.6, 38.63, 0.0, 92.77, 121.04]): return
+            if self._stop_requested: return
 
-            # 15. Z -150mm 하강
-            if not self._wait_for_step('15. Z -150mm 하강'): return
-            if not self._move_l(0, 0, -150, relative=True): return
+            # 14~18: 배송 박스 전달 (롤백 시 건너뜀)
+            if not ocr_rollback:
+                # 14. MoveJ 병동 박스 정렬
+                if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return
+                if not self._move_j([31.04, 48.6, 38.63, 0.0, 92.77, 121.04]): return
 
-            # 16. 전자석 OFF (배치)
-            if not self._wait_for_step('16. 전자석 OFF'): return
-            if not self._set_magnet(False): return
+                # 15. Z -150mm 하강
+                if not self._wait_for_step('15. Z -150mm 하강'): return
+                if not self._move_l(0, 0, -150, relative=True): return
 
-            # 17. Z +150mm 상승
-            if not self._wait_for_step('17. Z +150mm 상승'): return
-            if not self._move_l(0, 0, 150, relative=True): return
+                # 16. 전자석 OFF (배치)
+                if not self._wait_for_step('16. 전자석 OFF'): return
+                if not self._set_magnet(False): return
 
-            # 18. MoveC 전 위치로 복귀
-            if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return
-            if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
-                                pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
+                # 17. Z +150mm 상승
+                if not self._wait_for_step('17. Z +150mm 상승'): return
+                if not self._move_l(0, 0, 150, relative=True): return
+
+                # 18. MoveC 전 위치로 복귀
+                if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return
+                if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
+                                    pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5]): return
 
             # [공통] 이제 서랍 닫기 공통 단계로 진입 (19번부터)
             cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]

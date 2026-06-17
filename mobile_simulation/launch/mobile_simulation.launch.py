@@ -126,6 +126,14 @@ def generate_launch_description():
 
     nav_params = os.path.join(turtlebot3_navigation_share, 'param', 'humble', 'waffle.yaml')
 
+    # [TF 레이스 방지] 최초 colcon build 후 첫 실행 시 gazebo/플러그인 로드가 느려
+    # diff_drive(odom→base_footprint)가 늦게 떠서, nav2 local_costmap이 base_link→odom
+    # TF를 못 찾고 "two unconnected trees"로 죽는다. nav2와 initial_pose를 '함께' 지연시켜
+    # (따로 늦추면 AMCL 활성화 후 위치추정 없음으로 타임아웃됨 — 둘의 상대 타이밍 유지)
+    # gazebo TF가 흐른 뒤에 nav2가 뜨도록 한다. 매우 콜드한 첫 빌드 실행에서 여전히 레이스가
+    # 나면 이 값을 키우면 된다.
+    nav2_start_delay = 8.0
+
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('show_gazebo_client', default_value='true'),
@@ -163,27 +171,34 @@ def generate_launch_description():
                        '-Y', initial_yaw],
             output='screen'
         ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(nav2_bringup_share, 'launch', 'bringup_launch.py')),
-            launch_arguments={'use_sim_time': use_sim_time,
-                              'map': map_yaml,
-                              'params_file': nav_params,
-                              'autostart': 'True'}.items()
-        ),
-        # Localization bootstrap: 약실(spawn) 위치를 initialpose 로 반복 발행해 AMCL
-        # 위치추정을 확정한다. (원래 demo_goal_sender 처럼 지연 없이 즉시 시작 — 5초
-        # 지연을 넣으면 Nav2 activation 이 localization 보다 먼저 타임아웃됨.)
-        # 골 전송은 웹(ros_bridge)이 담당하므로 여기선 안 함.
-        Node(
-            package='mobile_simulation',
-            executable='initial_pose_publisher',
-            name='mobile_initial_pose_publisher',
-            output='screen',
-            parameters=[{'initial_x': initial_x,
-                         'initial_y': initial_y,
-                         'initial_yaw': initial_yaw,
-                         'repetitions': 15},
-                        {'use_sim_time': use_sim_time}]
+        # nav2 bringup + initial_pose 를 nav2_start_delay 초 뒤에 '함께' 시작.
+        # gazebo/diff_drive TF(odom→base_footprint)가 흐른 뒤 nav2가 떠서 costmap이
+        # TF를 정상적으로 찾고, initial_pose가 동시에 발행되어 AMCL이 즉시 위치추정한다.
+        # (둘을 한 TimerAction에 넣어 상대 타이밍을 유지 — 이게 핵심.)
+        TimerAction(
+            period=nav2_start_delay,
+            actions=[
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(os.path.join(nav2_bringup_share, 'launch', 'bringup_launch.py')),
+                    launch_arguments={'use_sim_time': use_sim_time,
+                                      'map': map_yaml,
+                                      'params_file': nav_params,
+                                      'autostart': 'True'}.items()
+                ),
+                # Localization bootstrap: 약실(spawn) 위치를 initialpose 로 1초마다 반복
+                # 발행해 AMCL 위치추정을 확정한다. 골 전송은 웹(ros_bridge)이 담당.
+                Node(
+                    package='mobile_simulation',
+                    executable='initial_pose_publisher',
+                    name='mobile_initial_pose_publisher',
+                    output='screen',
+                    parameters=[{'initial_x': initial_x,
+                                 'initial_y': initial_y,
+                                 'initial_yaw': initial_yaw,
+                                 'repetitions': 15},
+                                {'use_sim_time': use_sim_time}]
+                ),
+            ]
         ),
         # 단독 데모용 — auto_start_demo:=true 일 때만 하드코딩 골을 한 번 전송.
         Node(

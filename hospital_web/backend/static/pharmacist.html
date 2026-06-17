@@ -435,6 +435,22 @@ input[type=number].or-input{
   </div>
 </div>
 
+<!-- ── OCR 미일치 결정 Modal ── -->
+<div id="ocr-modal-bg" style="display:none;position:fixed;inset:0;background:#0007;z-index:300;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:2px solid var(--yellow);border-radius:.75rem;padding:1.5rem;width:430px;max-width:92vw;">
+    <div style="font-weight:800;color:var(--yellow);font-size:1.05rem;margin-bottom:.5rem;">⚠ OCR 검증 불일치 — 검수자 판단 필요</div>
+    <div style="font-size:.9rem;color:var(--text);margin-bottom:.5rem;line-height:1.5;">
+      로봇이 픽업한 약품이 OCR 검증과 일치하지 않습니다. 실물을 확인하고 결정하세요.
+    </div>
+    <div id="ocr-modal-detail" style="font-size:.82rem;color:var(--muted);background:#f8fafc;border:1px solid var(--border);border-radius:.4rem;padding:.5rem .65rem;margin-bottom:1rem;font-family:monospace;word-break:break-all;">—</div>
+    <div class="btn-group">
+      <button class="btn btn-yellow" style="flex:1;" onclick="ocrDecision('proceed')">강제 진행 (배송 계속)</button>
+      <button class="btn btn-red"    style="flex:1;" onclick="ocrDecision('rollback')">원위치 복구 (서랍 반환)</button>
+    </div>
+    <div id="ocr-modal-feedback" style="font-size:.8rem;margin-top:.5rem;min-height:1em;"></div>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════
 // State
@@ -586,8 +602,42 @@ function connect() {
         missionState = s.mission;
         applyMissionState(s.mission);
       }
+      // OCR 미일치 결정 팝업: motion_step 이 OCR_WARN 이면 띄우고, 아니면 닫는다.
+      const step = s.motion_step || 'IDLE';
+      if (step.startsWith('OCR_WARN')) showOcrModal(step);
+      else                            hideOcrModal();
     } catch(_) {}
   };
+}
+
+// ── OCR 미일치 결정 모달 ──
+function showOcrModal(step) {
+  const bg = document.getElementById('ocr-modal-bg');
+  if (!bg || bg.style.display === 'flex') return;   // 이미 떠있으면 유지
+  const detail = step.replace(/^OCR_WARN:/, '').trim();
+  document.getElementById('ocr-modal-detail').textContent = detail || '불일치 상세 없음';
+  document.getElementById('ocr-modal-feedback').textContent = '';
+  bg.style.display = 'flex';
+}
+function hideOcrModal() {
+  const bg = document.getElementById('ocr-modal-bg');
+  if (bg && bg.style.display !== 'none') bg.style.display = 'none';
+}
+async function ocrDecision(kind) {
+  const fb = document.getElementById('ocr-modal-feedback');
+  const path = kind === 'proceed' ? '/api/robot/motion/next' : '/api/robot/motion/reset';
+  fb.style.color = 'var(--muted)';
+  fb.textContent = kind === 'proceed' ? '강제 진행 신호 전송 중...' : '원위치 복구 신호 전송 중...';
+  try {
+    const res = await fetch(path, { method: 'POST' });
+    if (!res.ok) throw new Error(`서버 ${res.status}`);
+    fb.style.color = 'var(--green)';
+    fb.textContent = kind === 'proceed' ? '강제 진행 — 배송 계속' : '원위치 복구 — 서랍 반환';
+    setTimeout(hideOcrModal, 800);
+  } catch (e) {
+    fb.style.color = 'var(--red)';
+    fb.textContent = `전송 실패: ${e.message}`;
+  }
 }
 
 // ═══════════════════════════════════════════════

@@ -989,6 +989,22 @@ body{
   </div>
 </div>
 
+<!-- ── OCR 미일치 결정 Modal ── -->
+<div id="ocr-modal-bg" style="display:none;position:fixed;inset:0;background:#000a;z-index:300;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:2px solid var(--yellow);border-radius:.75rem;padding:1.5rem;width:420px;max-width:92vw;">
+    <div style="font-weight:700;color:var(--yellow);font-size:1.05rem;margin-bottom:.5rem;">⚠ OCR 검증 불일치 — 관리자 판단 필요</div>
+    <div id="ocr-modal-msg" style="font-size:.9rem;color:var(--text);margin-bottom:.5rem;line-height:1.5;">
+      픽업한 약품이 OCR 검증과 일치하지 않습니다.
+    </div>
+    <div id="ocr-modal-detail" style="font-size:.82rem;color:var(--muted);background:var(--bg);border:1px solid var(--border);border-radius:.4rem;padding:.5rem .65rem;margin-bottom:1rem;font-family:var(--mono);word-break:break-all;">—</div>
+    <div class="btn-group">
+      <button class="btn btn-yellow btn-full" onclick="ocrDecision('proceed')">강제 진행 (배송 계속)</button>
+      <button class="btn btn-red btn-full"    onclick="ocrDecision('rollback')">원위치 복구 (서랍에 반환)</button>
+    </div>
+    <div class="feedback" id="ocr-modal-feedback" style="margin-top:.5rem;"></div>
+  </div>
+</div>
+
 <style>
 .num-in{
   width:100%;background:var(--bg);border:1px solid var(--border);
@@ -1068,12 +1084,15 @@ function applySequence(s) {
   if (step.startsWith('OCR_WARN')) {
     stepEl.style.color = 'var(--yellow)';
     stepEl.style.fontWeight = '700';
+    showOcrModal(step);
   } else if (step.startsWith('ROLLBACK')) {
     stepEl.style.color = 'var(--red)';
     stepEl.style.fontWeight = '700';
+    hideOcrModal();
   } else {
     stepEl.style.color = 'inherit';
     stepEl.style.fontWeight = 'normal';
+    hideOcrModal();
   }
 
   setText('magnet-state',       mag ? 'ON' : 'OFF');
@@ -1102,6 +1121,36 @@ function applySequence(s) {
   el('btn-manual-go').disabled    = autoActive;
   el('btn-manual-next').disabled  = autoActive;
   el('btn-manual-stop').disabled  = autoActive;
+}
+
+// ── OCR 미일치 결정 모달 ──
+function showOcrModal(step) {
+  const bg = el('ocr-modal-bg');
+  if (!bg || bg.style.display === 'flex') return;   // 이미 떠있으면 유지
+  const detail = step.replace(/^OCR_WARN:/, '').trim();
+  setText('ocr-modal-detail', detail || '불일치 상세 없음');
+  el('ocr-modal-feedback').textContent = '';
+  bg.style.display = 'flex';
+}
+function hideOcrModal() {
+  const bg = el('ocr-modal-bg');
+  if (bg && bg.style.display !== 'none') bg.style.display = 'none';
+}
+async function ocrDecision(kind) {
+  const fb = el('ocr-modal-feedback');
+  const path = kind === 'proceed' ? '/api/robot/motion/next' : '/api/robot/motion/reset';
+  fb.style.color = 'var(--muted)';
+  fb.textContent = kind === 'proceed' ? '강제 진행 신호 전송 중...' : '원위치 복구 신호 전송 중...';
+  try {
+    const res = await fetch(path, { method: 'POST' });
+    if (!res.ok) throw new Error(`서버 ${res.status}`);
+    fb.style.color = 'var(--green)';
+    fb.textContent = kind === 'proceed' ? '강제 진행 — 배송 계속' : '원위치 복구 — 서랍 반환';
+    setTimeout(hideOcrModal, 800);
+  } catch (e) {
+    fb.style.color = 'var(--red)';
+    fb.textContent = `전송 실패: ${e.message}`;
+  }
 }
 
 // ── Robot ──

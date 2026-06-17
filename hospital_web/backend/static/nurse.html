@@ -456,6 +456,9 @@ textarea.form-input{resize:vertical;min-height:70px;}
         <button id="receipt-btn" class="not-ready" onclick="confirmReceipt()">
            약품 수령 확인
         </button>
+        <button id="complete-btn" class="btn btn-green" style="display:none;width:100%;margin-top:.5rem;" onclick="completeDelivery()">
+           투약 완료 (배송 종료)
+        </button>
         <div class="feedback" id="receipt-feedback"></div>
 
         <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
@@ -642,14 +645,20 @@ function applyAMR(a) {
   el('recv-status-text').textContent = labels[status] || status;
   el('recv-dest').textContent        = a.destination ? '목적지: ' + a.destination : '';
 
-  const receiptBtn = el('receipt-btn');
-  if (status === 'ARRIVED') {
-    receiptBtn.className = 'ready';
-    receiptBtn.disabled  = false;
-  } else {
-    receiptBtn.className = 'not-ready';
-    receiptBtn.disabled  = true;
-  }
+  const receiptBtn  = el('receipt-btn');
+  const completeBtn = el('complete-btn');
+  const dest        = a.destination || '';
+  const atStation   = (status === 'ARRIVED' && dest === '간호스테이션');
+  const atWard      = (status === 'ARRIVED' && dest && dest !== '간호스테이션');
+
+  // 수령 버튼: 1차(간호스테이션) 도착 때만 활성. 병동 도착 땐 숨김.
+  receiptBtn.className     = atStation ? 'ready' : 'not-ready';
+  receiptBtn.disabled      = !atStation;
+  receiptBtn.style.display = atWard ? 'none' : '';
+
+  // 투약 완료 버튼: 2차(병동) 최종 도착 때만 노출.
+  completeBtn.style.display = atWard ? '' : 'none';
+  completeBtn.disabled      = !atWard;
 
   // Arrival banner
   const banner = el('amr-arrival-banner');
@@ -987,22 +996,25 @@ async function confirmReceipt() {
   const fb = el('receipt-feedback');
 
   if (isReceiptPhase) {
-    if (amrState.status !== 'ARRIVED' || missionState.status !== 'ARRIVED') return;
-    
+    // 1차(간호스테이션) 도착 상태에서만 수령 처리
+    if (amrState.status !== 'ARRIVED' || amrState.destination !== '간호스테이션') return;
+
     fb.style.color = 'var(--teal)';
     fb.textContent = '적재함 개방 및 수령 확인 처리 중...';
     btn.disabled = true;
 
     try {
       // 1. 적재함 뚜껑 열기
-      await fetch('/api/amr/door/open', {method: 'POST'});
-      
+      const rOpen = await fetch('/api/amr/door/open', {method: 'POST'});
+      if (!rOpen.ok) throw new Error(`적재함 개방 실패 (${rOpen.status})`);
+
       // 2. 미션 상태 업데이트 (PICKED_UP) -> 이 상태가 되면 2차 목적지 출발 가능
-      await fetch('/api/system/mission/update', {
+      const rUpd = await fetch('/api/system/mission/update', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({status: 'PICKED_UP', detail: '간호사 수령 및 검수 완료'})
       });
+      if (!rUpd.ok) throw new Error(`수령 상태 갱신 실패 (${rUpd.status})`);
 
       // 수령 이력 추가 (로컬 렌더링)
       const now = new Date().toTimeString().substring(0,8);
@@ -1042,14 +1054,19 @@ async function confirmReceipt() {
 
     try {
       // 1. 적재함 뚜껑 닫기
-      await fetch('/api/amr/door/close', {method: 'POST'});
-      
+      const rClose = await fetch('/api/amr/door/close', {method: 'POST'});
+      if (!rClose.ok) throw new Error(`적재함 닫기 실패 (${rClose.status})`);
+
       // 2. 최종 목적지(병동)로 출발
-      await fetch('/api/amr/dispatch', {
+      const rDisp = await fetch('/api/amr/dispatch', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({destination: ''}) // 백엔드에서 mission['destination']을 알아서 사용함
       });
+      if (!rDisp.ok) {
+        const d = await rDisp.json().catch(() => ({}));
+        throw new Error(d.detail || `병동 출발 실패 (${rDisp.status})`);
+      }
 
       fb.style.color = 'var(--green)';
       fb.textContent = `V 병동 출발 완료`;
@@ -1068,6 +1085,29 @@ async function confirmReceipt() {
       fb.textContent = `출발 오류: ${e.message}`;
       btn.disabled = false;
     }
+  }
+}
+
+// 2차(병동) 최종 도착 후 간호사가 투약 완료 → 미션 COMPLETED 종료
+async function completeDelivery() {
+  const btn = el('complete-btn');
+  const fb  = el('receipt-feedback');
+  if (amrState.status !== 'ARRIVED' || amrState.destination === '간호스테이션') return;
+
+  fb.style.color = 'var(--teal)';
+  fb.textContent = '투약 완료 처리 중...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/system/mission/complete', {method: 'POST'});
+    if (!res.ok) throw new Error(`완료 처리 실패 (${res.status})`);
+    fb.style.color = 'var(--green)';
+    fb.textContent = 'V 투약 완료 — 배송 종료';
+    btn.style.display = 'none';
+    setTimeout(() => { fb.textContent = ''; }, 5000);
+  } catch (e) {
+    fb.style.color = 'var(--red)';
+    fb.textContent = `완료 처리 오류: ${e.message}`;
+    btn.disabled = false;
   }
 }
 
