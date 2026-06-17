@@ -1024,7 +1024,7 @@ class MotionSequenceNode(Node):
             if not ocr_rollback:
                 # 14. MoveJ 병동 박스 정렬
                 if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return
-                if not self._move_j([31.04, 48.6, 38.63, 0.0, 92.77, 121.04]): return
+                if not self._move_j([31.04, 48.6, 38.63, 0.0, 92.77, -58.96]): return
 
                 # 15. Z -150mm 하강
                 if not self._wait_for_step('15. Z -150mm 하강'): return
