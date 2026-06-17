@@ -98,6 +98,7 @@ class CameraManager:
         self._aruco_lock = threading.Lock()
         self._aruco_markers: list = []
         self._detections: list = []
+        self._top_faces: list = []
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -152,6 +153,10 @@ class CameraManager:
     def get_detections(self) -> list:
         with self._aruco_lock:
             return list(self._detections)
+
+    def get_top_faces(self) -> list:
+        with self._aruco_lock:
+            return list(self._top_faces)
 
     @property
     def detections(self) -> list:
@@ -211,6 +216,170 @@ class CameraManager:
         patch = depth_data[y1:y2, x1:x2].astype(np.float32) * depth_scale
         valid = patch[(patch > 0.05) & (patch < 5.0)]
         return float(np.median(valid)) if len(valid) > 0 else None
+
+    @staticmethod
+    def _depth_stats_in_polygon(
+        depth_data: np.ndarray,
+        depth_scale: float,
+        polygon: np.ndarray,
+    ) -> tuple[Optional[float], Optional[float], int]:
+        mask = np.zeros(depth_data.shape, dtype=np.uint8)
+        cv2.fillConvexPoly(mask, polygon.astype(np.int32), 255)
+        values = depth_data[mask > 0].astype(np.float32) * depth_scale
+        valid = values[(values > 0.05) & (values < 5.0)]
+        if valid.size < 20:
+            return None, None, int(valid.size)
+        return float(np.median(valid)), float(np.std(valid)), int(valid.size)
+
+    def _detect_top_faces(
+        self,
+        frame: np.ndarray,
+        depth_data: np.ndarray,
+        depth_scale: float,
+        intrinsics,
+        detections: list,
+    ) -> list:
+        """Detect rectangular top-face candidates inside YOLO bounding boxes."""
+        height, width = frame.shape[:2]
+        faces = []
+        for detection in detections:
+            bbox = detection.get('bbox')
+            if bbox is None or len(bbox) != 4:
+                continue
+
+            x1, y1, x2, y2 = [int(value) for value in bbox]
+            x1 = max(0, min(width - 1, x1))
+            y1 = max(0, min(height - 1, y1))
+            x2 = max(0, min(width, x2))
+            y2 = max(0, min(height, y2))
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            roi = frame[y1:y2, x1:x2]
+            if roi.size == 0:
+                continue
+
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray, (5, 5), 0)
+            kernel = np.ones((5, 5), np.uint8)
+
+            contour_sets = []
+            for low, high in ((35, 110), (45, 130), (60, 170)):
+                edges = cv2.Canny(gray, low, high)
+                contour_sets.append(edges)
+                closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=1)
+                contour_sets.append(closed)
+                connected = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+                connected = cv2.dilate(connected, kernel, iterations=1)
+                contour_sets.append(connected)
+
+            bbox_area = max(1, (x2 - x1) * (y2 - y1))
+            candidates = []
+            margin_px = 8
+            for edge_image in contour_sets:
+                contours, _ = cv2.findContours(
+                    edge_image,
+                    cv2.RETR_LIST,
+                    cv2.CHAIN_APPROX_SIMPLE,
+                )
+                for contour in contours:
+                    area = cv2.contourArea(contour)
+                    if area < 800 or area > 120000:
+                        continue
+
+                    area_ratio = area / float(bbox_area)
+                    if area_ratio < 0.03 or area_ratio > 0.85:
+                        continue
+
+                    rect = cv2.minAreaRect(contour)
+                    (cx, cy), (rw, rh), angle = rect
+                    if rw < 12 or rh < 12:
+                        continue
+
+                    ratio = max(rw, rh) / max(1.0, min(rw, rh))
+                    if ratio < 0.35 or ratio > 3.5:
+                        continue
+
+                    rectangularity = area / max(1.0, rw * rh)
+                    if rectangularity < 0.45:
+                        continue
+
+                    center_x = int(round(cx)) + x1
+                    center_y = int(round(cy)) + y1
+                    if center_x < 0 or center_x >= width or center_y < 0 or center_y >= height:
+                        continue
+
+                    box = cv2.boxPoints(((cx + x1, cy + y1), (rw, rh), angle)).astype(int)
+                    if (
+                        np.any(box[:, 0] < x1 - margin_px)
+                        or np.any(box[:, 0] > x2 + margin_px)
+                        or np.any(box[:, 1] < y1 - margin_px)
+                        or np.any(box[:, 1] > y2 + margin_px)
+                    ):
+                        continue
+
+                    depth_m = self._sample_depth_patch(
+                        depth_data, depth_scale, center_x, center_y, radius=7
+                    )
+                    if depth_m is None or depth_m < 0.15 or depth_m > 1.50:
+                        continue
+
+                    point = rs.rs2_deproject_pixel_to_point(
+                        intrinsics, [float(center_x), float(center_y)], depth_m
+                    )
+                    camera_position = [float(point[0]), float(point[1]), float(point[2])]
+                    base_position = None
+                    if self._T_base_camera is not None:
+                        p_base = self._T_base_camera @ np.array([point[0], point[1], point[2], 1.0])
+                        base_position = [float(p_base[0]), float(p_base[1]), float(p_base[2])]
+
+                    size_score = min(area_ratio, 0.55)
+                    score = (rectangularity * 2.0) + size_score
+                    candidates.append({
+                        'center_px': [center_x, center_y],
+                        'area_px': float(area),
+                        'corners': box.tolist(),
+                        'camera_position_m': camera_position,
+                        'base_position_m': base_position,
+                        'score': float(score),
+                        'yolo_bbox': [x1, y1, x2, y2],
+                        'yolo_class_name': detection.get('class_name'),
+                        'yolo_confidence': detection.get('confidence'),
+                    })
+
+            if candidates:
+                faces.append(max(candidates, key=lambda item: item['score']))
+
+        kept = []
+        for face in sorted(faces, key=lambda item: item['area_px'], reverse=True):
+            cx, cy = face['center_px']
+            if any(np.hypot(cx - other['center_px'][0], cy - other['center_px'][1]) < 35 for other in kept):
+                continue
+            kept.append(face)
+        return sorted(kept, key=lambda item: item['center_px'][0])
+
+    @staticmethod
+    def _annotate_top_faces(frame: np.ndarray, faces: list) -> np.ndarray:
+        annotated = frame.copy()
+        for index, face in enumerate(faces, start=1):
+            corners = np.array(face['corners'], dtype=np.int32).reshape((-1, 1, 2))
+            cx, cy = face['center_px']
+            cv2.polylines(annotated, [corners], True, (255, 0, 255), 3)
+            cv2.circle(annotated, (cx, cy), 6, (255, 0, 255), -1)
+            label = f"TOP {index}"
+            base = face.get('base_position_m')
+            if base is not None:
+                label += f" ({base[0]*1000:.0f},{base[1]*1000:.0f},{base[2]*1000:.0f})mm"
+            text_origin = (cx + 8, max(22, cy - 10))
+            cv2.putText(
+                annotated, label, text_origin,
+                cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 0, 0), 4, cv2.LINE_AA,
+            )
+            cv2.putText(
+                annotated, label, text_origin,
+                cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 0, 255), 2, cv2.LINE_AA,
+            )
+        return annotated
 
     def _capture_loop(self) -> None:
         import time as _t
@@ -304,7 +473,8 @@ class CameraManager:
                     depth_filtered = hole_filling.process(depth_filtered)
 
                     depth_data = np.asanyarray(depth_filtered.get_data()).copy()
-                    frame      = np.asanyarray(color_frame.get_data()).copy()
+                    raw_frame  = np.asanyarray(color_frame.get_data()).copy()
+                    frame      = raw_frame.copy()
 
                     markers_out: list = []
 
@@ -384,10 +554,8 @@ class CameraManager:
                                     (0, 255, 255), 2, cv2.LINE_AA,
                                 )
 
-                    with self._aruco_lock:
-                        self._aruco_markers = markers_out
-
                     # ── YOLO: 큐에 프레임을 넘기고 즉시 반환 (블로킹 없음) ────────
+                    current_dets = []
                     if self._detector_loaded:
                         try:
                             # 큐가 가득 차면 이전 대기 프레임을 버리고 최신으로 교체
@@ -395,12 +563,21 @@ class CameraManager:
                         except queue.Empty:
                             pass
                         self._yolo_queue.put_nowait(
-                            (frame.copy(), depth_data, depth_scale, intrinsics)
+                            (raw_frame.copy(), depth_data, depth_scale, intrinsics)
                         )
-                        # 마지막 YOLO 결과로 현재 프레임에 박스 오버레이
                         with self._aruco_lock:
                             current_dets = list(self._detections)
+
+                    top_faces = self._detect_top_faces(
+                        raw_frame, depth_data, depth_scale, intrinsics, current_dets
+                    )
+                    with self._aruco_lock:
+                        self._aruco_markers = markers_out
+                        self._top_faces = top_faces
+
+                    if self._detector_loaded:
                         frame = self._detector._annotate(frame, current_dets)
+                    frame = self._annotate_top_faces(frame, top_faces)
 
                     ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     if ok:

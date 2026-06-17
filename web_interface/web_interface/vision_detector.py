@@ -91,11 +91,6 @@ class VisionDetector:
             return False
 
     @staticmethod
-    def _unsharp(image: np.ndarray) -> np.ndarray:
-        blurred = cv2.GaussianBlur(image, (5, 5), 0)
-        return cv2.addWeighted(image, 2.0, blurred, -1.0, 0)
-
-    @staticmethod
     def _sample_depth(
         depth_data: np.ndarray,
         depth_scale: float,
@@ -269,11 +264,9 @@ class VisionDetector:
 
         self._last_inference_at = now
         
-        # 선명화 기법 (2.0, -1.0 고정)
-        sharpened = self._unsharp(color)
         try:
             result = self.model.predict(
-                sharpened,
+                color,
                 conf=min(self.medicine_conf, self.water_pack_conf),
                 imgsz=640,
                 device=self.device,
@@ -292,7 +285,7 @@ class VisionDetector:
             height, width = color.shape[:2]
             x1_roi, y1_roi = 0, height // 4
             x2_roi, y2_roi = width // 2, height
-            roi = sharpened[y1_roi:y2_roi, x1_roi:x2_roi]
+            roi = color[y1_roi:y2_roi, x1_roi:x2_roi]
             
             try:
                 roi_result = self.model.predict(

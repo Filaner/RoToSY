@@ -22,6 +22,7 @@ setup(
     entry_points={
         'console_scripts': [
             'web_server = web_interface.main:main',
+            'medicine_box_center_detector = web_interface.medicine_box_center_detector:main',
         ],
     },
 )
