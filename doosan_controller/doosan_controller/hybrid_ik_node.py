@@ -1,22 +1,23 @@
 """
-hybrid_ik_node.py  —  MoveL middleware: DSR IK → MoveJ + final MoveL
+hybrid_ik_node.py  -  MoveL middleware: DSR IK -> MoveJ + final MoveL
 
 Intercepts /arm/move_l and replaces long moves with:
-  1. DSR ikin service → joint angles for a pre-approach point (5 mm before target),
-     computed with the SAME orientation (rx,ry,rz) as the target → no wrist twist
-  2. MoveJ  → fast joint-space motion to pre-approach
-  3. MoveL  → precise final 5 mm via /arm/move_l_real
+  1. DSR ikin service -> joint angles for a pre-approach point before target,
+     computed with the SAME orientation (rx,ry,rz) as the target
+  2. MoveJ -> fast joint-space motion to pre-approach
+  3. MoveL -> precise final approach via /arm/move_l_real
 
 Passthrough cases (forwarded directly to /arm/move_l_real):
-  - distance ≤ 5 mm
+  - short moves
   - blended / relative moves
   - DSR ikin fails for all 8 solution spaces
 
 Launch file wires up:
-  arm_controller: remaps /arm/move_l → /arm/move_l_real
+  arm_controller: remaps /arm/move_l -> /arm/move_l_real
   hybrid_ik_node: provides /arm/move_l (public face)
 """
 
+import asyncio
 import math
 import time
 
@@ -27,10 +28,9 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 from dsr_msgs2.srv import Ikin
+from std_msgs.msg import Float64MultiArray
 from robot_arm_interfaces.action import MoveJ, MoveL
 from robot_arm_interfaces.msg import RobotStatus
-
-THRESHOLD_MM = 5.0   # moves shorter than this pass through unchanged
 
 
 class HybridIKNode(Node):
@@ -41,13 +41,46 @@ class HybridIKNode(Node):
 
         self._joints       = None   # list[6] deg
         self._tcp          = None   # list[6] [x,y,z mm, rx,ry,rz deg]
+        self._tcp_rt       = None   # TF-based TCP from tcp_monitor
+        self._tcp_rt_stamp = 0.0
         self._status_stamp = 0.0
 
         self.declare_parameter('robot_ns', 'dsr01')
+        self.declare_parameter('enabled', True)
+        self.declare_parameter('pre_approach_distance_mm', 10.0)
+        self.declare_parameter('min_hybrid_distance_mm', 30.0)
+        self.declare_parameter('max_status_age_sec', 0.5)
+        self.declare_parameter('post_movej_settle_sec', 0.2)
+        self.declare_parameter('prefer_tcp_monitor_pose', True)
+
         ns = self.get_parameter('robot_ns').get_parameter_value().string_value
+        self._enabled = bool(self.get_parameter('enabled').value)
+        self._pre_approach_mm = max(
+            1.0,
+            float(self.get_parameter('pre_approach_distance_mm').value),
+        )
+        self._min_hybrid_distance_mm = max(
+            self._pre_approach_mm + 1.0,
+            float(self.get_parameter('min_hybrid_distance_mm').value),
+        )
+        self._max_status_age_sec = max(
+            0.1,
+            float(self.get_parameter('max_status_age_sec').value),
+        )
+        self._post_movej_settle_sec = max(
+            0.0,
+            float(self.get_parameter('post_movej_settle_sec').value),
+        )
+        self._prefer_tcp_monitor_pose = bool(
+            self.get_parameter('prefer_tcp_monitor_pose').value
+        )
 
         self.create_subscription(
             RobotStatus, '/arm/status', self._status_cb, 10,
+            callback_group=cbg,
+        )
+        self.create_subscription(
+            Float64MultiArray, '/arm/tcp_pose', self._tcp_pose_cb, 10,
             callback_group=cbg,
         )
         self._ikin_cli = self.create_client(
@@ -63,7 +96,10 @@ class HybridIKNode(Node):
             callback_group=cbg,
         )
         self.get_logger().info(
-            f'hybrid_ik_node ready  ns={ns}  threshold={THRESHOLD_MM} mm'
+            'hybrid_ik_node ready  '
+            f'ns={ns}  enabled={self._enabled}  '
+            f'pre={self._pre_approach_mm:.1f}mm  '
+            f'min_distance={self._min_hybrid_distance_mm:.1f}mm'
         )
 
     # ── callbacks ──────────────────────────────────────────────────────────────
@@ -72,6 +108,21 @@ class HybridIKNode(Node):
         self._joints       = list(msg.current_joints_deg)
         self._tcp          = list(msg.current_tcp)
         self._status_stamp = time.monotonic()
+
+    def _tcp_pose_cb(self, msg: Float64MultiArray):
+        if len(msg.data) >= 6:
+            self._tcp_rt = list(msg.data[:6])
+            self._tcp_rt_stamp = time.monotonic()
+
+    def _best_tcp(self):
+        now = time.monotonic()
+        if (
+            self._prefer_tcp_monitor_pose
+            and self._tcp_rt is not None
+            and now - self._tcp_rt_stamp <= self._max_status_age_sec
+        ):
+            return self._tcp_rt, 'tcp_monitor'
+        return self._tcp, 'status'
 
     # ── DSR IK ─────────────────────────────────────────────────────────────────
 
@@ -135,7 +186,7 @@ class HybridIKNode(Node):
                 return res.result.success, res.result.message
             log.warning(f'hybrid_ik: MoveJ rejected (attempt {attempt+1}/3)')
             if attempt < 2:
-                time.sleep(0.3)
+                await asyncio.sleep(0.3)
         return False, 'MoveJ rejected (3 attempts)'
 
     async def _send_l(self, goal: MoveL.Goal) -> tuple:
@@ -153,7 +204,7 @@ class HybridIKNode(Node):
                 return res.result.success, res.result.message, res.result.execution_time_sec
             log.warning(f'hybrid_ik: MoveL_real rejected (attempt {attempt+1}/3)')
             if attempt < 2:
-                time.sleep(0.3)
+                await asyncio.sleep(0.3)
         return False, 'MoveL_real rejected (3 attempts)', 0.0
 
     @staticmethod
@@ -182,41 +233,46 @@ class HybridIKNode(Node):
         g   = goal_handle.request
         log = self.get_logger()
 
+        if not self._enabled:
+            return await self._passthrough(goal_handle, g)
+
         if g.blend_radius_mm > 0.0 or g.relative:
             return await self._passthrough(goal_handle, g)
 
         # yield so pending _status_cb can run before we read state
-        time.sleep(0.05)
+        await asyncio.sleep(0.05)
 
         if self._tcp is None or self._joints is None:
             log.warning('hybrid_ik: no /arm/status yet — passthrough')
             return await self._passthrough(goal_handle, g)
 
         age = time.monotonic() - self._status_stamp
-        if age > 0.5:
+        if age > self._max_status_age_sec:
             log.warning(f'hybrid_ik: status {age:.2f}s old — passthrough')
             return await self._passthrough(goal_handle, g)
 
-        cur  = self._tcp[:3]
+        tcp, tcp_source = self._best_tcp()
+        cur  = tcp[:3]
         tgt  = [g.x, g.y, g.z]
         dist = math.dist(cur, tgt)
         log.info(
-            f'hybrid_ik: cur=({cur[0]:.1f},{cur[1]:.1f},{cur[2]:.1f}) mm  '
+            f'hybrid_ik: cur=({cur[0]:.1f},{cur[1]:.1f},{cur[2]:.1f}) mm '
+            f'source={tcp_source}  '
             f'target=({g.x:.0f},{g.y:.0f},{g.z:.0f}) mm  dist={dist:.1f} mm  '
             f'orient=({g.rx:.0f},{g.ry:.0f},{g.rz:.0f}) deg'
         )
 
-        if dist <= THRESHOLD_MM:
+        if dist <= self._min_hybrid_distance_mm:
             log.info('hybrid_ik: short move → passthrough')
             return await self._passthrough(goal_handle, g)
 
-        # Pre-approach: 5 mm before target along travel direction.
+        # Pre-approach before target along travel direction.
         # Use the TARGET orientation so the wrist is already aligned before MoveL.
         dx, dy, dz = tgt[0]-cur[0], tgt[1]-cur[1], tgt[2]-cur[2]
         pre = [
-            tgt[0] - 5.0 * dx / dist,
-            tgt[1] - 5.0 * dy / dist,
-            tgt[2] - 5.0 * dz / dist,
+            tgt[0] - self._pre_approach_mm * dx / dist,
+            tgt[1] - self._pre_approach_mm * dy / dist,
+            tgt[2] - self._pre_approach_mm * dz / dist,
         ]
         pre_pose6 = [pre[0], pre[1], pre[2], g.rx, g.ry, g.rz]
 
@@ -247,7 +303,10 @@ class HybridIKNode(Node):
             goal_handle.abort()
             return self._result(False, f'MoveJ failed: {msg_j}')
 
-        # 2. Final 5 mm MoveL to exact target
+        if self._post_movej_settle_sec > 0.0:
+            await asyncio.sleep(self._post_movej_settle_sec)
+
+        # 2. Final MoveL to exact target
         gl = self._copy_l_goal(g)
         gl.blend_radius_mm = 0.0
 

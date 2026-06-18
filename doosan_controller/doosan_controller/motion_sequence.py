@@ -1289,13 +1289,19 @@ class MotionSequenceNode(Node):
 
                 # 17. Z +150mm 상승
                 if not self._wait_for_step('17. Z +150mm 상승'): return
-                if not self._move_l(0, 0, 150, relative=True, profile='LIFT'): return
+                if not self._move_l(
+                    0, 0, 150,
+                    relative=True,
+                    profile='LIFT',
+                    blend_radius='SMALL',
+                ): return
 
                 # 18. MoveC 전 위치로 복귀
                 if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return
                 if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
                                     pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5],
-                                    profile='TRANSIT'): return
+                                    profile='TRANSIT',
+                                    blend_radius='SMALL'): return
 
             # [공통] 이제 서랍 닫기 공통 단계로 진입 (19번부터)
             cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
