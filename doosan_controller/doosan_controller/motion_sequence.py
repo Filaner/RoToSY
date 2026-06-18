@@ -151,6 +151,7 @@ BLEND_PROFILES: dict[str, float] = {
 
 BLEND_ALLOWED_MOTION_PROFILES = {
     'TRANSIT',
+    'APPROACH',
     'LIFT',
     'VISION_ALIGN',
 }
@@ -806,7 +807,7 @@ class MotionSequenceNode(Node):
             r_y = -90.0 - theta_deg
             r_z = 0.0
 
-            blend = 'NONE' if i == N else 'ARC'
+            blend = 'SMALL' if i == N else 'ARC'
 
             self.get_logger().info(
                 f'  [{i}/{N}] θ={theta_deg:.0f}°'
@@ -1095,7 +1096,11 @@ class MotionSequenceNode(Node):
             result = self._get_drawer_target(drawer_index)
             if result is None: return
             approach, contact, pull_dir = result
-            if not self._move_l(*approach, 90.0, -90.0, 0.0, profile='APPROACH'): return
+            if not self._move_l(
+                *approach, 90.0, -90.0, 0.0,
+                blend_radius='SMALL',
+                profile='APPROACH',
+            ): return
             cx, cy, cz = approach
             self._set_inverter_freq(3000)   # 컨베이어 주파수 30.00 Hz 설정
             self._set_inverter_run(True)    # 컨베이어 RUN
@@ -1127,7 +1132,11 @@ class MotionSequenceNode(Node):
                 for i in range(3)
             )
             if not self._wait_for_step('7. 손잡이에서 30mm 후퇴'): return
-            if not self._move_l(*released_target, 90.0, -90.0, 0.0, profile='APPROACH'): return
+            if not self._move_l(
+                *released_target, 90.0, -90.0, 0.0,
+                blend_radius='SMALL',
+                profile='APPROACH',
+            ): return
             cx, cy, cz = released_target
 
             # ── [Vision] 약품 검출 로직 ──
@@ -1206,7 +1215,12 @@ class MotionSequenceNode(Node):
 
             # 12. Y+50 Z+50 이동
             if not self._wait_for_step('12. Y+50 Z+50 이동'): return
-            if not self._move_l(0, 50, 50, relative=True, profile='LIFT'): return
+            if not self._move_l(
+                0, 50, 50,
+                relative=True,
+                blend_radius='SMALL',
+                profile='LIFT',
+            ): return
             cy += 50
             cz += 50
 
@@ -1307,7 +1321,11 @@ class MotionSequenceNode(Node):
             # 23. 닫힌 손잡이에서 50mm 후퇴
             final_retreat = tuple(contact[i] + pull_dir[i] * 50.0 for i in range(3))
             if not self._wait_for_step('23. 손잡이에서 50mm 후퇴'): return
-            if not self._move_l(*final_retreat, 90.0, -90.0, 0.0, profile='APPROACH'): return
+            if not self._move_l(
+                *final_retreat, 90.0, -90.0, 0.0,
+                blend_radius='SMALL',
+                profile='APPROACH',
+            ): return
             cx, cy, cz = final_retreat
 
             # 24. 최종 홈 정렬
