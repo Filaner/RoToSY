@@ -968,6 +968,22 @@
     return typeof v === 'number' ? v.toFixed(decimals) : '—';
   }
 
+  function fmtTcp(v, axisIndex, decimals = 2) {
+    if (typeof v !== 'number') return '—';
+    if (axisIndex >= 3 && Math.abs(Math.abs(v) - 180) < 0.05) {
+      return (180).toFixed(decimals);
+    }
+    return v.toFixed(decimals);
+  }
+
+  function displayTcp(state) {
+    const rt = state?.current_tcp_rt ?? [];
+    if (rt.length >= 6 && rt.slice(0, 3).some(v => typeof v === 'number' && Math.abs(v) > 1e-6)) {
+      return rt;
+    }
+    return state?.current_tcp ?? [];
+  }
+
   function colorState(el, val, trueClass, falseClass) {
     el.className = 'status-value ' + (val ? trueClass : falseClass);
   }
@@ -1088,17 +1104,17 @@
     cartBadge.style.display = cartEnabled ? 'none' : 'inline';
     cartBadge.textContent   = isTeaching ? '[DISABLED: 직접 교시 모드]' : '[DISABLED: SERVO OFF]';
 
-    // Cartesian Jog와 이동 명령은 Doosan-native TCP 좌표를 기준으로 통일한다.
-    const ctcp = s.current_tcp ?? [];
+    // Cartesian Jog display uses the same real-time TCP stream as the main display.
+    const ctcp = displayTcp(s);
     CART_AXES.forEach((_, i) => {
       const el = document.getElementById(`cart-val-${i}`);
-      if (el) el.textContent = fmt(ctcp[i], i < 3 ? 1 : 2);
+      if (el) el.textContent = fmtTcp(ctcp[i], i, i < 3 ? 1 : 2);
     });
 
-    // TCP 표시와 Read Current가 동일한 Doosan-native 좌표를 사용한다.
-    const tcp = s.current_tcp ?? [];
+    // TCP display uses the real-time TF-based tcp_monitor stream.
+    const tcp = displayTcp(s);
     ['tcp-x','tcp-y','tcp-z','tcp-rx','tcp-ry','tcp-rz'].forEach((id, i) => {
-      document.getElementById(id).textContent = fmt(tcp[i]);
+      document.getElementById(id).textContent = fmtTcp(tcp[i], i);
     });
 
     // Joints
@@ -1934,10 +1950,10 @@
     ws.addEventListener('message', e => {
       try {
         const s = JSON.parse(e.data);
-        const tcp = s.current_tcp || [];
+        const tcp = displayTcp(s);
         if (tcp.length >= 3) {
           document.getElementById('touch-tcp-display').innerHTML =
-            `X <b>${tcp[0].toFixed(1)}</b> &nbsp; Y <b>${tcp[1].toFixed(1)}</b> &nbsp; Z <b>${tcp[2].toFixed(1)}</b> mm`;
+            `X <b>${fmtTcp(tcp[0], 0, 1)}</b> &nbsp; Y <b>${fmtTcp(tcp[1], 1, 1)}</b> &nbsp; Z <b>${fmtTcp(tcp[2], 2, 1)}</b> mm`;
         }
       } catch (_) {}
     });
@@ -2030,11 +2046,11 @@
   const _heOrigOnState = typeof onStateUpdate === 'function' ? onStateUpdate : null;
   function heUpdateFromState(state) {
     // TCP 표시
-    const tcp = state.current_tcp || [];
+    const tcp = displayTcp(state);
     if (tcp.length >= 6) {
       document.getElementById('he-tcp-display').innerHTML =
-        `X <b>${tcp[0].toFixed(1)}</b>  Y <b>${tcp[1].toFixed(1)}</b>  Z <b>${tcp[2].toFixed(1)}</b><br>` +
-        `Rx <b>${tcp[3].toFixed(1)}</b>  Ry <b>${tcp[4].toFixed(1)}</b>  Rz <b>${tcp[5].toFixed(1)}</b>`;
+        `X <b>${fmtTcp(tcp[0], 0, 1)}</b>  Y <b>${fmtTcp(tcp[1], 1, 1)}</b>  Z <b>${fmtTcp(tcp[2], 2, 1)}</b><br>` +
+        `Rx <b>${fmtTcp(tcp[3], 3, 1)}</b>  Ry <b>${fmtTcp(tcp[4], 4, 1)}</b>  Rz <b>${fmtTcp(tcp[5], 5, 1)}</b>`;
     }
   }
 
