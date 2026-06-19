@@ -107,10 +107,12 @@ class TcpMonitor(Node):
 
         continuous_rpy = self._continuous_rpy(pose[3:6], self._filtered_pose[3:6])
         for offset, index in enumerate(range(3, 6)):
-            filtered[index] = self._lerp(
-                self._filtered_pose[index],
-                continuous_rpy[offset],
-                self._orientation_alpha,
+            filtered[index] = self._wrap_deg(
+                self._lerp(
+                    self._filtered_pose[index],
+                    continuous_rpy[offset],
+                    self._orientation_alpha,
+                )
             )
 
         return filtered
@@ -154,6 +156,10 @@ class TcpMonitor(Node):
     @staticmethod
     def _unwrap_deg(angle, reference):
         return reference + ((angle - reference + 180.0) % 360.0 - 180.0)
+
+    @staticmethod
+    def _wrap_deg(angle):
+        return ((angle + 180.0) % 360.0) - 180.0
 
     @staticmethod
     def _normalize_quat(quat):

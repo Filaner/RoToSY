@@ -89,56 +89,56 @@ MOTION_PROFILES: dict[str, MotionProfile] = {
     # Long moves through open space. Tune upward only after verifying clearance.
     'TRANSIT': MotionProfile(
         'TRANSIT',
-        joint_vel_deg_s=50.0,
-        joint_acc_deg_s2=100.0,
-        linear_vel_mm_s=72.0,
-        linear_acc_mm_s2=144.0,
-        angular_vel_deg_s=50.0,
-        angular_acc_deg_s2=100.0,
+        joint_vel_deg_s=45.0,
+        joint_acc_deg_s2=90.0,
+        linear_vel_mm_s=65.0,
+        linear_acc_mm_s2=130.0,
+        angular_vel_deg_s=45.0,
+        angular_acc_deg_s2=90.0,
     ),
 
     # Approach moves near drawer handles, medicine, or delivery box.
     'APPROACH': MotionProfile(
         'APPROACH',
-        joint_vel_deg_s=35.0,
-        joint_acc_deg_s2=70.0,
-        linear_vel_mm_s=42.0,
-        linear_acc_mm_s2=84.0,
-        angular_vel_deg_s=35.0,
-        angular_acc_deg_s2=70.0,
+        joint_vel_deg_s=32.0,
+        joint_acc_deg_s2=64.0,
+        linear_vel_mm_s=38.0,
+        linear_acc_mm_s2=76.0,
+        angular_vel_deg_s=32.0,
+        angular_acc_deg_s2=64.0,
     ),
 
     # Physical contact, drawer pull/push, pickup descent, and placement descent.
     'CONTACT': MotionProfile(
         'CONTACT',
-        joint_vel_deg_s=22.0,
-        joint_acc_deg_s2=44.0,
-        linear_vel_mm_s=24.0,
-        linear_acc_mm_s2=48.0,
-        angular_vel_deg_s=22.0,
-        angular_acc_deg_s2=44.0,
+        joint_vel_deg_s=20.0,
+        joint_acc_deg_s2=40.0,
+        linear_vel_mm_s=22.0,
+        linear_acc_mm_s2=44.0,
+        angular_vel_deg_s=20.0,
+        angular_acc_deg_s2=40.0,
     ),
 
     # Small camera/vision alignment corrections.
     'VISION_ALIGN': MotionProfile(
         'VISION_ALIGN',
-        joint_vel_deg_s=31.0,
-        joint_acc_deg_s2=62.0,
-        linear_vel_mm_s=35.0,
-        linear_acc_mm_s2=70.0,
-        angular_vel_deg_s=31.0,
-        angular_acc_deg_s2=62.0,
+        joint_vel_deg_s=28.0,
+        joint_acc_deg_s2=56.0,
+        linear_vel_mm_s=32.0,
+        linear_acc_mm_s2=64.0,
+        angular_vel_deg_s=28.0,
+        angular_acc_deg_s2=56.0,
     ),
 
     # Vertical moves while carrying medicine.
     'LIFT': MotionProfile(
         'LIFT',
-        joint_vel_deg_s=39.0,
-        joint_acc_deg_s2=78.0,
-        linear_vel_mm_s=50.0,
-        linear_acc_mm_s2=100.0,
-        angular_vel_deg_s=39.0,
-        angular_acc_deg_s2=78.0,
+        joint_vel_deg_s=35.0,
+        joint_acc_deg_s2=70.0,
+        linear_vel_mm_s=45.0,
+        linear_acc_mm_s2=90.0,
+        angular_vel_deg_s=35.0,
+        angular_acc_deg_s2=70.0,
     ),
 
     # OCR 불일치 시 컨베이어로 내려놓는 rollback 블록의 MoveJ 8개 전용.
@@ -1238,7 +1238,7 @@ class MotionSequenceNode(Node):
                 profile='TRANSIT', blend_radius='SMALL',
             ): return
             if not self._move_j(
-                [-2.21, 44.37, 61.78, -0.00, -107.20, -180.00],
+                [-2.21, 44.37, 61.78, -0.00, -107.20, -182.00],
                 profile='TRANSIT',
             ): return
 
