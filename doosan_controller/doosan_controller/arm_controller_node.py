@@ -37,7 +37,7 @@ from sensor_msgs.msg import JointState
 
 # Custom interfaces
 from robot_arm_interfaces.action import MoveJ, MoveL
-from robot_arm_interfaces.srv import ServoOn, WaitDuration, Jog, Home, Teaching, EStop
+from robot_arm_interfaces.srv import ServoOn, WaitDuration, Jog, Home, Teaching, EStop, Recover
 from robot_arm_interfaces.msg import RobotStatus
 
 # Doosan DSR service interfaces
@@ -51,6 +51,7 @@ from dsr_msgs2.srv import (
     SetRobotMode,
     GetRobotState,
     GetCurrentPose,
+    SetSafeStopResetType,
     Jog as DsrJog,
 )
 
@@ -61,10 +62,18 @@ STATE_MOVING       = 2
 STATE_SAFE_OFF     = 3
 STATE_TEACHING     = 4
 STATE_SAFE_STOP    = 5
+STATE_RECOVERY     = 8
+STATE_SAFE_STOP2   = 9
+STATE_SAFE_OFF2    = 10
 STATE_NOT_READY    = 15
 
-CONTROL_ENABLE_OPERATION  = 1   # NOT_READY / INITIALIZING → STANDBY
-CONTROL_SERVO_ON          = 3   # SAFE_OFF → STANDBY
+# SetRobotControl values (DRFC.py CONTROL_*)
+CONTROL_ENABLE_OPERATION   = 1   # NOT_READY / INITIALIZING → STANDBY
+CONTROL_RESET_SAFET_STOP   = 2   # SAFE_STOP  → STANDBY
+CONTROL_SERVO_ON           = 3   # SAFE_OFF   → STANDBY
+CONTROL_RECOVERY_SAFE_STOP = 4   # SAFE_STOP2 → RECOVERY
+CONTROL_RECOVERY_SAFE_OFF  = 5   # SAFE_OFF2  → RECOVERY
+CONTROL_RESET_RECOVERY     = 7   # RECOVERY   → STANDBY
 
 STATE_STR = {
     STATE_INITIALIZING: 'INITIALIZING',
@@ -73,6 +82,9 @@ STATE_STR = {
     STATE_SAFE_OFF:     'SAFE_OFF',
     STATE_TEACHING:     'TEACHING',
     STATE_SAFE_STOP:    'SAFE_STOP',
+    STATE_RECOVERY:     'RECOVERY',
+    STATE_SAFE_STOP2:   'SAFE_STOP2',
+    STATE_SAFE_OFF2:    'SAFE_OFF2',
     STATE_NOT_READY:    'NOT_READY',
 }
 
@@ -132,9 +144,10 @@ class ArmControllerNode(Node):
         self._cli_move_line      = _cli(MoveLine,        'motion/move_line')
         self._cli_move_stop      = _cli(MoveStop,        'motion/move_stop')
         self._cli_servo_off      = _cli(ServoOff,        'system/servo_off')
-        self._cli_set_control    = _cli(SetRobotControl, 'system/set_robot_control')
-        self._cli_set_mode       = _cli(SetRobotMode,    'system/set_robot_mode')
-        self._cli_get_state      = _cli(GetRobotState,   'system/get_robot_state')
+        self._cli_set_control         = _cli(SetRobotControl,    'system/set_robot_control')
+        self._cli_set_mode            = _cli(SetRobotMode,        'system/set_robot_mode')
+        self._cli_get_state           = _cli(GetRobotState,       'system/get_robot_state')
+        self._cli_safe_stop_reset     = _cli(SetSafeStopResetType,'system/set_safe_stop_reset_type')
         self._cli_get_pose       = _cli(GetCurrentPose,  'system/get_current_pose')
         self._cli_dsr_jog   = _cli(DsrJog,   'motion/jog')
         self._cli_move_home = _cli(MoveHome, 'motion/move_home')
@@ -156,6 +169,11 @@ class ArmControllerNode(Node):
         self._srv_servo_on = self.create_service(
             ServoOn, '/arm/servo_on',
             self._servo_on_callback,
+            callback_group=self._service_cbg,
+        )
+        self._srv_recovery = self.create_service(
+            Recover, '/arm/safety_recovery',
+            self._safety_recovery_callback,
             callback_group=self._service_cbg,
         )
         self._srv_wait = self.create_service(
@@ -344,67 +362,139 @@ class ArmControllerNode(Node):
 
     def _do_servo_on(self):
         """
-        SAFE_OFF → STANDBY 전환 시퀀스:
-          1. SetRobotMode(AUTONOMOUS)  — MANUAL 모드 해제
-          2. SetRobotControl(SERVO_ON) — 서보 전원 인가
-          3. STANDBY 대기 (최대 15초)
+        SAFE_OFF → STANDBY 전환 (서보 ON).
+
+        안전 정지(SAFE_STOP / SAFE_STOP2 / SAFE_OFF2 / RECOVERY) 상태에서는
+        서보 ON을 거부하고 /arm/safety_recovery 서비스를 사용하도록 안내.
         """
+        log   = self.get_logger()
         state = self._get_robot_state_now()
+        log.info(f'[ServoON] 현재 상태: {STATE_STR.get(state, state)} ({state})')
 
         if state == STATE_STANDBY:
             return True, 'Already in STANDBY'
 
-        if state == STATE_SAFE_STOP:
-            msg = '[SAFE_STOP] 안전 조건 해제 필요 — 로봇 컨트롤러를 재시작하세요.'
-            self.get_logger().warn(msg)
+        if state == STATE_MOVING:
+            return True, 'Robot is moving (already servo-on)'
+
+        # 안전 정지 계열 → 서보 ON 불가, 안전복구 버튼 유도
+        if state in (STATE_SAFE_STOP, STATE_SAFE_STOP2, STATE_SAFE_OFF2, STATE_RECOVERY):
+            msg = (
+                f'서보 ON 불가: 현재 상태 {STATE_STR.get(state, state)} — '
+                '⚡ 안전 복구 버튼을 사용하세요'
+            )
+            log.warn(msg)
             return False, msg
 
         if state not in (STATE_SAFE_OFF, STATE_NOT_READY, STATE_INITIALIZING):
             msg = f'서보 ON 불가 상태: {STATE_STR.get(state, state)}'
-            self.get_logger().warn(msg)
+            log.warn(msg)
             return False, msg
 
-        log = self.get_logger()
-        log.info(f'Servo ON 시퀀스 시작 (현재 상태: {STATE_STR.get(state, state)})')
+        return self._recover_safe_off()
 
-        # ── Step 1: AUTONOMOUS 모드로 전환 ────────────────────────────────
-        # MANUAL 모드에서는 원격 서보 ON이 거부됨 → 먼저 AUTO 모드로 전환
-        mode_req              = SetRobotMode.Request()
-        mode_req.robot_mode   = 1   # ROBOT_MODE_AUTONOMOUS
-        mode_resp = self._call_service_sync(self._cli_set_mode, mode_req, timeout=5.0)
-        if mode_resp is None:
-            log.warn('SetRobotMode 서비스 응답 없음 — 계속 진행')
-        elif mode_resp.success:
-            log.info('로봇 모드 → AUTONOMOUS')
+    def _set_robot_control(self, control_val: int, label: str) -> bool:
+        """SetRobotControl 서비스 호출 헬퍼."""
+        req = SetRobotControl.Request()
+        req.robot_control = control_val
+        resp = self._call_service_sync(self._cli_set_control, req, timeout=5.0)
+        if resp is None:
+            self.get_logger().error(f'[ServoON] SetRobotControl({label}) 응답 없음')
+            return False
+        if not resp.success:
+            self.get_logger().warn(f'[ServoON] SetRobotControl({label}) 실패 — 계속 진행')
         else:
-            log.warn('SetRobotMode 실패 — 계속 진행 (이미 AUTO일 수 있음)')
+            self.get_logger().info(f'[ServoON] SetRobotControl({label}) 전송 완료')
+        return True
 
-        # ── Step 2: 서보 ON ───────────────────────────────────────────────
-        ctrl_req              = SetRobotControl.Request()
-        ctrl_req.robot_control = CONTROL_SERVO_ON
-        self._call_service_sync(self._cli_set_control, ctrl_req, timeout=5.0)
-        log.info('SetRobotControl(SERVO_ON) 전송 완료')
-
-        # ── Step 3: STANDBY 대기 (최대 15초) ─────────────────────────────
-        deadline = time.time() + 15.0
+    def _wait_for_state(self, target: int, timeout_sec: float = 20.0) -> int:
+        """target 상태가 될 때까지 최대 timeout_sec 동안 폴링. 실제 상태 반환."""
+        deadline = time.time() + timeout_sec
         while time.time() < deadline:
             s = self._get_robot_state_now()
-            if s == STATE_STANDBY:
-                self._robot_state = STATE_STANDBY
-                log.info('Servo ON 성공 → STANDBY (하얀불 확인)')
-                return True, 'Servo ON successful'
+            if s == target:
+                return s
             time.sleep(0.5)
+        return self._get_robot_state_now()
 
-        final_state = self._get_robot_state_now()
-        msg = (
-            f'Servo ON 실패 — 최종 상태: {STATE_STR.get(final_state, final_state)}\n'
-            '  가능한 원인:\n'
-            '  ① 로봇 컨트롤러 웹UI(http://110.120.1.52)에서 External Control 활성화 필요\n'
-            '  ② 안전 회로 이상 — 비상정지 버튼 상태 확인\n'
-            '  ③ dsr_hardware2 초기화 실패 — launch 재시작'
-        )
-        log.error(msg)
-        return False, msg
+    def _recover_safe_off(self):
+        """SAFE_OFF → AUTONOMOUS 모드 + SERVO_ON → STANDBY."""
+        log = self.get_logger()
+        log.info('[ServoON] SAFE_OFF 복구 시작')
+
+        mode_req            = SetRobotMode.Request()
+        mode_req.robot_mode = 1   # ROBOT_MODE_AUTONOMOUS
+        mode_resp = self._call_service_sync(self._cli_set_mode, mode_req, timeout=5.0)
+        if mode_resp is None:
+            log.warn('[ServoON] SetRobotMode 응답 없음 — 계속 진행')
+        elif mode_resp.success:
+            log.info('[ServoON] 로봇 모드 → AUTONOMOUS')
+        else:
+            log.warn('[ServoON] SetRobotMode 실패 — 계속 진행 (이미 AUTO일 수 있음)')
+
+        self._set_robot_control(CONTROL_SERVO_ON, 'SERVO_ON')
+
+        final = self._wait_for_state(STATE_STANDBY, timeout_sec=15.0)
+        if final == STATE_STANDBY:
+            self._robot_state = STATE_STANDBY
+            log.info('[ServoON] SAFE_OFF 복구 성공 → STANDBY')
+            return True, 'Servo ON successful'
+        return False, f'SAFE_OFF 복구 실패 — 최종 상태: {STATE_STR.get(final, final)}'
+
+    def _recover_safe_stop(self):
+        """SAFE_STOP → SetSafeStopResetType(0) + CONTROL_RESET_SAFET_STOP → STANDBY."""
+        log = self.get_logger()
+        log.info('[ServoON] SAFE_STOP 복구 시작 (SetSafeStopResetType + CONTROL_RESET_SAFET_STOP)')
+
+        rst_req             = SetSafeStopResetType.Request()
+        rst_req.reset_type  = 0   # SAFE_STOP_RESET_TYPE_DEFAULT = PROGRAM_STOP
+        rst_resp = self._call_service_sync(self._cli_safe_stop_reset, rst_req, timeout=5.0)
+        if rst_resp is None:
+            log.warn('[ServoON] SetSafeStopResetType 응답 없음 — 계속 진행')
+        else:
+            log.info('[ServoON] SetSafeStopResetType(DEFAULT) 완료')
+
+        self._set_robot_control(CONTROL_RESET_SAFET_STOP, 'RESET_SAFE_STOP')
+
+        final = self._wait_for_state(STATE_STANDBY, timeout_sec=15.0)
+        if final == STATE_STANDBY:
+            self._robot_state = STATE_STANDBY
+            log.info('[ServoON] SAFE_STOP 복구 성공 → STANDBY')
+            return True, 'SAFE_STOP recovery successful'
+        return False, f'SAFE_STOP 복구 실패 — 최종 상태: {STATE_STR.get(final, final)} (비상정지 버튼/안전 회로 확인 필요)'
+
+    def _recover_deep(self, control_val: int, label: str):
+        """
+        SAFE_STOP2 / SAFE_OFF2 심층 복구:
+          Step 1: CONTROL_RECOVERY_SAFE_STOP(4) 또는 CONTROL_RECOVERY_SAFE_OFF(5)
+                  → 상태가 RECOVERY(8)로 전환될 때까지 대기
+          Step 2: CONTROL_RESET_RECOVERY(7) → STANDBY
+        """
+        log = self.get_logger()
+        log.info(f'[ServoON] {label} 심층 복구 시작')
+
+        self._set_robot_control(control_val, f'RECOVERY_{label}')
+
+        mid = self._wait_for_state(STATE_RECOVERY, timeout_sec=20.0)
+        if mid != STATE_RECOVERY:
+            msg = f'{label} 복구 실패 — RECOVERY 진입 못함 (상태: {STATE_STR.get(mid, mid)})'
+            log.error(f'[ServoON] {msg}')
+            return False, msg
+        log.info(f'[ServoON] {label} → RECOVERY 진입 성공, RESET_RECOVERY 전송')
+
+        return self._reset_recovery()
+
+    def _reset_recovery(self):
+        """RECOVERY → CONTROL_RESET_RECOVERY(7) → STANDBY."""
+        log = self.get_logger()
+        self._set_robot_control(CONTROL_RESET_RECOVERY, 'RESET_RECOVERY')
+
+        final = self._wait_for_state(STATE_STANDBY, timeout_sec=20.0)
+        if final == STATE_STANDBY:
+            self._robot_state = STATE_STANDBY
+            log.info('[ServoON] RECOVERY 복구 성공 → STANDBY')
+            return True, 'Recovery successful → STANDBY'
+        return False, f'RECOVERY 복구 실패 — 최종 상태: {STATE_STR.get(final, final)}'
 
     def _do_servo_off(self, stop_type: int):
         req           = ServoOff.Request()
@@ -413,6 +503,51 @@ class ArmControllerNode(Node):
         if resp is None:
             return False, 'servo_off service call failed (timeout)'
         return resp.success, 'Servo OFF successful' if resp.success else 'Servo OFF failed'
+
+    def _safety_recovery_callback(
+        self,
+        request: Recover.Request,
+        response: Recover.Response,
+    ) -> Recover.Response:
+        """
+        /arm/safety_recovery 서비스 핸들러.
+
+        현재 로봇 상태에 따라 적절한 복구 시퀀스를 수행해 STANDBY로 전환.
+          SAFE_STOP  → SetSafeStopResetType(0) + CONTROL_RESET_SAFET_STOP(2)
+          SAFE_STOP2 → CONTROL_RECOVERY_SAFE_STOP(4) → RECOVERY → CONTROL_RESET_RECOVERY(7)
+          SAFE_OFF2  → CONTROL_RECOVERY_SAFE_OFF(5)  → RECOVERY → CONTROL_RESET_RECOVERY(7)
+          RECOVERY   → CONTROL_RESET_RECOVERY(7)
+        """
+        log   = self.get_logger()
+        state = self._get_robot_state_now()
+        log.info(f'[SafetyRecovery] 요청 수신 — 현재 상태: {STATE_STR.get(state, state)} ({state})')
+
+        if state in (STATE_STANDBY, STATE_MOVING):
+            response.success = True
+            response.message = f'복구 불필요 — 이미 정상 상태: {STATE_STR.get(state, state)}'
+            response.robot_state_after = state
+            return response
+
+        if state == STATE_SAFE_STOP:
+            ok, msg = self._recover_safe_stop()
+        elif state == STATE_SAFE_STOP2:
+            ok, msg = self._recover_deep(CONTROL_RECOVERY_SAFE_STOP, 'SAFE_STOP2')
+        elif state == STATE_SAFE_OFF2:
+            ok, msg = self._recover_deep(CONTROL_RECOVERY_SAFE_OFF, 'SAFE_OFF2')
+        elif state == STATE_RECOVERY:
+            ok, msg = self._reset_recovery()
+        else:
+            ok  = False
+            msg = (
+                f'안전복구 대상 아님: 현재 상태 {STATE_STR.get(state, state)} — '
+                '비상정지 해제 또는 컨트롤러 재시작 필요'
+            )
+            log.error(f'[SafetyRecovery] {msg}')
+
+        response.success = ok
+        response.message = msg
+        response.robot_state_after = self._get_robot_state_now()
+        return response
 
     def _jog_callback(self, request: Jog.Request,
                       response: Jog.Response) -> Jog.Response:

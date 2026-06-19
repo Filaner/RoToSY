@@ -23,6 +23,10 @@ TEMP_FALLBACK_MEDICINE_OFFSET_MM = (0.0, 120.0, 0.0)
 
 
 class TempSequenceNode(MotionSequenceNode):
+    # motion_sequence와 동일한 시퀀스를 그대로 재사용하되, 항상 step 모드로 진행
+    # (각 단계마다 /temp_motion/next_step 신호를 받아야 다음으로 넘어감).
+    _DEFAULT_STEP_MODE = True
+
     def __init__(self):
         super().__init__(topic_prefix='temp_motion', node_name='temp_sequence_node')
 
@@ -60,11 +64,10 @@ def main(args=None):
     executor = MultiThreadedExecutor()
     executor.add_node(node)
 
-    # CLI 지원
+    # CLI 지원 (항상 step 모드 — _DEFAULT_STEP_MODE 참고)
     if len(sys.argv) > 1 and sys.argv[1].isdigit():
         drawer_index = int(sys.argv[1])
         radius = float(sys.argv[2]) if len(sys.argv) > 2 else 200.0
-        node._step_mode = '--step' in sys.argv
         seq_thread = threading.Thread(target=node.run_sequence, args=(drawer_index, radius))
         seq_thread.start()
 

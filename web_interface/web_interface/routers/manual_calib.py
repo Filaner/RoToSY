@@ -42,7 +42,7 @@ def _calib_path() -> Path:
     try:
         return Path(get_package_share_directory('rotosy_calibration')) / 'config' / 'camera_extrinsic.yaml'
     except PackageNotFoundError:
-        return Path.home() / 'ros2_ws' / 'src' / 'RoToSY' / 'rotosy_calibration' / 'config' / 'camera_extrinsic.yaml'
+        return Path(__file__).resolve().parents[3] / 'rotosy_calibration' / 'config' / 'camera_extrinsic.yaml'
 
 
 _CALIB_PATH = _calib_path()

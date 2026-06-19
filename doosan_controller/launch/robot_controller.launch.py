@@ -23,10 +23,11 @@ from launch.actions import (
     OpaqueFunction,
     TimerAction,
 )
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 
@@ -116,6 +117,14 @@ def generate_launch_description() -> LaunchDescription:
             description='Maximum seconds allowed for a single MoveJ/MoveL',
         ),
         DeclareLaunchArgument(
+            'enable_hybrid_ik', default_value='false',
+            description='Route /arm/move_l through hybrid_ik_node when true',
+        ),
+        DeclareLaunchArgument(
+            'hybrid_pre_approach_mm', default_value='50.0',
+            description='Final MoveL approach distance used by hybrid_ik_node',
+        ),
+        DeclareLaunchArgument(
             'plc_port', default_value='/dev/ttyUSB0',
             description='Modbus RTU 시리얼 포트 (PLC/인버터 연결)',
         ),
@@ -171,11 +180,59 @@ def generate_launch_description() -> LaunchDescription:
                 executable = 'arm_controller',
                 name       = 'arm_controller',
                 output     = 'screen',
+                condition  = UnlessCondition(LaunchConfiguration('enable_hybrid_ik')),
                 parameters = [{
                     'robot_ns':        LaunchConfiguration('name'),
                     'status_rate_hz':  LaunchConfiguration('status_rate_hz'),
                     'motion_timeout':  LaunchConfiguration('motion_timeout'),
                     'servo_on_retries': 3,
+                }],
+            )
+        ],
+    )
+
+    # Hybrid IK mode keeps the public /arm/move_l endpoint on hybrid_ik_node.
+    # The real DSR MoveL action is remapped behind it to /arm/move_l_real.
+    arm_controller_hybrid = TimerAction(
+        period=2.0,
+        actions=[
+            Node(
+                package    = 'doosan_controller',
+                executable = 'arm_controller',
+                name       = 'arm_controller',
+                output     = 'screen',
+                condition  = IfCondition(LaunchConfiguration('enable_hybrid_ik')),
+                parameters = [{
+                    'robot_ns':        LaunchConfiguration('name'),
+                    'status_rate_hz':  LaunchConfiguration('status_rate_hz'),
+                    'motion_timeout':  LaunchConfiguration('motion_timeout'),
+                    'servo_on_retries': 3,
+                }],
+                remappings=[
+                    ('/arm/move_l', '/arm/move_l_real'),
+                ],
+            )
+        ],
+    )
+
+    hybrid_ik = TimerAction(
+        period=3.0,
+        actions=[
+            Node(
+                package    = 'doosan_controller',
+                executable = 'hybrid_ik',
+                name       = 'hybrid_ik_node',
+                output     = 'screen',
+                condition  = IfCondition(LaunchConfiguration('enable_hybrid_ik')),
+                parameters = [{
+                    'robot_ns': LaunchConfiguration('name'),
+                    'pre_approach_distance_mm': ParameterValue(
+                        LaunchConfiguration('hybrid_pre_approach_mm'),
+                        value_type=float,
+                    ),
+                    'min_hybrid_distance_mm': 70.0,
+                    'post_movej_settle_sec': 0.2,
+                    'prefer_tcp_monitor_pose': True,
                 }],
             )
         ],
@@ -243,6 +300,8 @@ def generate_launch_description() -> LaunchDescription:
             dsr_bringup,
             plc_controller,
             arm_controller,
+            arm_controller_hybrid,
+            hybrid_ik,
             tcp_monitor,
             web_server,
             motion_sequence,

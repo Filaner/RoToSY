@@ -27,7 +27,7 @@ def _default_config_path(filename: str) -> Path:
     try:
         return Path(get_package_share_directory('rotosy_calibration')) / 'config' / filename
     except PackageNotFoundError:
-        return Path.home() / 'ros2_ws' / 'src' / 'RoToSY' / 'rotosy_calibration' / 'config' / filename
+        return Path(__file__).resolve().parent.parent / 'config' / filename
 
 
 class CalibrationMotionRunner(Node):

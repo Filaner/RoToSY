@@ -54,7 +54,7 @@ def _calib_candidates() -> list[Path]:
     except PackageNotFoundError:
         pass
 
-    candidates.append(Path.home() / 'ros2_ws' / 'src' / 'RoToSY' / 'rotosy_calibration' / 'config' / 'camera_extrinsic.yaml')
+    candidates.append(Path(__file__).resolve().parent.parent / 'config' / 'camera_extrinsic.yaml')
     return candidates
 
 

@@ -281,17 +281,13 @@ async def stop_temp_sequence() -> dict:
 
 
 @router.post('/recovery')
-async def toggle_recovery() -> dict:
-    """안전복구 토글: 복구 모드 진입 또는 복구 완료."""
+async def safety_recovery() -> dict:
+    """안전복구: 현재 로봇 상태에 맞는 복구 시퀀스 실행 → STANDBY."""
     node = ros.get_node()
     if node is None:
         raise HTTPException(status_code=503, detail='ROS2 node not initialized')
     try:
-        state = node.get_state()
-        if state.get('recovery_active'):
-            result = await node.exit_recovery()
-        else:
-            result = await node.enter_recovery()
+        result = await node.call_safety_recovery()
         if not result.get('success'):
             raise HTTPException(status_code=500, detail=result.get('message', 'Recovery failed'))
         return result

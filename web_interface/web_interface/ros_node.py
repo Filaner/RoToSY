@@ -20,9 +20,9 @@ from std_msgs.msg import Bool, Float64MultiArray, String, Int32, Empty
 
 # Custom interfaces
 from robot_arm_interfaces.msg import PlcCommand, RobotStatus
-from robot_arm_interfaces.srv import ServoOn, Jog, Home, Teaching, EStop
+from robot_arm_interfaces.srv import ServoOn, Jog, Home, Teaching, EStop, Recover
 from robot_arm_interfaces.action import MoveJ, MoveL
-from dsr_msgs2.srv import SetToolDigitalOutput, GetToolDigitalOutput, SetRobotMode
+from dsr_msgs2.srv import SetToolDigitalOutput, GetToolDigitalOutput
 
 class RobotBridgeNode(Node):
     """ROS2 node that bridges robot state to the FastAPI application."""
@@ -44,7 +44,7 @@ class RobotBridgeNode(Node):
             'error_code':      0,
             'error_message':   '',
             'magnet_on':       False,
-            'recovery_active': False,
+            'safety_recovery_needed':   False,
             'seq_step':        'IDLE',
             'tmp_step':        'IDLE',
             'inverter_running': False,
@@ -60,13 +60,13 @@ class RobotBridgeNode(Node):
 
         # Clients (for REST API use)
         self.cli_servo    = self.create_client(ServoOn,    '/arm/servo_on')
+        self.cli_recovery = self.create_client(Recover,    '/arm/safety_recovery')
         self.cli_jog      = self.create_client(Jog,        '/arm/jog')
         self.cli_home     = self.create_client(Home,       '/arm/home')
         self.cli_teaching = self.create_client(Teaching,   '/arm/teaching')
         self.cli_estop    = self.create_client(EStop,      '/arm/estop')
         self.cli_magnet   = self.create_client(SetToolDigitalOutput, '/dsr01/io/set_tool_digital_output')
         self.cli_mag_get  = self.create_client(GetToolDigitalOutput, '/dsr01/io/get_tool_digital_output')
-        self.cli_mode     = self.create_client(SetRobotMode, '/dsr01/system/set_robot_mode')
 
         # Action Clients
         self.act_move_j   = ActionClient(self, MoveJ, '/arm/move_j')
@@ -86,20 +86,21 @@ class RobotBridgeNode(Node):
         # Magnet state polling timer (1Hz)
         self.create_timer(1.0, self._poll_magnet)
 
+    # 안전복구가 필요한 상태 (서보 ON 불가, ⚡ 안전 복구 버튼 활성화)
+    _RECOVERY_STATES = frozenset({5, 8, 9, 10})  # SAFE_STOP, RECOVERY, SAFE_STOP2, SAFE_OFF2
+
     def _status_cb(self, msg: RobotStatus):
         with self._lock:
-            self._state['robot_state']     = msg.robot_state
-            self._state['robot_state_str'] = msg.robot_state_str
-            self._state['servo_on']        = msg.servo_on
-            self._state['is_moving']       = msg.is_moving
-            self._state['teaching_mode']   = msg.teaching_mode
-            self._state['current_joints_deg'] = list(msg.current_joints_deg)
-            self._state['current_tcp']     = list(msg.current_tcp)
-            self._state['error_code']      = msg.error_code
-            self._state['error_message']   = msg.error_message
-            # state 10 (RECOVERY_HANDGUIDING) is a special recovery state
-            if msg.robot_state != 10:
-                self._state['recovery_active'] = False
+            self._state['robot_state']            = msg.robot_state
+            self._state['robot_state_str']        = msg.robot_state_str
+            self._state['servo_on']               = msg.servo_on
+            self._state['is_moving']              = msg.is_moving
+            self._state['teaching_mode']          = msg.teaching_mode
+            self._state['current_joints_deg']     = list(msg.current_joints_deg)
+            self._state['current_tcp']            = list(msg.current_tcp)
+            self._state['error_code']             = msg.error_code
+            self._state['error_message']          = msg.error_message
+            self._state['safety_recovery_needed'] = msg.robot_state in self._RECOVERY_STATES
 
     def _ready_cb(self, msg: Bool):
         with self._lock:
@@ -140,6 +141,15 @@ class RobotBridgeNode(Node):
         """Return a shallow copy of the current robot state (thread-safe)."""
         with self._lock:
             return dict(self._state)
+
+    async def call_safety_recovery(self) -> dict:
+        """안전복구 서비스 호출 (/arm/safety_recovery)."""
+        if self._command_lock.locked():
+            return {'success': False, 'message': 'Robot is busy with another command'}
+        async with self._command_lock:
+            req = Recover.Request()
+            req.go_to_teaching = False
+            return await self._run_srv(self.cli_recovery, req)
 
     async def call_servo(self, enable: bool) -> dict:
         if self._command_lock.locked():
@@ -233,29 +243,6 @@ class RobotBridgeNode(Node):
 
     def stop_temp_sequence(self) -> None:
         self.pub_tmp_stop.publish(Empty())
-
-    async def enter_recovery(self) -> dict:
-        servo = await self.call_servo(True)
-        if not servo.get('success'):
-            return servo
-        req = SetRobotMode.Request()
-        req.robot_mode = 0
-        await self._run_srv(self.cli_mode, req)
-        teaching = await self.call_teaching(True)
-        if not teaching.get('success'):
-            return teaching
-        with self._lock:
-            self._state['recovery_active'] = True
-        return {'success': True, 'message': '안전복구 모드 진입'}
-
-    async def exit_recovery(self) -> dict:
-        await self.call_teaching(False)
-        req = SetRobotMode.Request()
-        req.robot_mode = 1
-        await self._run_srv(self.cli_mode, req)
-        with self._lock:
-            self._state['recovery_active'] = False
-        return {'success': True, 'message': '복구 완료'}
 
     async def call_magnet(self, enabled: bool) -> dict:
         req = SetToolDigitalOutput.Request()
