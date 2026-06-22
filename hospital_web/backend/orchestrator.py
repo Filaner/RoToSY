@@ -10,6 +10,7 @@ from . import mission_state as ms
 from . import prescription_state as ps
 from . import robot_proxy
 from . import ros_bridge
+from . import pallet_pack as pp
 from .db_schema import get_conn
 
 
@@ -275,6 +276,19 @@ async def _run(prescription_id: str, *, actor: str) -> None:
 
         mission = ms.new_mission(prescription['ward'], prescription_id)
         ps.set_status(prescription_id, 'awaiting_load_confirm')
+
+        # Calculate and save pallet plan for this mission
+        try:
+            pallet_plan = pp.plan_for_mission(mission['mission_id'])
+            if pallet_plan.get('ok'):
+                ms.add_audit('system', 'PALLET_PLAN',
+                             f'{mission["mission_id"]} → {pallet_plan["box_code"]} '
+                             f'{pallet_plan["placed_count"]}슬롯 계획 완료')
+            else:
+                ms.add_audit('system', 'PALLET_PLAN_WARN',
+                             f'{mission["mission_id"]} plan 실패: {pallet_plan.get("error")}')
+        except Exception as exc:
+            ms.add_audit('system', 'PALLET_PLAN_ERROR', f'plan_for_mission 예외: {exc}')
         
         # Save queues to the state for persistence and tracking
         _set(

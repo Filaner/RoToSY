@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>팔레타이징 시뮬레이터</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', sans-serif; background: #f5f6fa; color: #222; font-size: 14px; }
+
+/* ── Header ── */
+header {
+  background: #1a2942; color: #fff;
+  padding: 12px 20px; display: flex; align-items: center; gap: 12px;
+}
+header h1 { font-size: 1rem; font-weight: 600; }
+
+/* ── Tabs ── */
+.tabs {
+  background: #fff; border-bottom: 2px solid #e0e4ef;
+  display: flex; padding: 0 20px;
+}
+.tab-btn {
+  padding: 10px 20px; border: none; background: none; cursor: pointer;
+  font-size: .88rem; color: #666; font-weight: 500; border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+}
+.tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+
+/* ── Tab panels ── */
+.tab-panel { display: none; }
+.tab-panel.active { display: flex; flex-direction: column; }
+
+/* ── Toolbar ── */
+.toolbar {
+  background: #fff; border-bottom: 1px solid #dde;
+  padding: 10px 20px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.toolbar label { font-size: .82rem; color: #555; }
+.toolbar input[type=text] {
+  border: 1px solid #ccd; border-radius: 4px; padding: 5px 9px;
+  font-size: .88rem; width: 160px;
+}
+button {
+  border: none; border-radius: 5px; padding: 6px 14px;
+  font-size: .84rem; cursor: pointer; font-weight: 500;
+}
+.btn-blue  { background: #2563eb; color: #fff; }
+.btn-blue:hover { background: #1d4ed8; }
+.btn-green { background: #16a34a; color: #fff; }
+.btn-green:hover { background: #15803d; }
+.btn-gray  { background: #e5e7eb; color: #374151; }
+.btn-gray:hover { background: #d1d5db; }
+.btn-red   { background: #ef4444; color: #fff; }
+.btn-red:hover { background: #dc2626; }
+.btn-sm { padding: 3px 9px; font-size: .78rem; }
+
+/* ── Status bar ── */
+.status-bar {
+  padding: 5px 20px; font-size: .8rem; min-height: 26px;
+  background: #f0f4ff; border-bottom: 1px solid #dde; color: #444;
+}
+.status-bar.ok   { color: #166534; background: #dcfce7; }
+.status-bar.err  { color: #991b1b; background: #fee2e2; }
+.status-bar.warn { color: #92400e; background: #fef3c7; }
+
+/* ── Main split layout ── */
+.main { display: flex; height: calc(100vh - 130px); overflow: hidden; }
+
+.box-panel {
+  flex: 0 0 400px; padding: 16px; background: #fff;
+  border-right: 1px solid #dde; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+}
+.box-panel h3 { font-size: .82rem; color: #666; }
+
+#box-svg-wrap { display: flex; justify-content: center; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 5px; }
+.legend-item { display: flex; align-items: center; gap: 4px; font-size: .75rem; }
+.legend-swatch { width: 11px; height: 11px; border-radius: 2px; }
+
+.box-info {
+  font-size: .76rem; color: #666; line-height: 1.7;
+  background: #f8f9fa; border-radius: 5px; padding: 7px 10px;
+}
+
+.table-panel { flex: 1; padding: 16px; overflow: auto; }
+.table-panel h3 { font-size: .82rem; color: #666; margin-bottom: 8px; }
+
+/* ── Test mode: item builder ── */
+.test-toolbar {
+  background: #fff; border-bottom: 1px solid #dde;
+  padding: 12px 20px; display: flex; flex-direction: column; gap: 10px;
+}
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.row label { font-size: .82rem; color: #555; white-space: nowrap; }
+select, input[type=number] {
+  border: 1px solid #ccd; border-radius: 4px; padding: 5px 8px; font-size: .85rem;
+}
+select { background: #fff; }
+.dim-group { display: flex; gap: 4px; align-items: center; }
+.dim-group input { width: 68px; }
+.dim-group label { font-size: .76rem; color: #888; }
+
+.item-list { display: flex; flex-direction: column; gap: 4px; }
+.item-chip {
+  display: flex; align-items: center; gap: 8px;
+  background: #f1f5f9; border-radius: 5px; padding: 5px 10px; font-size: .82rem;
+}
+.item-chip .chip-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.item-chip .chip-name { flex: 1; }
+.item-chip .chip-dim { color: #888; font-size: .75rem; }
+
+/* ── Slot table ── */
+table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+th {
+  background: #f1f5f9; text-align: left; padding: 6px 8px;
+  border-bottom: 2px solid #dde; white-space: nowrap; color: #444;
+}
+td { padding: 5px 8px; border-bottom: 1px solid #eee; }
+tr:hover td { background: #f8faff; }
+.slot-dot {
+  display: inline-block; width: 9px; height: 9px;
+  border-radius: 50%; margin-right: 4px; vertical-align: middle;
+}
+.tag { padding: 2px 6px; border-radius: 3px; font-size: .73rem; }
+.tag-unplaced { background: #fee2e2; color: #991b1b; }
+.tag-skipped  { background: #fef3c7; color: #92400e; }
+
+.empty-msg { text-align: center; color: #aaa; padding: 40px 20px; font-size: .9rem; }
+.note { font-size: .75rem; color: #888; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📦 팔레타이징 시뮬레이터</h1>
+</header>
+
+<!-- ── 탭 ── -->
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('mission')">미션 계획 조회</button>
+  <button class="tab-btn"        onclick="switchTab('test')">단독 테스트</button>
+</div>
+
+<!-- ══════════ 탭 1: 미션 계획 조회 ══════════ -->
+<div id="tab-mission" class="tab-panel active">
+  <div class="toolbar">
+    <label>미션 코드</label>
+    <input type="text" id="inp-mission" placeholder="비워두면 현재 미션" />
+    <button class="btn-blue"  onclick="loadPlan()">계획 조회</button>
+    <button class="btn-green" onclick="createPlan()">계획 (재)생성</button>
+    <button class="btn-gray"  onclick="clearView('mission')">초기화</button>
+    <span style="margin-left:auto;font-size:.76rem;color:#888">
+      base XY: θ_box=0 fallback (실배치 시 마커 측정값으로 자동 보정)
+    </span>
+  </div>
+  <div class="status-bar" id="status-mission">준비 중…</div>
+  <div class="main">
+    <div class="box-panel">
+      <h3 id="box-title-mission">박스 뷰</h3>
+      <div id="svg-wrap-mission">
+        <div class="empty-msg">계획을 로드하면<br>배치 미리보기가 표시됩니다</div>
+      </div>
+      <div class="legend" id="legend-mission"></div>
+      <div class="box-info" id="boxinfo-mission" style="display:none"></div>
+    </div>
+    <div class="table-panel">
+      <h3>슬롯 목록</h3>
+      <p class="note" id="note-mission" style="display:none">
+        base XY: θ_box=0, 박스 origin 기준 (mm)
+      </p>
+      <div id="table-mission"><div class="empty-msg">슬롯 없음</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 탭 2: 단독 테스트 ══════════ -->
+<div id="tab-test" class="tab-panel">
+  <div class="test-toolbar">
+    <!-- 박스 선택 + 품목 추가 행 -->
+    <div class="row">
+      <label>박스</label>
+      <select id="sel-box">
+        <option value="BOX-A">BOX-A (병동A, 마커 4)</option>
+        <option value="BOX-B" selected>BOX-B (병동B, 마커 3)</option>
+      </select>
+
+      <label style="margin-left:12px">약품</label>
+      <select id="sel-medicine" style="width:160px" onchange="onMedSelect()">
+        <option value="">-- 선택 --</option>
+      </select>
+
+      <label>수량</label>
+      <input type="number" id="inp-qty" value="1" min="1" max="9" style="width:55px">
+
+      <button class="btn-blue" onclick="addItemFromCatalog()">+ 추가</button>
+
+      <span style="color:#ccc; margin: 0 4px">|</span>
+
+      <label>직접 입력</label>
+      <input type="text" id="inp-cname" placeholder="약품명" style="width:100px">
+      <div class="dim-group">
+        <input type="number" id="inp-w" placeholder="W" step="0.1" min="0.1">
+        <label>×</label>
+        <input type="number" id="inp-d" placeholder="D" step="0.1" min="0.1">
+        <label>×</label>
+        <input type="number" id="inp-h" placeholder="H" step="0.1" min="0.1">
+        <label style="margin-left:2px">cm</label>
+      </div>
+      <input type="number" id="inp-cqty" value="1" min="1" max="9" style="width:50px">
+      <button class="btn-gray" onclick="addCustomItem()">+ 직접 추가</button>
+    </div>
+
+    <!-- 추가된 품목 목록 -->
+    <div class="row" style="align-items:flex-start; gap:6px">
+      <label style="padding-top:4px">품목 목록</label>
+      <div class="item-list" id="item-list" style="flex:1">
+        <span style="color:#aaa; font-size:.8rem">품목을 추가하세요 (최대 4가지 약품, 수량 합계 제한 없음)</span>
+      </div>
+      <button class="btn-green" onclick="runPreview()" style="align-self:flex-start">미리보기 실행</button>
+      <button class="btn-gray btn-sm" onclick="clearItems()" style="align-self:flex-start">전체 삭제</button>
+    </div>
+  </div>
+  <div class="status-bar" id="status-test">약품을 추가하고 미리보기를 실행하세요</div>
+  <div class="main">
+    <div class="box-panel">
+      <h3 id="box-title-test">박스 뷰</h3>
+      <div id="svg-wrap-test">
+        <div class="empty-msg">미리보기를 실행하면<br>배치 결과가 표시됩니다</div>
+      </div>
+      <div class="legend" id="legend-test"></div>
+      <div class="box-info" id="boxinfo-test" style="display:none"></div>
+    </div>
+    <div class="table-panel">
+      <h3>슬롯 목록</h3>
+      <p class="note" id="note-test" style="display:none">
+        base XY: θ_box=0, 박스 origin 기준 (mm) · stack_h = 적재 높이
+      </p>
+      <div id="table-test"><div class="empty-msg">슬롯 없음</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 색상 팔레트 ──────────────────────────────────────────────────────────────
+const PALETTE = [
+  '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
+  '#06b6d4','#f97316','#84cc16','#ec4899','#64748b',
+];
+const slotColor = i => PALETTE[i % PALETTE.length];
+
+// ── 탭 전환 ──────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', ['mission','test'][i] === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// ── 상태 ─────────────────────────────────────────────────────────────────────
+function setStatus(id, msg, type = '') {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'status-bar ' + type;
+}
+
+// ── base 좌표 계산 (θ_box=0) ─────────────────────────────────────────────────
+function toBase(slot, box) {
+  const lx = slot.local_x - box.inner_w / 2;
+  const ly = slot.local_y - box.inner_d / 2;
+  return {
+    bx: Math.round((box.origin[0] + lx) * 10) / 10,
+    by: Math.round((box.origin[1] + ly) * 10) / 10,
+    bz: Math.round((box.origin[2] + 20) * 10) / 10,  // place_drop_mm=20 기준
+  };
+}
+
+// ── SVG 렌더 ─────────────────────────────────────────────────────────────────
+const SVG_W = 360;
+
+function renderSVG(wrapId, box, layout) {
+  const scale  = SVG_W / box.inner_w;
+  const svgH   = Math.round(box.inner_d * scale);
+  const margin = box.wall_margin * scale;
+  const cx = SVG_W / 2, cy = svgH / 2;
+
+  let html = `<svg width="${SVG_W}" height="${svgH}" xmlns="http://www.w3.org/2000/svg"
+    style="border:1px solid #aab;background:#f0f4ff">`;
+
+  // 박스 내부 가용 영역
+  html += `<rect x="${margin}" y="${margin}"
+    width="${SVG_W-2*margin}" height="${svgH-2*margin}"
+    fill="none" stroke="#93c5fd" stroke-width="1" stroke-dasharray="4,3"/>`;
+
+  // 마커 중앙
+  html += `<circle cx="${cx}" cy="${cy}" r="4" fill="#374151" opacity="0.4"/>`;
+  html += `<text x="${cx+6}" y="${cy+4}" font-size="9" fill="#9ca3af">◎ 마커</text>`;
+
+  // base layer 먼저, stacked layer 나중 (겹쳐 보이도록)
+  const sorted = [...layout].sort((a,b) => (a.z_offset_mm||0) - (b.z_offset_mm||0));
+  for (const s of sorted) {
+    const color = slotColor(s.slot_idx);
+    const stacked = (s.z_offset_mm || 0) > 0;
+    const px = s.local_x * scale;
+    const py = (box.inner_d - s.local_y) * scale;
+    const pw = s.w * scale, ph = s.h * scale;
+    // 적층 아이템: 오른쪽·위로 4px 오프셋, 점선 테두리, 반투명
+    const ox = stacked ? 4 : 0, oy = stacked ? -4 : 0;
+    const opacity = stacked ? '0.55' : '0.8';
+    const dash = stacked ? 'stroke-dasharray="5,3"' : '';
+    html += `<rect x="${px-pw/2+ox}" y="${py-ph/2+oy}" width="${pw}" height="${ph}"
+      fill="${color}" fill-opacity="${opacity}" stroke="${color}" stroke-width="${stacked?1.5:1.8}"
+      ${dash} rx="2"/>`;
+    const label = s.medicine_name.length > 5 ? s.medicine_name.slice(0,4)+'…' : s.medicine_name;
+    const fs = Math.max(7, Math.min(10, Math.min(pw, ph) * 0.4));
+    html += `<text x="${px+ox}" y="${py+oy+fs*0.38}" text-anchor="middle"
+      font-size="${fs}px" fill="#fff" font-weight="600">${label}</text>`;
+    const badge = stacked ? `↑${Math.round(s.z_offset_mm)}` : `#${s.slot_idx}`;
+    html += `<text x="${px+ox}" y="${py+oy-ph/2+9}" text-anchor="middle"
+      font-size="8px" fill="#fff" opacity="0.9">${badge}</text>`;
+  }
+  html += `</svg>`;
+  document.getElementById(wrapId).innerHTML = html;
+}
+
+// ── 범례 ─────────────────────────────────────────────────────────────────────
+function renderLegend(legendId, layout) {
+  const seen = new Map();
+  for (const s of layout)
+    if (!seen.has(s.medicine_name)) seen.set(s.medicine_name, s.slot_idx);
+  const el = document.getElementById(legendId);
+  el.innerHTML = '';
+  for (const [name, idx] of seen)
+    el.innerHTML += `<div class="legend-item">
+      <div class="legend-swatch" style="background:${slotColor(idx)}"></div>
+      <span>${name}</span></div>`;
+}
+
+// ── 슬롯 테이블 ──────────────────────────────────────────────────────────────
+function renderTable(tableId, box, layout, unplaced, skipped, showStack) {
+  if (!layout.length) {
+    document.getElementById(tableId).innerHTML = '<div class="empty-msg">배치된 슬롯 없음</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>#</th><th>약품명</th>
+    <th>층</th>
+    <th>local X</th><th>local Y</th>
+    <th>W × H (mm)</th><th>회전</th>
+    <th>base X</th><th>base Y</th><th>base Z (θ=0)</th>
+    ${showStack ? '<th>적재높이</th>' : ''}
+  </tr></thead><tbody>`;
+  for (const s of layout) {
+    const b = toBase(s, box);
+    const sh = showStack && s.stack_h_mm != null ? s.stack_h_mm.toFixed(1) : '-';
+    const zOff = s.z_offset_mm || 0;
+    const layerLabel = zOff > 0
+      ? `<span style="color:#2563eb;font-weight:600">↑${zOff}mm</span>`
+      : `<span style="color:#888">0</span>`;
+    html += `<tr>
+      <td><span class="slot-dot" style="background:${slotColor(s.slot_idx)}"></span>${s.slot_idx}</td>
+      <td>${s.medicine_name}</td>
+      <td>${layerLabel}</td>
+      <td>${s.local_x}</td><td>${s.local_y}</td>
+      <td>${s.w} × ${s.h}</td>
+      <td>${s.rot_deg}°</td>
+      <td>${b.bx}</td><td>${b.by}</td><td>${b.bz}</td>
+      ${showStack ? `<td>${sh} mm</td>` : ''}
+    </tr>`;
+  }
+  html += '</tbody></table>';
+
+  if (unplaced && unplaced.length)
+    html += `<div style="margin-top:12px"><strong style="font-size:.8rem">미배치 (공간 부족):</strong>
+      <span style="margin-left:4px">${unplaced.map(u=>`<span class="tag tag-unplaced">${u.medicine_name||u}</span>`).join(' ')}</span></div>`;
+  if (skipped && skipped.length)
+    html += `<div style="margin-top:8px"><strong style="font-size:.8rem">치수 미등록:</strong>
+      <span style="margin-left:4px">${skipped.map(s=>`<span class="tag tag-skipped">${s}</span>`).join(' ')}</span></div>`;
+
+  document.getElementById(tableId).innerHTML = html;
+}
+
+// ── 공통 뷰 적용 ─────────────────────────────────────────────────────────────
+function applyResult(suffix, data, showStack) {
+  const box = data.box, layout = data.layout || [];
+  document.getElementById('box-title-'+suffix).textContent =
+    `박스 뷰 — ${data.box_code}  (inner ${box.inner_w}×${box.inner_d} mm)`;
+
+  if (!layout.length) {
+    document.getElementById('svg-wrap-'+suffix).innerHTML = '<div class="empty-msg">배치 슬롯 없음</div>';
+  } else {
+    renderSVG('svg-wrap-'+suffix, box, layout);
+    renderLegend('legend-'+suffix, layout);
+  }
+
+  const info = document.getElementById('boxinfo-'+suffix);
+  info.style.display = 'block';
+  info.innerHTML = `박스: <b>${data.box_code}</b> | inner ${box.inner_w}×${box.inner_d}×${box.inner_h} mm
+    | 벽여유 ${box.wall_margin} mm | 마커 #${box.aruco_marker_id}<br>
+    origin(θ=0): (${box.origin.join(', ')}) mm | 슬롯 ${layout.length}개`;
+
+  document.getElementById('note-'+suffix).style.display = 'block';
+  renderTable('table-'+suffix, box, layout, data.unplaced, data.skipped, showStack);
+}
+
+// ── 탭1: 미션 조회 ───────────────────────────────────────────────────────────
+async function loadPlan() {
+  const mc = document.getElementById('inp-mission').value.trim();
+  const qs = mc ? '?mission_code=' + encodeURIComponent(mc) : '';
+  setStatus('status-mission', '조회 중…');
+  try {
+    const d = await fetch('/api/pallet/plan' + qs).then(r => r.json());
+    if (!d.ok) { setStatus('status-mission', '오류: ' + (d.error || JSON.stringify(d)), 'err'); return; }
+    applyResult('mission', d, false);
+    setStatus('status-mission', `${d.mission_code} → ${d.box_code}: 슬롯 ${d.layout.length}개`, 'ok');
+  } catch(e) { setStatus('status-mission', '요청 실패: ' + e.message, 'err'); }
+}
+
+async function createPlan() {
+  const mc = document.getElementById('inp-mission').value.trim();
+  setStatus('status-mission', '계획 생성 중…');
+  try {
+    const d = await fetch('/api/pallet/plan', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(mc ? {mission_code: mc} : {}),
+    }).then(r => r.json());
+    if (!d.ok) { setStatus('status-mission', '오류: ' + (d.error || JSON.stringify(d)), 'err'); return; }
+    applyResult('mission', d, false);
+    const warn = d.unplaced && d.unplaced.length;
+    setStatus('status-mission',
+      warn ? `계획 완료 — 미배치 ${d.unplaced.length}개 있음 (공간 부족)` : `${d.mission_code} → ${d.box_code}: ${d.placed_count}슬롯 생성`,
+      warn ? 'warn' : 'ok');
+  } catch(e) { setStatus('status-mission', '요청 실패: ' + e.message, 'err'); }
+}
+
+function clearView(suffix) {
+  document.getElementById('svg-wrap-'+suffix).innerHTML =
+    '<div class="empty-msg">계획을 로드하면<br>배치 미리보기가 표시됩니다</div>';
+  document.getElementById('table-'+suffix).innerHTML = '<div class="empty-msg">슬롯 없음</div>';
+  document.getElementById('legend-'+suffix).innerHTML = '';
+  document.getElementById('boxinfo-'+suffix).style.display = 'none';
+  document.getElementById('note-'+suffix).style.display = 'none';
+  document.getElementById('box-title-'+suffix).textContent = '박스 뷰';
+  setStatus('status-'+suffix, '초기화됨');
+}
+
+// ── 탭2: 단독 테스트 ─────────────────────────────────────────────────────────
+let testItems = [];      // [{name, qty, w_cm, d_cm, h_cm}]
+let catalogData = [];    // [{name, display_name, w_cm, d_cm, h_cm}]
+
+async function loadCatalog() {
+  try {
+    const d = await fetch('/api/pallet/catalog').then(r => r.json());
+    catalogData = d.items || [];
+    const sel = document.getElementById('sel-medicine');
+    for (const it of catalogData) {
+      const opt = document.createElement('option');
+      opt.value = it.name;
+      opt.textContent = `${it.display_name || it.name}  (${it.w_cm}×${it.d_cm}×${it.h_cm} cm)`;
+      sel.appendChild(opt);
+    }
+  } catch(e) { console.warn('카탈로그 로드 실패:', e); }
+}
+
+function onMedSelect() {
+  const name = document.getElementById('sel-medicine').value;
+  const it = catalogData.find(c => c.name === name);
+  if (!it) return;
+  // 직접입력 필드에 자동 채움 (편의용)
+  document.getElementById('inp-cname').value = it.display_name || it.name;
+  document.getElementById('inp-w').value = it.w_cm;
+  document.getElementById('inp-d').value = it.d_cm;
+  document.getElementById('inp-h').value = it.h_cm;
+}
+
+function addItemFromCatalog() {
+  const name = document.getElementById('sel-medicine').value;
+  const qty  = parseInt(document.getElementById('inp-qty').value) || 1;
+  if (!name) { alert('약품을 선택하세요'); return; }
+  const it = catalogData.find(c => c.name === name);
+  if (!it) return;
+  pushItem({name: it.display_name || it.name, qty,
+            w_cm: it.w_cm, d_cm: it.d_cm, h_cm: it.h_cm});
+}
+
+function addCustomItem() {
+  const name = document.getElementById('inp-cname').value.trim();
+  const w = parseFloat(document.getElementById('inp-w').value);
+  const d = parseFloat(document.getElementById('inp-d').value);
+  const h = parseFloat(document.getElementById('inp-h').value);
+  const qty = parseInt(document.getElementById('inp-cqty').value) || 1;
+  if (!name) { alert('약품명을 입력하세요'); return; }
+  if (!w || !d || !h) { alert('W × D × H 치수를 모두 입력하세요 (cm)'); return; }
+  pushItem({name, qty, w_cm: w, d_cm: d, h_cm: h});
+}
+
+function pushItem(it) {
+  if (testItems.length >= 10) { alert('최대 10개까지 추가할 수 있습니다'); return; }
+  // 같은 이름+치수면 수량만 합산
+  const existing = testItems.find(x =>
+    x.name === it.name && x.w_cm === it.w_cm && x.d_cm === it.d_cm && x.h_cm === it.h_cm);
+  if (existing) { existing.qty += it.qty; }
+  else          { testItems.push({...it}); }
+  renderItemList();
+}
+
+function removeItem(idx) {
+  testItems.splice(idx, 1);
+  renderItemList();
+}
+
+function clearItems() {
+  testItems = [];
+  renderItemList();
+}
+
+function renderItemList() {
+  const el = document.getElementById('item-list');
+  if (!testItems.length) {
+    el.innerHTML = '<span style="color:#aaa;font-size:.8rem">품목을 추가하세요</span>';
+    return;
+  }
+  el.innerHTML = testItems.map((it, i) => {
+    const color = slotColor(i);
+    return `<div class="item-chip">
+      <div class="chip-dot" style="background:${color}"></div>
+      <span class="chip-name">${it.name} ×${it.qty}</span>
+      <span class="chip-dim">${it.w_cm}×${it.d_cm}×${it.h_cm} cm</span>
+      <button class="btn-red btn-sm" onclick="removeItem(${i})">삭제</button>
+    </div>`;
+  }).join('');
+}
+
+async function runPreview() {
+  if (!testItems.length) { alert('품목을 먼저 추가하세요'); return; }
+  const boxCode = document.getElementById('sel-box').value;
+  setStatus('status-test', '계산 중…');
+  try {
+    const d = await fetch('/api/pallet/preview', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({box_code: boxCode, items: testItems}),
+    }).then(r => r.json());
+    if (!d.ok) { setStatus('status-test', '오류: ' + (d.error || JSON.stringify(d)), 'err'); return; }
+    applyResult('test', d, true);
+    const warn = d.unplaced && d.unplaced.length;
+    setStatus('status-test',
+      warn ? `${boxCode}: ${d.placed_count}슬롯 배치, 미배치 ${d.unplaced.length}개 (공간 부족)` :
+             `${boxCode}: 전체 ${d.placed_count}슬롯 배치 완료`,
+      warn ? 'warn' : 'ok');
+  } catch(e) { setStatus('status-test', '요청 실패: ' + e.message, 'err'); }
+}
+
+// ── 초기화 ───────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  loadCatalog();
+  loadPlan();    // 미션 탭 자동 조회
+});
+</script>
+</body>
+</html>
