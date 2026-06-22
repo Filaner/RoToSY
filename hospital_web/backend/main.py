@@ -19,7 +19,10 @@ from fastapi.staticfiles import StaticFiles
 from . import robot_proxy as proxy
 from . import ros_bridge   as ros
 from . import mission_state as ms
-from .routers import robot, amr, system as sys_router, prescription as presc_router, sensor as sensor_router, vision as vision_router, demo as demo_router, patient as patient_router, medicine as medicine_router, ocr as ocr_router
+from .routers import (robot, amr, system as sys_router, prescription as presc_router,
+                      sensor as sensor_router, vision as vision_router, demo as demo_router,
+                      patient as patient_router, medicine as medicine_router, ocr as ocr_router,
+                      pallet as pallet_router)
 from . import sensor_db
 from . import db_schema
 
@@ -118,6 +121,7 @@ app.include_router(demo_router.router)
 app.include_router(patient_router.router)
 app.include_router(medicine_router.router)
 app.include_router(ocr_router.router)
+app.include_router(pallet_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')
@@ -146,6 +150,11 @@ async def nurse_dashboard():
 @app.get('/patient', response_class=HTMLResponse)
 async def patient_dashboard():
     return HTMLResponse((STATIC_DIR / 'patient.html').read_text())
+
+
+@app.get('/pallet', response_class=HTMLResponse)
+async def pallet_viewer():
+    return HTMLResponse((STATIC_DIR / 'pallet.html').read_text())
 
 
 @app.websocket('/ws')

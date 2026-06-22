@@ -7,6 +7,7 @@ from typing import Optional
 from .. import prescription_state as ps
 from .. import mission_state as ms
 from .. import robot_proxy
+from .. import pallet_pack as pp
 from ..db_schema import get_conn
 
 import httpx
@@ -185,10 +186,25 @@ async def start_picking(pid: str):
     ms.add_audit('robot', 'ARM_PICK_TRIGGER',
                  f'{pid} — drawer index {markers[0]} 피킹 시작 ({arm})')
 
+    # 4) 적재 레이아웃 계산 + DB 저장 (실패해도 미션 자체는 막지 않음)
+    pallet_plan = None
+    try:
+        pallet_plan = pp.plan_for_mission(mission['mission_id'])
+        if pallet_plan.get('ok'):
+            ms.add_audit('system', 'PALLET_PLAN',
+                         f'{mission["mission_id"]} → {pallet_plan["box_code"]} '
+                         f'{pallet_plan["placed_count"]}슬롯 계획 완료')
+        else:
+            ms.add_audit('system', 'PALLET_PLAN_WARN',
+                         f'{mission["mission_id"]} plan 실패: {pallet_plan.get("error")}')
+    except Exception as exc:
+        ms.add_audit('system', 'PALLET_PLAN_ERROR', f'plan_for_mission 예외: {exc}')
+
     return {
         'prescription': ps.get(pid),
         'mission':      mission,
         'marker_queue': queue,
         'missing':      missing,
         'arm_trigger':  arm,
+        'pallet_plan':  pallet_plan,
     }
