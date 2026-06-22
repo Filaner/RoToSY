@@ -4,7 +4,7 @@ Launch the Doosan E0509 full stack:
   2. plc_controller_node — Modbus RTU PLC/인버터 브리지        (delay 2 s)
   3. arm_controller      — our high-level controller node     (delay 3 s)
   4. tcp_monitor         — TF2 기반 TCP 포즈 퍼블리셔          (delay 5 s)
-  5. web_server          — FastAPI 웹 인터페이스 (port 8000)   (delay 5 s)
+  5. hospital_web        — Hospital FastAPI gateway (port 8080) (delay 5 s)
 
 Usage (real hardware):
   ros2 launch doosan_controller robot_controller.launch.py mode:=real
@@ -19,6 +19,7 @@ import os
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
     TimerAction,
@@ -34,29 +35,17 @@ from ament_index_python.packages import get_package_share_directory
 
 _launch_lock_fd = None
 
+# Resolves symlink paths correctly to handle '--symlink-install' and non-symlink 'colcon build'
+_REAL_PATH = os.path.realpath(__file__)
+_SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(_REAL_PATH), '..', '..'))
+_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(_REAL_PATH), '..', '..', '..', '..', 'src', 'RoToSY'))
 
-def _acquire_launch_lock(_context):
-    """Prevent two full stacks from controlling the same robot namespace."""
-    global _launch_lock_fd
-
-    lock_path = '/tmp/rotosy_robot_controller.lock'
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError as exc:
-        os.close(fd)
-        raise RuntimeError(
-            'robot_controller.launch.py is already running. '
-            'Stop the existing launch before starting another one.'
-        ) from exc
-
-    os.ftruncate(fd, 0)
-    os.write(fd, str(os.getpid()).encode('ascii'))
-    _launch_lock_fd = fd
-    return []
-
-
-_launch_lock_fd = None
+if os.path.exists(os.path.join(_SRC_DIR, 'hospital_web')):
+    _HOSPITAL_WEB_DIR = os.path.join(_SRC_DIR, 'hospital_web')
+elif os.path.exists(os.path.join(_INSTALL_DIR, 'hospital_web')):
+    _HOSPITAL_WEB_DIR = os.path.join(_INSTALL_DIR, 'hospital_web')
+else:
+    _HOSPITAL_WEB_DIR = os.path.join(_SRC_DIR, 'hospital_web') # Fallback
 
 
 def _acquire_launch_lock(_context):
@@ -127,6 +116,10 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             'plc_port', default_value='/dev/ttyUSB0',
             description='Modbus RTU 시리얼 포트 (PLC/인버터 연결)',
+        ),
+        DeclareLaunchArgument(
+            'hospital_web_port', default_value='8080',
+            description='Hospital Web Gateway HTTP port',
         ),
     ]
 
@@ -252,16 +245,21 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    # ── web_server node ──────────────────────────────────────────────────────
-    # 3.5 s — /arm/status, /arm/tcp_pose 구독, 연결 전 상태는 WebSocket으로 표시.
-    web_server = TimerAction(
+    # ── hospital_web server ──────────────────────────────────────────────────
+    # 3.5 s — directly owns robot ROS bridge now; web_interface is not required.
+    hospital_web = TimerAction(
         period=3.5,
         actions=[
-            Node(
-                package    = 'web_interface',
-                executable = 'web_server',
-                name       = 'web_server',
-                output     = 'screen',
+            ExecuteProcess(
+                cmd=[
+                    'python3', '-m', 'uvicorn',
+                    'backend.main:app',
+                    '--host', '0.0.0.0',
+                    '--port', LaunchConfiguration('hospital_web_port'),
+                ],
+                cwd=_HOSPITAL_WEB_DIR,
+                name='hospital_web',
+                output='screen',
             )
         ],
     )
@@ -303,7 +301,7 @@ def generate_launch_description() -> LaunchDescription:
             arm_controller_hybrid,
             hybrid_ik,
             tcp_monitor,
-            web_server,
+            hospital_web,
             motion_sequence,
             temp_sequence,
         ]

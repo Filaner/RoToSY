@@ -492,6 +492,31 @@ body{
         </div>
       </div>
 
+      <!-- 오케스트레이터 상태 -->
+      <div class="card" style="border-left:3px solid var(--blue);">
+        <div class="card-title">오케스트레이터</div>
+        <div style="display:flex;gap:2rem;flex-wrap:wrap;align-items:flex-start;">
+          <div class="st-item"><div class="st-label">단계</div><div class="st-val info" id="orch-phase">IDLE</div></div>
+          <div class="st-item"><div class="st-label">상태</div><div class="st-val" id="orch-status">IDLE</div></div>
+          <div class="st-item"><div class="st-label">처방</div><div class="st-val" id="orch-presc">—</div></div>
+          <div class="st-item"><div class="st-label">현재 서랍</div><div class="st-val" id="orch-drawer">—</div></div>
+          <div class="st-item"><div class="st-label">재시도</div><div class="st-val" id="orch-retry">0</div></div>
+        </div>
+        <div class="st-item" style="margin-top:.8rem;">
+          <div class="st-label">메시지</div>
+          <div id="orch-message" style="font-size:.88rem;color:var(--muted);line-height:1.45;">—</div>
+        </div>
+        <div class="st-item" style="margin-top:.5rem;">
+          <div class="st-label">오류</div>
+          <div id="orch-error" style="font-size:.88rem;color:var(--red);line-height:1.45;">—</div>
+        </div>
+        <div class="btn-group" style="margin-top:.9rem;">
+          <button class="btn btn-red" id="btn-orch-cancel" onclick="orchestratorCancel()" disabled>중지</button>
+          <button class="btn btn-yellow" id="btn-orch-retry" onclick="orchestratorRetry()" disabled>재시도</button>
+        </div>
+        <div class="feedback" id="orch-feedback"></div>
+      </div>
+
       <!-- 금일 배송 요청 목록 -->
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
@@ -936,7 +961,7 @@ body{
           <div class="node-card" id="nc-rotosy">
             <div class="node-dot" id="nd-rotosy" style="background:var(--muted)"></div>
             <div>
-              <div class="node-name">RoToSY (robot arm API · :8000)</div>
+              <div class="node-name">Robot Bridge (hospital_web)</div>
               <div class="node-seen" id="ns-rotosy">—</div>
             </div>
             <div style="margin-left:auto;font-size:.92rem;color:var(--muted)" id="nst-rotosy">—</div>
@@ -1062,6 +1087,7 @@ function applyState(s) {
   if (s.amr)   applyAMR(s.amr);
   if (s.door)  applyDoor(s.door);
   if (s.mission) applyMission(s.mission);
+  if (s.orchestrator) applyOrchestrator(s.orchestrator);
   if (s.nodes)  applyNodes(s.nodes);
   applyRoToSYOnline(s.robot_online);
   applySequence(s);
@@ -1308,6 +1334,39 @@ function missionColor(status) {
   return 'info';
 }
 
+// ── Orchestrator ──
+function applyOrchestrator(o) {
+  if (!o) return;
+  const phase = o.phase || 'IDLE';
+  const status = o.status || 'IDLE';
+  setText('orch-phase', phase);
+  setValColor('orch-status', status, orchColor(status));
+  setText('orch-presc', o.prescription_id || '—');
+  setText('orch-drawer', o.current_drawer ?? '—');
+  setText('orch-retry', o.retry_count ?? 0);
+  const msgEl = el('orch-message');
+  if (msgEl) msgEl.textContent = o.message || '—';
+  const errEl = el('orch-error');
+  if (errEl) errEl.textContent = o.error || '—';
+
+  const running = !!o.running;
+  const failed = String(status).startsWith('FAILED') || status === 'CANCELLED';
+  const cancelBtn = el('btn-orch-cancel');
+  const retryBtn = el('btn-orch-retry');
+  if (cancelBtn) cancelBtn.disabled = !running;
+  if (retryBtn) retryBtn.disabled = running || !failed || !o.prescription_id;
+
+  const progress = el('kpi-progress');
+  if (progress && running) progress.textContent = 1;
+}
+
+function orchColor(status) {
+  if (!status || status === 'IDLE') return '';
+  if (String(status).startsWith('FAILED') || status === 'CANCELLED') return 'bad';
+  if (['AWAITING_LOAD_CONFIRM','AMR_DISPATCHED'].includes(status)) return 'good';
+  return 'warn';
+}
+
 // ── Nodes ──
 const NODE_NAMES = {arm_controller:'arm_controller', amr_controller:'amr_controller', vision_node:'vision_node'};
 
@@ -1351,7 +1410,7 @@ function applyRoToSYOnline(online) {
   } else {
     dot.style.background = 'var(--red)';
     if (stEl) { stEl.textContent = 'OFFLINE'; stEl.style.color = 'var(--red)'; }
-    if (seen) seen.textContent = 'RoToSY :8000 연결 불가';
+    if (seen) seen.textContent = '로봇 ROS bridge 미연결';
   }
 }
 
@@ -1383,6 +1442,22 @@ async function apiPost(url, body, feedbackId) {
     if (fb) { fb.style.color='var(--red)'; fb.textContent=e.message; }
     return null;
   }
+}
+
+async function orchestratorCancel() {
+  if (!confirm('현재 오케스트레이션을 중지합니다. 진행 중인 로봇/AMR 명령도 정지 요청합니다. 계속?')) return;
+  const r = await apiPost(
+    '/api/orchestrator/cancel',
+    {actor:'admin', detail:'관리자 화면에서 오케스트레이터 중지'},
+    'orch-feedback'
+  );
+  if (r) addAlert('warn', '오케스트레이터 중지 요청 완료');
+}
+
+async function orchestratorRetry() {
+  if (!confirm('마지막 처방으로 오케스트레이션을 재시도합니다. 계속?')) return;
+  const r = await apiPost('/api/orchestrator/retry?actor=admin', null, 'orch-feedback');
+  if (r) addAlert('info', '오케스트레이터 재시도 시작');
 }
 
 // Robot proxy shorthand
@@ -1596,7 +1671,7 @@ function renderTodayDeliveries(list) {
       : `<span style="font-size:.68rem;color:var(--muted);background:var(--surf2);border:1px solid var(--border);border-radius:9999px;padding:.1rem .5rem;">미요청</span>`;
     const canStart = p.delivery_requested && p.status === 'approved';
     const startBtn = canStart
-      ? `<button class="btn btn-teal btn-sm" onclick="startPicking('${p.id}',this)" style="font-size:.75rem;">조제 시작</button>`
+      ? `<button class="btn btn-teal btn-sm" onclick="startPicking('${p.id}',this)" style="font-size:.75rem;">오케스트레이터 시작</button>`
       : '';
     return `
     <div style="display:flex;align-items:center;gap:.85rem;padding:.65rem .9rem;
@@ -1625,14 +1700,15 @@ async function startPicking(pid, btn) {
     const r = await fetch(`/api/prescription/${pid}/start_picking`, {method: 'POST'});
     const d = await r.json();
     if (!r.ok) {
-      alert(d.detail || '조제 시작 실패');
-      if (btn) { btn.disabled = false; btn.textContent = '조제 시작'; }
+      alert(d.detail || '오케스트레이터 시작 실패');
+      if (btn) { btn.disabled = false; btn.textContent = '오케스트레이터 시작'; }
       return;
     }
+    addAlert('info', `오케스트레이터 시작: ${pid}`);
     await loadTodayDeliveries();
   } catch(e) {
-    alert(e.message);
-    if (btn) { btn.disabled = false; btn.textContent = '조제 시작'; }
+    alert('오케스트레이터 시작 오류: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '오케스트레이터 시작'; }
   }
 }
 
@@ -1892,10 +1968,10 @@ function updateVisionResults() {
       const ss = el('stream-status');
       if (ss) {
         if (data.status === 'ONLINE') {
-          ss.textContent = 'LIVE (web_interface :8000)';
+          ss.textContent = 'LIVE (hospital_web camera)';
           ss.style.color = 'var(--green)';
         } else {
-          ss.textContent = data.error ? '오프라인 — web_interface(:8000) 대기 중' : '대기 중';
+          ss.textContent = data.error ? '오프라인 — 카메라 대기 중' : '대기 중';
           ss.style.color = 'var(--muted)';
         }
       }
@@ -1934,7 +2010,7 @@ function updateVisionResults() {
     .catch(e => console.log('vision error:', e));
 }
 
-// 카메라 MJPEG 스트림 시작 (web_interface :8000 프록시). 끊기면 백엔드가 대기화면 폴백.
+// 카메라 MJPEG 스트림 시작. 끊기면 백엔드가 대기화면 폴백.
 function initCameraStream() {
   const img = el('camera-frame');
   if (!img) return;

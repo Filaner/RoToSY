@@ -44,10 +44,11 @@ from rotosy_gripper_control.keyboard_electromagnet_gripper import KeyboardElectr
 
 # ── 공통 파라미터 ────────────────────────────────────────────────────────────
 
-CAMERA_API          = 'http://localhost:8000/camera/markers'
-MEDICINE_DETECTION_API = 'http://localhost:8000/camera/detections'
-CAMERA_SNAPSHOT_API = 'http://localhost:8000/camera/snapshot'
-OCR_VERIFY_API      = 'http://localhost:8080/api/ocr/verify'
+HOSPITAL_WEB_BASE_URL = os.environ.get('HOSPITAL_WEB_BASE_URL', 'http://localhost:8080')
+CAMERA_API          = f'{HOSPITAL_WEB_BASE_URL}/camera/markers'
+MEDICINE_DETECTION_API = f'{HOSPITAL_WEB_BASE_URL}/camera/detections'
+CAMERA_SNAPSHOT_API = f'{HOSPITAL_WEB_BASE_URL}/camera/snapshot'
+OCR_VERIFY_API      = f'{HOSPITAL_WEB_BASE_URL}/api/ocr/verify'
 ROBOT_NS            = 'dsr01'
 GROQ_API_KEY        = os.environ.get('GROQ_API_KEY', '')
 
@@ -1001,7 +1002,7 @@ class MotionSequenceNode(Node):
     # ── OCR 파이프라인 ────────────────────────────────────────────────────────
 
     def _capture_image(self) -> bytes | None:
-        """web_interface에서 현재 카메라 프레임을 JPEG bytes로 취득."""
+        """hospital_web에서 현재 카메라 프레임을 JPEG bytes로 취득."""
         try:
             with urllib.request.urlopen(CAMERA_SNAPSHOT_API, timeout=5) as resp:
                 return resp.read()
@@ -1112,7 +1113,7 @@ class MotionSequenceNode(Node):
         return None
 
     def _get_medicine_target(self, retries: int = 5) -> tuple | None:
-        """web_interface에서 YOLO로 검출된 약품(medicine, medicine_box) 또는 수액(water_pack)의 베이스 좌표를 취득."""
+        """hospital_web에서 YOLO로 검출된 약품(medicine, medicine_box) 또는 수액(water_pack)의 베이스 좌표를 취득."""
         for attempt in range(retries):
             try:
                 with urllib.request.urlopen(MEDICINE_DETECTION_API, timeout=3) as resp:
