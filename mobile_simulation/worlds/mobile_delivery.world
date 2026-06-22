@@ -11,6 +11,14 @@
       <shadows>true</shadows>
     </scene>
 
+    <gui fullscreen='0'>
+      <camera name='user_camera'>
+        <pose>-2.9 4.8 3.2 0 0.85 -2.1</pose>
+        <view_controller>orbit</view_controller>
+        <projection_type>perspective</projection_type>
+      </camera>
+    </gui>
+
     <light name="corridor_softbox_1" type="point">
       <pose>-3.0 0 1.35 0 0 0</pose>
       <diffuse>0.95 0.96 0.90 1</diffuse>
@@ -344,7 +352,7 @@
         <visual name="visual"><geometry><box><size>0.08 0.55 0.08</size></box></geometry><material><ambient>0.90 0.92 0.92 1</ambient><diffuse>0.90 0.92 0.92 1</diffuse></material></visual>
       </link>
       <link name="stretcher">
-        <pose>1.15 -0.92 0.35 0 0 -0.18</pose>
+        <pose>1.15 -0.92 0.20 0 0 -0.18</pose>
         <collision name="collision"><geometry><box><size>1.35 0.48 0.40</size></box></geometry></collision>
         <visual name="visual"><geometry><box><size>1.35 0.48 0.40</size></box></geometry><material><ambient>0.78 0.86 0.90 1</ambient><diffuse>0.78 0.86 0.90 1</diffuse></material></visual>
       </link>
