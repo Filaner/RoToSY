@@ -212,12 +212,12 @@ class SequenceStartRequest(BaseModel):
 
 @router.post('/motion/start')
 async def start_sequence(req: SequenceStartRequest) -> dict:
-    """Start motion sequence for drawer index 0..5.
+    """Start motion sequence for drawer number 1..6.
 
     marker_id is retained as the request field for API compatibility.
     """
-    if req.marker_id < 0 or req.marker_id > 5:
-        raise HTTPException(status_code=422, detail='drawer index must be 0..5')
+    if req.marker_id < 1 or req.marker_id > 6:
+        raise HTTPException(status_code=422, detail='drawer number must be 1..6')
     node = ros.get_node()
     if node is None:
         raise HTTPException(status_code=503, detail='ROS2 node not initialized')
@@ -254,7 +254,9 @@ async def reset_sequence() -> dict:
 
 @router.post('/temp_motion/start')
 async def start_temp_sequence(req: SequenceStartRequest) -> dict:
-    """Start temp sequence for a marker."""
+    """Start temp sequence for a drawer number (1..6)."""
+    if req.marker_id < 1 or req.marker_id > 6:
+        raise HTTPException(status_code=422, detail='drawer number must be 1..6')
     node = ros.get_node()
     if node is None:
         raise HTTPException(status_code=503, detail='ROS2 node not initialized')

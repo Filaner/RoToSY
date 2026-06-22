@@ -65,8 +65,13 @@ def main(args=None):
     executor.add_node(node)
 
     # CLI 지원 (항상 step 모드 — _DEFAULT_STEP_MODE 참고)
+    # 사용법: temp_sequence <drawer_number 1~6> [radius_mm]
     if len(sys.argv) > 1 and sys.argv[1].isdigit():
-        drawer_index = int(sys.argv[1])
+        drawer_number = int(sys.argv[1])
+        if drawer_number < 1 or drawer_number > 6:
+            print(f'Invalid drawer number {drawer_number}; expected 1..6', file=sys.stderr)
+            return 1
+        drawer_index = drawer_number - 1
         radius = float(sys.argv[2]) if len(sys.argv) > 2 else 200.0
         seq_thread = threading.Thread(target=node.run_sequence, args=(drawer_index, radius))
         seq_thread.start()

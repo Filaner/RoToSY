@@ -619,8 +619,8 @@
     <div class="card-title">Motion Sequence Control</div>
     <div style="display:flex; gap:1.5rem; align-items:center;">
       <div style="display:flex; align-items:center; gap:0.5rem;">
-        <span class="status-label">Drawer Index (0~5)</span>
-        <input type="number" id="seq-marker-id" min="0" max="5"
+        <span class="status-label">Drawer Number (1~6)</span>
+        <input type="number" id="seq-marker-id" min="1" max="6" value="4"
           style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
       </div>
       <button id="btn-seq-start" class="btn btn-on" onclick="startMotionSeq()" style="flex:none; padding:0.6rem 1.2rem;">시퀀스 시작</button>
@@ -642,8 +642,8 @@
     <div class="card-title">Temp Sequence Control</div>
     <div style="display:flex; gap:1.5rem; align-items:center;">
       <div style="display:flex; align-items:center; gap:0.5rem;">
-        <span class="status-label">Drawer Index (0~5)</span>
-        <input type="number" id="tmp-marker-id" min="0" max="5"
+        <span class="status-label">Drawer Number (1~6)</span>
+        <input type="number" id="tmp-marker-id" min="1" max="6" value="4"
           style="width:4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0.35rem; border-radius:4px; font-family:var(--mono);">
       </div>
       <button id="btn-tmp-start" class="btn btn-on" onclick="startTempSeq()" style="flex:none; padding:0.6rem 1.2rem;">시퀀스 시작</button>
@@ -1340,11 +1340,11 @@
   async function startMotionSeq() {
     const markerId = parseInt(document.getElementById('seq-marker-id').value);
     const feedback = document.getElementById('control-feedback');
-    if (!Number.isInteger(markerId) || markerId < 0 || markerId > 5) {
-      showAlert('서랍 인덱스(0~5)를 입력하세요.');
+    if (!Number.isInteger(markerId) || markerId < 1 || markerId > 6) {
+      showAlert('서랍 번호(1~6)를 입력하세요.');
       return;
     }
-    feedback.textContent = `시퀀스 시작 명령 전송 (서랍 ${markerId + 1}, index ${markerId})...`;
+    feedback.textContent = `시퀀스 시작 명령 전송 (서랍 ${markerId})...`;
     try {
       const resp = await fetch('/api/motion/start', {
         method: 'POST',
@@ -1434,14 +1434,13 @@
   }
 
   async function startTempSeq() {
-    const rawMarkerId = parseInt(document.getElementById('tmp-marker-id').value);
+    const markerId = parseInt(document.getElementById('tmp-marker-id').value);
     const feedback = document.getElementById('control-feedback');
-    if (!Number.isInteger(rawMarkerId)) {
-      showAlert('마커 ID를 입력하세요.');
+    if (!Number.isInteger(markerId) || markerId < 1 || markerId > 6) {
+      showAlert('서랍 번호(1~6)를 입력하세요.');
       return;
     }
-    const markerId = Math.max(0, Math.min(5, rawMarkerId));
-    feedback.textContent = `Temp 시퀀스 시작 명령 전송 (마커 ${markerId})...`;
+    feedback.textContent = `Temp 시퀀스 시작 명령 전송 (서랍 ${markerId})...`;
     try {
       const resp = await fetch('/api/temp_motion/start', {
         method: 'POST',

@@ -5,7 +5,7 @@ Usage:
   1. Persistent Node:
      ros2 run doosan_controller motion_sequence
   2. One-shot CLI:
-     ros2 run doosan_controller motion_sequence <drawer_index> [--step]
+     ros2 run doosan_controller motion_sequence <drawer_number 1~6> [--step]
 """
 
 import base64
@@ -89,56 +89,56 @@ MOTION_PROFILES: dict[str, MotionProfile] = {
     # Long moves through open space. Tune upward only after verifying clearance.
     'TRANSIT': MotionProfile(
         'TRANSIT',
-        joint_vel_deg_s=45.0,
-        joint_acc_deg_s2=90.0,
-        linear_vel_mm_s=65.0,
-        linear_acc_mm_s2=130.0,
-        angular_vel_deg_s=45.0,
-        angular_acc_deg_s2=90.0,
+        joint_vel_deg_s=50.0,
+        joint_acc_deg_s2=100.0,
+        linear_vel_mm_s=72.0,
+        linear_acc_mm_s2=144.0,
+        angular_vel_deg_s=50.0,
+        angular_acc_deg_s2=100.0,
     ),
 
     # Approach moves near drawer handles, medicine, or delivery box.
     'APPROACH': MotionProfile(
         'APPROACH',
-        joint_vel_deg_s=32.0,
-        joint_acc_deg_s2=64.0,
-        linear_vel_mm_s=38.0,
-        linear_acc_mm_s2=76.0,
-        angular_vel_deg_s=32.0,
-        angular_acc_deg_s2=64.0,
+        joint_vel_deg_s=35.0,
+        joint_acc_deg_s2=70.0,
+        linear_vel_mm_s=42.0,
+        linear_acc_mm_s2=84.0,
+        angular_vel_deg_s=35.0,
+        angular_acc_deg_s2=70.0,
     ),
 
     # Physical contact, drawer pull/push, pickup descent, and placement descent.
     'CONTACT': MotionProfile(
         'CONTACT',
-        joint_vel_deg_s=20.0,
-        joint_acc_deg_s2=40.0,
-        linear_vel_mm_s=22.0,
-        linear_acc_mm_s2=44.0,
-        angular_vel_deg_s=20.0,
-        angular_acc_deg_s2=40.0,
+        joint_vel_deg_s=22.0,
+        joint_acc_deg_s2=44.0,
+        linear_vel_mm_s=24.0,
+        linear_acc_mm_s2=48.0,
+        angular_vel_deg_s=22.0,
+        angular_acc_deg_s2=44.0,
     ),
 
     # Small camera/vision alignment corrections.
     'VISION_ALIGN': MotionProfile(
         'VISION_ALIGN',
-        joint_vel_deg_s=28.0,
-        joint_acc_deg_s2=56.0,
-        linear_vel_mm_s=32.0,
-        linear_acc_mm_s2=64.0,
-        angular_vel_deg_s=28.0,
-        angular_acc_deg_s2=56.0,
+        joint_vel_deg_s=31.0,
+        joint_acc_deg_s2=62.0,
+        linear_vel_mm_s=35.0,
+        linear_acc_mm_s2=70.0,
+        angular_vel_deg_s=31.0,
+        angular_acc_deg_s2=62.0,
     ),
 
     # Vertical moves while carrying medicine.
     'LIFT': MotionProfile(
         'LIFT',
-        joint_vel_deg_s=35.0,
-        joint_acc_deg_s2=70.0,
-        linear_vel_mm_s=45.0,
-        linear_acc_mm_s2=90.0,
-        angular_vel_deg_s=35.0,
-        angular_acc_deg_s2=70.0,
+        joint_vel_deg_s=39.0,
+        joint_acc_deg_s2=78.0,
+        linear_vel_mm_s=50.0,
+        linear_acc_mm_s2=100.0,
+        angular_vel_deg_s=39.0,
+        angular_acc_deg_s2=78.0,
     ),
 
     # OCR 불일치 시 컨베이어로 내려놓는 rollback 블록의 MoveJ 8개 전용.
@@ -428,13 +428,14 @@ class MotionSequenceNode(Node):
                     self._step_info_pub.publish(String(data='STOPPING'))
                     return
 
-        drawer_index = msg.data
-        if drawer_index < 0 or drawer_index > 5:
+        drawer_number = msg.data   # 사용자 기준 1~6
+        if drawer_number < 1 or drawer_number > 6:
             self.get_logger().error(
-                f'Invalid drawer index {drawer_index}; expected 0..5'
+                f'Invalid drawer number {drawer_number}; expected 1..6'
             )
             self._step_info_pub.publish(String(data='IDLE'))
             return
+        drawer_index = drawer_number - 1   # 내부 로직 기준 0~5
         self._step_mode = self._DEFAULT_STEP_MODE
         self._stop_requested = False
 
@@ -1012,7 +1013,7 @@ class MotionSequenceNode(Node):
     def _drawer_offset(self, slot_index: int) -> tuple | None:
         """Return handle-center offset from the marker in robot base axes."""
         if slot_index < 0 or slot_index > 5:
-            self.get_logger().error(f'서랍 번호 범위 초과: {slot_index} (0~5 필요)')
+            self.get_logger().error(f'서랍 번호 범위 초과: {slot_index + 1} (1~6 필요)')
             return None
 
         row, col = divmod(slot_index, 2)
@@ -1063,13 +1064,284 @@ class MotionSequenceNode(Node):
         )
         return approach_flange, contact_flange, pull_dir
 
+    def _pick_verify_and_deliver(
+        self,
+        drawer_index: int,
+        radius_mm: float,
+        contact: tuple,
+        pull_dir: tuple,
+    ) -> bool:
+        """8~18단계: 약품을 집어 OCR로 검수하고 배송 박스(또는 컨베이어 롤백)로 옮긴다.
+
+        이 시점에는 이미 서랍이 열려 있다. False를 반환해도 서랍은 닫아야 하므로,
+        호출 측(run_sequence)은 이 결과와 무관하게 항상 _close_drawer_and_home을 이어서 실행한다.
+        """
+        # ── [Vision] 약품 검출 로직 ──
+        self.get_logger().info('[Vision] 약품 위치 측정 중...')
+        box_pos = self._get_medicine_target()
+
+        fallback_used = False
+        if box_pos is None:
+            fallback_box_pos = self._on_missing_medicine(contact, pull_dir)
+            if fallback_box_pos is None:
+                self.get_logger().error(
+                    '약품 감지 실패 — 시퀀스를 종료합니다. '
+                    '약품이 없으면 다음 단계로 진행하지 않습니다.'
+                )
+                self._step_info_pub.publish(String(data='Vision 실패 — 약품 미감지'))
+                return False
+            box_pos = fallback_box_pos
+            fallback_used = True
+
+        bx, by, bz = box_pos
+        coord_str = (
+            f"약품 감지(대체)" if fallback_used else "약품 감지"
+        ) + f" (X:{bx:.1f}, Y:{by:.1f}, Z:{bz:.1f})"
+        self.get_logger().info(coord_str)
+        self._step_info_pub.publish(String(data=f'WAIT:{coord_str}'))
+
+        # MoveC 시작 전 실제 TCP 전체(위치+자세) 기억
+        if not self._wait_tcp():
+            self.get_logger().error('MoveC 전 TCP 위치 미수신')
+            return False
+        pre_movec_pos = tuple(self._tcp[:6])  # (x, y, z, rx, ry, rz)
+        cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
+
+        # 8. MoveC 호 이동
+        if not self._wait_for_step(f'8. MoveC r={radius_mm:.0f} 호 이동'): return False
+        end_pos = self._move_c(radius_mm, -1)
+        if end_pos is None:
+            self._step_info_pub.publish(String(data='MoveC 실패 — 작업 공간 초과 가능'))
+            return False
+        cx, cy, cz = end_pos
+
+        # 8.5 약품 X, Y 위치로 정렬 (현재 높이 유지)
+        # TCP 스윙으로 인한 그리퍼 끝단 Y 오차 수동 보정 (기존 -97mm + 추가 -23mm = -120mm)
+        gripper_x_offset = -8.12
+        gripper_y_offset = -104.0
+        target_x = bx + gripper_x_offset
+        target_y = by + gripper_y_offset
+
+        # 손잡이(마커 기준 실제 handle, contact에서 그리퍼 길이만큼 뺀 값) 기준
+        # 안전 범위 검증: x ±6cm, y +6~+13cm.
+        # contact는 contact_flange(손잡이 + 그리퍼 길이)라서 그대로 쓰면 안 되고,
+        # pull_dir 방향으로 gripper_length_mm만큼 빼서 진짜 손잡이 좌표로 되돌린다.
+        # 범위를 벗어나면 비전 오검출로 보고 약품 미감지와 동일하게 시퀀스를 중단한다.
+        gripper_length = float(self._cabinet_geometry['gripper_length_mm'])
+        handle_x = contact[0] - pull_dir[0] * gripper_length
+        handle_y = contact[1] - pull_dir[1] * gripper_length
+        handle_dx = target_x - handle_x
+        handle_dy = target_y - handle_y
+        if not (-60.0 <= handle_dx <= 60.0 and 60.0 <= handle_dy <= 130.0):
+            self.get_logger().error(
+                'XY 정렬 목표가 손잡이 기준 안전 범위 밖 — 시퀀스를 종료합니다. '
+                f'(dx={handle_dx:+.1f}mm 허용 ±60mm, dy={handle_dy:+.1f}mm 허용 60~130mm)'
+            )
+            self._step_info_pub.publish(String(data='Vision 실패 — XY 정렬 범위 초과'))
+            return False
+
+        if not self._wait_for_step(f'8.5 약품 XY 정렬 (X:{target_x:.0f}, Y:{target_y:.0f})'): return False
+        # 호 이동이 끝나면 카메라가 아래를 보는 자세(rx=90, ry=-180, rz=0)가 됨. 이 자세 유지.
+        if not self._move_l(
+            target_x, target_y, cz, 90.0, -180.0, 0.0,
+            profile='VISION_ALIGN',
+        ): return False
+        cx, cy = target_x, target_y # 이제 현재 위치는 약품 바로 위
+
+        # 9. Z 하강 (비전 좌표 + 그리퍼 길이 보정 + 수동 보정)
+        # 그리퍼 길이 97mm + 안전거리 5mm 에, 추가로 12mm 더 깊게 하강 (-12mm 보정)
+        gripper_z_offset = 97.0
+        target_z = bz + 5.0 + gripper_z_offset - 13.87
+        if not self._wait_for_step(f'9. Z 하강 (목표 Z={target_z:.1f})'): return False
+        if not self._move_l(
+            cx, cy, target_z, 90.0, -180.0, 0.0,
+            profile='CONTACT',
+        ): return False
+        cz = target_z
+
+        # 10. 전자석 ON
+        if not self._wait_for_step('10. 전자석 ON'): return False
+        if not self._set_magnet(True): return False
+
+        # 11. Z +100mm 상승
+        if not self._wait_for_step('11. Z +100mm 상승'): return False
+        if not self._move_l(0, 0, 100, relative=True, profile='LIFT'): return False
+        cz += 100
+
+        # 12. Y+50 Z+50 이동
+        if not self._wait_for_step('12. Y+50 Z+50 이동'): return False
+        if not self._move_l(
+            0, 50, 50,
+            relative=True,
+            blend_radius='SMALL',
+            profile='LIFT',
+        ): return False
+        cy += 50
+        cz += 50
+
+        # 13. MoveJ 카메라 앞 정렬
+        if not self._wait_joints():
+            self.get_logger().error('13번 전 관절 위치 미수신')
+            return False
+        pre_camera_joints = tuple(self._joints[:6])
+        if not self._wait_for_step('13. MoveJ 카메라 앞 정렬'): return False
+        if not self._move_j(
+            [-1.00, -13.30, 94.01, 18.55, 49.57, -113.36],
+            profile='TRANSIT', blend_radius='SMALL',
+        ): return False
+        if not self._move_j(
+            [3.74, 22.84, 111.01, 8.49, -78.55, -180.00],
+            profile='TRANSIT', blend_radius='SMALL',
+        ): return False
+        if not self._move_j(
+            [-2.21, 44.37, 61.78, -0.00, -107.20, -180.00],
+            profile='TRANSIT',
+        ): return False
+
+        # 13.5. OCR & JSON 파싱
+        if not self._wait_for_step('13.5. OCR & JSON 파싱'): return False
+        ocr_status = self._ocr_and_parse()
+
+        # [핵심] OCR 결과 분기 — 관리자 확인 없이 자동으로 판단한다.
+        #   MATCHED      → 배송 박스로 이동 (14~18)
+        #   그 외(불일치) → 자동으로 컨베이어에 내려놓기
+        ocr_rollback = False
+        if ocr_status != 'MATCHED':
+            self.get_logger().error(
+                f'[🚨경고] OCR 결과: {ocr_status}. 자동으로 컨베이어에 내려놓습니다.'
+            )
+            self._step_info_pub.publish(String(data='ROLLBACK:원위치 복구 중'))
+            ocr_rollback = True
+            if not self._move_j(
+                [1.14, 13.16, 122.67, 6.37, -107.20, -180.00],
+                profile='OCR_ROLLBACK',
+                blend_radius='SMALL',
+            ): return False
+            if not self._move_j(
+                [-1.49, -15.16, 83.61, 0.0, 21.20, -180.0],
+                profile='OCR_ROLLBACK',
+                blend_radius='SMALL',
+            ): return False
+            if not self._move_j(
+                [-66.80, -19.25, 57.07, 0.0, 91.48, -180.0],
+                profile='OCR_ROLLBACK',
+                blend_radius='SMALL',
+            ): return False
+            if not self._move_j(
+                [-84.58, 17.75, 82.87, 0.0, 79.38, -174.58],
+                profile='OCR_ROLLBACK',
+            ): return False
+            time.sleep(1.0)
+            if not self._set_magnet(False): return False
+            time.sleep(0.5)
+            self._set_inverter_freq(freq=3000)  # 컨베이어 주파수 30Hz
+            self._set_inverter_run(True)  # 컨베이어 ON
+            if not self._move_j(
+                [-66.80, -19.25, 57.07, 0.0, 91.48, -180.0],
+                profile='OCR_ROLLBACK',
+                blend_radius='SMALL',
+            ): return False
+            if not self._move_j(
+                [-1.49, -15.16, 83.61, 0.0, 21.20, -180.0],
+                profile='OCR_ROLLBACK',
+                blend_radius='SMALL',
+            ): return False
+            if not self._move_j(
+                [34.69, 0.76, 77.49, -57.51, 92.50, -180.00],
+                profile='OCR_ROLLBACK',
+                blend_radius='SMALL',
+            ): return False
+            if not self._move_j(
+                [32.18, 37.57, 77.48, -75.09, 118.85, -61.10],
+                profile='OCR_ROLLBACK',
+            ): return False
+            self._set_inverter_run(False)  # 컨베이어 OFF
+        else:
+            self.get_logger().info('OCR 일치 확인. 배송 박스로 이동합니다.')
+
+        if self._stop_requested: return False
+
+        # 14~18: 배송 박스 전달 (롤백 시 건너뜀)
+        if not ocr_rollback:
+            # 14. MoveJ 병동 박스 정렬
+            if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return False
+            if not self._move_j(
+                [31.04, 48.6, 38.63, 0.0, 92.77, -58.96],
+                profile='TRANSIT',
+            ): return False
+
+            # 15. Z -150mm 하강
+            if not self._wait_for_step('15. Z -150mm 하강'): return False
+            if not self._move_l(0, 0, -150, relative=True, profile='CONTACT'): return False
+
+            # 16. 전자석 OFF (배치)
+            if not self._wait_for_step('16. 전자석 OFF'): return False
+            if not self._set_magnet(False): return False
+
+            # 17. Z +150mm 상승
+            if not self._wait_for_step('17. Z +150mm 상승'): return False
+            if not self._move_l(
+                0, 0, 150,
+                relative=True,
+                profile='LIFT',
+                blend_radius='SMALL',
+            ): return False
+
+            # 18. MoveC 전 위치로 복귀
+            if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return False
+            if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
+                                pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5],
+                                profile='TRANSIT',
+                                blend_radius='SMALL'): return False
+
+        return True
+
+    def _close_drawer_and_home(
+        self, pull_target: tuple, contact: tuple, pull_dir: tuple,
+    ) -> bool:
+        """19~24단계: 서랍을 닫고 홈으로 복귀한다.
+
+        픽업/배송(_pick_verify_and_deliver)의 성공 여부와 무관하게 항상 호출되어야
+        한다 — 그렇지 않으면 비전 실패 등으로 시퀀스가 중단될 때 서랍이 열린 채로
+        방치된다.
+        """
+        # 19. 열린 서랍의 손잡이 위치로 재접근
+        if not self._wait_for_step('19. 열린 서랍 손잡이 재접근'): return False
+        if not self._move_l(*pull_target, 90.0, -90.0, 0.0, profile='APPROACH'): return False
+
+        # 20. 전자석 ON
+        if not self._wait_for_step('20. 전자석 ON'): return False
+        if not self._set_magnet(True): return False
+
+        # 21. 원래 손잡이 위치까지 200mm 밀어 서랍 닫기
+        if not self._wait_for_step('21. 서랍 200mm 닫기'): return False
+        if not self._move_l(*contact, 90.0, -90.0, 0.0, profile='CONTACT'): return False
+
+        # 22. 전자석 OFF
+        if not self._wait_for_step('22. 전자석 OFF'): return False
+        if not self._set_magnet(False): return False
+
+        # 23. 닫힌 손잡이에서 50mm 후퇴
+        final_retreat = tuple(contact[i] + pull_dir[i] * 50.0 for i in range(3))
+        if not self._wait_for_step('23. 손잡이에서 50mm 후퇴'): return False
+        if not self._move_l(
+            *final_retreat, 90.0, -90.0, 0.0,
+            blend_radius='SMALL',
+            profile='APPROACH',
+        ): return False
+
+        # 24. 최종 홈 정렬
+        if not self._wait_for_step('24. 최종 홈 정렬'): return False
+        if not self._home(): return False
+        return True
+
     def run_sequence(self, drawer_index: int, radius_mm: float):
         self._is_running = True
         try:
             # 1. 홈
+            self._set_plc_coil(0x20, True)   # M20 ON — 시퀀스 시작
             if not self._wait_for_step('1. 홈 이동'): return
             if not self._home(): return
-            self._set_plc_coil(0x20, True)   # M20 ON — 시퀀스 시작
 
             if not self._wait_tcp():
                 self.get_logger().error('TCP 위치 미수신')
@@ -1120,279 +1392,27 @@ class MotionSequenceNode(Node):
             ): return
             cx, cy, cz = released_target
 
-            # ── [Vision] 약품 검출 로직 ──
-            self.get_logger().info('[Vision] 약품 위치 측정 중...')
-            box_pos = self._get_medicine_target()
+            # ── 8~18: 약품 픽업 → OCR 검수 → 배송(또는 롤백) ──
+            # 이 시점부터는 서랍이 열려 있으므로, 실패(예외 포함)하더라도 반드시
+            # 서랍을 닫고 홈으로 복귀시킨다(아래 _close_drawer_and_home은 결과와 무관하게 항상 실행).
+            pick_ok = False
+            try:
+                pick_ok = self._pick_verify_and_deliver(drawer_index, radius_mm, contact, pull_dir)
+            except Exception as exc:
+                self.get_logger().error(f'픽업/배송 중 예외 발생: {exc}')
 
-            fallback_used = False
-            if box_pos is None:
-                fallback_box_pos = self._on_missing_medicine(contact, pull_dir)
-                if fallback_box_pos is None:
-                    self.get_logger().error(
-                        '약품 감지 실패 — 시퀀스를 종료합니다. '
-                        '약품이 없으면 다음 단계로 진행하지 않습니다.'
-                    )
-                    self._step_info_pub.publish(String(data='Vision 실패 — 약품 미감지'))
-                    return
-                box_pos = fallback_box_pos
-                fallback_used = True
+            # 19~24: 서랍 닫기 + 홈 복귀 — 픽업/배송 성공 여부와 무관하게 항상 시도
+            close_ok = self._close_drawer_and_home(pull_target, contact, pull_dir)
 
-            bx, by, bz = box_pos
-            coord_str = (
-                f"약품 감지(대체)" if fallback_used else "약품 감지"
-            ) + f" (X:{bx:.1f}, Y:{by:.1f}, Z:{bz:.1f})"
-            self.get_logger().info(coord_str)
-            self._step_info_pub.publish(String(data=f'WAIT:{coord_str}'))
-
-            # MoveC 시작 전 실제 TCP 전체(위치+자세) 기억
-            if not self._wait_tcp():
-                self.get_logger().error('MoveC 전 TCP 위치 미수신')
+            if not pick_ok or not close_ok:
                 return
-            pre_movec_pos = tuple(self._tcp[:6])  # (x, y, z, rx, ry, rz)
-            cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
-
-            # 8. MoveC 호 이동
-            if not self._wait_for_step(f'8. MoveC r={radius_mm:.0f} 호 이동'): return
-            end_pos = self._move_c(radius_mm, -1)
-            if end_pos is None:
-                self._step_info_pub.publish(String(data='MoveC 실패 — 작업 공간 초과 가능'))
-                return
-            cx, cy, cz = end_pos
-
-            # 8.5 약품 X, Y 위치로 정렬 (현재 높이 유지)
-            # TCP 스윙으로 인한 그리퍼 끝단 Y 오차 수동 보정 (기존 -97mm + 추가 -23mm = -120mm)
-            gripper_x_offset = -8.12
-            gripper_y_offset = -104.0
-            target_x = bx + gripper_x_offset
-            target_y = by + gripper_y_offset
-
-            # 손잡이(마커 기준 실제 handle, contact에서 그리퍼 길이만큼 뺀 값) 기준
-            # 안전 범위 검증: x ±6cm, y +6~+13cm.
-            # contact는 contact_flange(손잡이 + 그리퍼 길이)라서 그대로 쓰면 안 되고,
-            # pull_dir 방향으로 gripper_length_mm만큼 빼서 진짜 손잡이 좌표로 되돌린다.
-            # 범위를 벗어나면 비전 오검출로 보고 약품 미감지와 동일하게 시퀀스를 중단한다.
-            gripper_length = float(self._cabinet_geometry['gripper_length_mm'])
-            handle_x = contact[0] - pull_dir[0] * gripper_length
-            handle_y = contact[1] - pull_dir[1] * gripper_length
-            handle_dx = target_x - handle_x
-            handle_dy = target_y - handle_y
-            if not (-60.0 <= handle_dx <= 60.0 and 60.0 <= handle_dy <= 130.0):
-                self.get_logger().error(
-                    'XY 정렬 목표가 손잡이 기준 안전 범위 밖 — 시퀀스를 종료합니다. '
-                    f'(dx={handle_dx:+.1f}mm 허용 ±60mm, dy={handle_dy:+.1f}mm 허용 60~130mm)'
-                )
-                self._step_info_pub.publish(String(data='Vision 실패 — XY 정렬 범위 초과'))
-                return
-
-            if not self._wait_for_step(f'8.5 약품 XY 정렬 (X:{target_x:.0f}, Y:{target_y:.0f})'): return
-            # 호 이동이 끝나면 카메라가 아래를 보는 자세(rx=90, ry=-180, rz=0)가 됨. 이 자세 유지.
-            if not self._move_l(
-                target_x, target_y, cz, 90.0, -180.0, 0.0,
-                profile='VISION_ALIGN',
-            ): return
-            cx, cy = target_x, target_y # 이제 현재 위치는 약품 바로 위
-
-            # 9. Z 하강 (비전 좌표 + 그리퍼 길이 보정 + 수동 보정)
-            # 그리퍼 길이 97mm + 안전거리 5mm 에, 추가로 12mm 더 깊게 하강 (-12mm 보정)
-            gripper_z_offset = 97.0
-            target_z = bz + 5.0 + gripper_z_offset - 13.87
-            if not self._wait_for_step(f'9. Z 하강 (목표 Z={target_z:.1f})'): return
-            if not self._move_l(
-                cx, cy, target_z, 90.0, -180.0, 0.0,
-                profile='CONTACT',
-            ): return
-            cz = target_z
-
-            # 10. 전자석 ON
-            if not self._wait_for_step('10. 전자석 ON'): return
-            if not self._set_magnet(True): return
-
-            # 11. Z +100mm 상승
-            if not self._wait_for_step('11. Z +100mm 상승'): return
-            if not self._move_l(0, 0, 100, relative=True, profile='LIFT'): return
-            cz += 100
-
-            # 12. Y+50 Z+50 이동
-            if not self._wait_for_step('12. Y+50 Z+50 이동'): return
-            if not self._move_l(
-                0, 50, 50,
-                relative=True,
-                blend_radius='SMALL',
-                profile='LIFT',
-            ): return
-            cy += 50
-            cz += 50
-
-            # 13. MoveJ 카메라 앞 정렬
-            if not self._wait_joints():
-                self.get_logger().error('13번 전 관절 위치 미수신')
-                return
-            pre_camera_joints = tuple(self._joints[:6])
-            if not self._wait_for_step('13. MoveJ 카메라 앞 정렬'): return
-            if not self._move_j(
-                [-1.00, -13.30, 94.01, 18.55, 49.57, -113.36],
-                profile='TRANSIT', blend_radius='SMALL',
-            ): return
-            if not self._move_j(
-                [3.74, 22.84, 111.01, 8.49, -78.55, -180.00],
-                profile='TRANSIT', blend_radius='SMALL',
-            ): return
-            if not self._move_j(
-                [-2.21, 44.37, 61.78, -0.00, -107.20, -182.00],
-                profile='TRANSIT',
-            ): return
-
-            # 13.5. OCR & JSON 파싱
-            if not self._wait_for_step('13.5. OCR & JSON 파싱'): return
-            ocr_status = self._ocr_and_parse()
-
-            # [핵심] OCR 결과 분기 — 관리자 확인 없이 자동으로 판단한다.
-            #   MATCHED      → 배송 박스로 이동 (14~18)
-            #   그 외(불일치) → 자동으로 컨베이어에 내려놓기
-            ocr_rollback = False
-            if ocr_status != 'MATCHED':
-                self.get_logger().error(
-                    f'[🚨경고] OCR 결과: {ocr_status}. 자동으로 컨베이어에 내려놓습니다.'
-                )
-                self._step_info_pub.publish(String(data='ROLLBACK:원위치 복구 중'))
-                ocr_rollback = True
-                # 기존 동작(서랍으로 되돌리기) — 혹시 몰라 주석으로 남겨둠.
-                # if not self._move_j(list(pre_camera_joints), profile='TRANSIT'): return
-                # if not self._move_l(0, -50, -50, relative=True, profile='LIFT'): return
-                # if not self._move_l(0, 0, -100, relative=True, profile='CONTACT'): return
-                # if not self._set_magnet(False): return
-                # if not self._move_l(
-                #     target_x, target_y, end_pos[2], 90.0, -180.0, 0.0,
-                #     profile='VISION_ALIGN',
-                # ): return
-                # if not self._move_l(
-                #     end_pos[0], end_pos[1], end_pos[2], 90.0, -180.0, 0.0,
-                #     profile='VISION_ALIGN',
-                # ): return
-                # if not self._move_c_reverse_from_end(pre_movec_pos, radius_mm): return
-                if not self._move_j(
-                    [1.14, 13.16, 122.67, 6.37, -107.20, -180.00],
-                    profile='OCR_ROLLBACK',
-                    blend_radius='SMALL',
-                ): return
-                if not self._move_j(
-                    [-1.49, -15.16, 83.61, 0.0, 21.20, -180.0],
-                    profile='OCR_ROLLBACK',
-                    blend_radius='SMALL',
-                ): return
-                if not self._move_j(
-                    [-66.80, -19.25, 57.07, 0.0, 91.48, -180.0],
-                    profile='OCR_ROLLBACK',
-                    blend_radius='SMALL',
-                ): return
-                if not self._move_j(
-                    [-84.58, 17.75, 82.87, 0.0, 79.38, -174.58],
-                    profile='OCR_ROLLBACK',
-                ): return
-                time.sleep(1.0)
-                if not self._set_magnet(False): return
-                time.sleep(0.5)
-                self._set_inverter_freq(freq=3000)  # 컨베이어 주파수 30Hz
-                self._set_inverter_run(True)  # 컨베이어 ON
-                if not self._move_j(
-                    [-66.80, -19.25, 57.07, 0.0, 91.48, -180.0],
-                    profile='OCR_ROLLBACK',
-                    blend_radius='SMALL',
-                ): return
-                if not self._move_j(
-                    [-1.49, -15.16, 83.61, 0.0, 21.20, -180.0],
-                    profile='OCR_ROLLBACK',
-                    blend_radius='SMALL',
-                ): return
-                if not self._move_j(
-                    [34.69, 0.76, 77.49, -57.51, 92.50, -180.00],
-                    profile='OCR_ROLLBACK',
-                    blend_radius='SMALL',
-                ): return
-                if not self._move_j(
-                    [32.18, 37.57, 77.48, -75.09, 118.85, -61.10],
-                    profile='OCR_ROLLBACK',
-                ): return
-                self._set_inverter_run(False)  # 컨베이어 OFF
-            else:
-                self.get_logger().info('OCR 일치 확인. 배송 박스로 이동합니다.')
-
-            if self._stop_requested: return
-
-            # 14~18: 배송 박스 전달 (롤백 시 건너뜀)
-            if not ocr_rollback:
-                # 14. MoveJ 병동 박스 정렬
-                if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return
-                if not self._move_j(
-                    [31.04, 48.6, 38.63, 0.0, 92.77, -58.96],
-                    profile='TRANSIT',
-                ): return
-
-                # 15. Z -150mm 하강
-                if not self._wait_for_step('15. Z -150mm 하강'): return
-                if not self._move_l(0, 0, -150, relative=True, profile='CONTACT'): return
-
-                # 16. 전자석 OFF (배치)
-                if not self._wait_for_step('16. 전자석 OFF'): return
-                if not self._set_magnet(False): return
-
-                # 17. Z +150mm 상승
-                if not self._wait_for_step('17. Z +150mm 상승'): return
-                if not self._move_l(
-                    0, 0, 150,
-                    relative=True,
-                    profile='LIFT',
-                    blend_radius='SMALL',
-                ): return
-
-                # 18. MoveC 전 위치로 복귀
-                if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return
-                if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
-                                    pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5],
-                                    profile='TRANSIT',
-                                    blend_radius='SMALL'): return
-
-            # [공통] 이제 서랍 닫기 공통 단계로 진입 (19번부터)
-            cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
-
-            # 19. 열린 서랍의 손잡이 위치로 재접근
-            if not self._wait_for_step('19. 열린 서랍 손잡이 재접근'): return
-            if not self._move_l(*pull_target, 90.0, -90.0, 0.0, profile='APPROACH'): return
-            cx, cy, cz = pull_target
-
-            # 20. 전자석 ON
-            if not self._wait_for_step('20. 전자석 ON'): return
-            if not self._set_magnet(True): return
-
-            # 21. 원래 손잡이 위치까지 200mm 밀어 서랍 닫기
-            if not self._wait_for_step('21. 서랍 200mm 닫기'): return
-            if not self._move_l(*contact, 90.0, -90.0, 0.0, profile='CONTACT'): return
-            cx, cy, cz = contact
-
-            # 22. 전자석 OFF
-            if not self._wait_for_step('22. 전자석 OFF'): return
-            if not self._set_magnet(False): return
-
-            # 23. 닫힌 손잡이에서 50mm 후퇴
-            final_retreat = tuple(contact[i] + pull_dir[i] * 50.0 for i in range(3))
-            if not self._wait_for_step('23. 손잡이에서 50mm 후퇴'): return
-            if not self._move_l(
-                *final_retreat, 90.0, -90.0, 0.0,
-                blend_radius='SMALL',
-                profile='APPROACH',
-            ): return
-            cx, cy, cz = final_retreat
-
-            # 24. 최종 홈 정렬
-            if not self._wait_for_step('24. 최종 홈 정렬'): return
-            if not self._home(): return
-            self._set_plc_coil(0x20, False)  # M20 OFF — 시퀀스 종료
 
             self.get_logger().info('시퀀스 완료')
             self._wait_for_step('시퀀스 완료')
         except Exception as e:
             self.get_logger().error(f'Sequence error: {e}')
         finally:
+            self._set_plc_coil(0x20, False)  # M20 OFF — 정상/중단/예외 모든 경로에서 종료 보장
             self._is_running = False
             self._step_info_pub.publish(String(data='IDLE'))
 
@@ -1410,9 +1430,13 @@ def main(args=None):
     executor = MultiThreadedExecutor()
     executor.add_node(node)
 
-    # CLI 지원
+    # CLI 지원 (서랍 번호는 사용자 기준 1~6)
     if len(sys.argv) > 1 and sys.argv[1].isdigit():
-        drawer_index = int(sys.argv[1])
+        drawer_number = int(sys.argv[1])
+        if drawer_number < 1 or drawer_number > 6:
+            print(f'Invalid drawer number {drawer_number}; expected 1..6', file=sys.stderr)
+            return 1
+        drawer_index = drawer_number - 1
         radius = float(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_RADIUS
         node._step_mode = '--step' in sys.argv
         seq_thread = threading.Thread(target=node.run_sequence, args=(drawer_index, radius))
