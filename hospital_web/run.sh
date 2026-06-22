@@ -1,6 +1,6 @@
 #!/bin/bash
-# RoToSY (로봇 암 API) 가 localhost:8000 에서 먼저 실행 중이어야 합니다.
-# 이 스크립트는 hospital_web/backend 를 포트 8080 으로 실행합니다.
+# hospital_web/backend 를 포트 8080 으로 실행합니다.
+# 로봇 팔 제어는 web_interface(:8000) 없이 ROS2 bridge로 직접 연결됩니다.
 
 cd "$(dirname "$0")"
 

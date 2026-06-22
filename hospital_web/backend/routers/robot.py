@@ -1,4 +1,4 @@
-"""Proxy robot control commands to RoToSY (localhost:8000)."""
+"""Robot control commands through the in-process ROS bridge."""
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -37,12 +37,26 @@ class JogCartReq(BaseModel):
     direction: int    # +1 | -1
     distance: float = 5.0  # mm
 
+class InverterFreqReq(BaseModel):
+    freq: int
+
+class InverterRunReq(BaseModel):
+    run: bool
+
 
 async def _proxy(path: str, body: dict | None = None) -> dict:
     result = await proxy.post(path, body)
     if not result.get('success', True):
         raise HTTPException(status_code=500, detail=result.get('message', 'RoToSY error'))
     return result
+
+
+def _robot_node():
+    try:
+        from .. import robot_bridge
+        return robot_bridge.get_node()
+    except Exception:
+        return None
 
 
 @router.post('/servo')
@@ -93,11 +107,11 @@ async def recover():
 
 @router.post('/motion/start')
 async def motion_start(req: MotionStartReq):
-    """수동 호출 (옵션 X) — 서랍 인덱스(0~5) 모션 시퀀스 시작."""
-    if req.marker_id < 0 or req.marker_id > 5:
-        raise HTTPException(status_code=422, detail='drawer index must be 0..5')
+    """수동 호출 (옵션 X) — 서랍 번호(1~6) 모션 시퀀스 시작."""
+    if req.marker_id < 1 or req.marker_id > 6:
+        raise HTTPException(status_code=422, detail='drawer number must be 1..6')
     r = await _proxy('/api/motion/start', {'marker_id': req.marker_id})
-    ms.add_audit('admin', 'MOTION_START', f'서랍 {req.marker_id + 1} (index {req.marker_id})')
+    ms.add_audit('admin', 'MOTION_START', f'서랍 {req.marker_id}')
     return r
 
 
@@ -143,13 +157,44 @@ async def gripper_off():
 
 @router.get('/gripper/status')
 async def gripper_status():
-    async with __import__('httpx').AsyncClient(base_url=proxy.ROTOSY_BASE,
-                                               timeout=__import__('httpx').Timeout(3.0)) as cli:
-        try:
-            r = await cli.get('/api/gripper/status')
-            return r.json()
-        except Exception as e:
-            raise HTTPException(status_code=503, detail=str(e))
+    state = proxy.get_robot_state()
+    return {'magnet_on': state.get('magnet_on', False)}
+
+
+# ── Inverter / Conveyor ──────────────────────────────────────────────────────
+
+@router.post('/inverter/freq')
+async def inverter_freq(req: InverterFreqReq):
+    if not 0 <= req.freq <= 6000:
+        raise HTTPException(
+            status_code=422,
+            detail='freq must be 0..6000 (0.01 Hz unit)',
+        )
+    node = _robot_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='Robot ROS bridge not initialized')
+    node.publish_inverter_freq(req.freq)
+    ms.add_audit('admin', 'INVERTER_FREQ', f'{req.freq / 100:.2f} Hz')
+    return {'success': True, 'freq': req.freq, 'hz': round(req.freq / 100, 2)}
+
+
+@router.post('/inverter/run')
+async def inverter_run(req: InverterRunReq):
+    node = _robot_node()
+    if node is None:
+        raise HTTPException(status_code=503, detail='Robot ROS bridge not initialized')
+    node.publish_inverter_run(req.run)
+    ms.add_audit('admin', 'INVERTER_' + ('RUN' if req.run else 'STOP'))
+    return {'success': True, 'run': req.run}
+
+
+@router.get('/inverter/status')
+async def inverter_status():
+    state = proxy.get_robot_state()
+    return {
+        'inverter_running': state.get('inverter_running', False),
+        'inverter_freq': state.get('inverter_freq', 0),
+    }
 
 
 # ── Cartesian jog ────────────────────────────────────────────────────────────

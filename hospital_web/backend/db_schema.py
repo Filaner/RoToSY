@@ -176,6 +176,12 @@ def init_schema() -> None:
                             DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now'))
         );
 
+        CREATE TABLE IF NOT EXISTS orchestrator_state (
+            id              INTEGER PRIMARY KEY CHECK (id = 1),
+            state_json      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_prescription_status ON prescription(status);
         CREATE INDEX IF NOT EXISTS idx_prescription_created ON prescription(created_at);
         CREATE INDEX IF NOT EXISTS idx_pitem_pid ON prescription_item(prescription_id);

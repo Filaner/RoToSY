@@ -1,6 +1,6 @@
 """
 Hospital Web Gateway — Admin Dashboard backend.
-Port: 8080  (RoToSY runs on 8000)
+Port: 8080
 
 WebSocket /ws broadcasts combined state at 10 Hz:
   { robot, amr, door, mission, nodes, plc, arduino }
@@ -12,14 +12,16 @@ from pathlib import Path
 from typing import Set
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import robot_proxy as proxy
 from . import ros_bridge   as ros
 from . import mission_state as ms
-from .routers import robot, amr, system as sys_router, prescription as presc_router, sensor as sensor_router, vision as vision_router, demo as demo_router, patient as patient_router, medicine as medicine_router, ocr as ocr_router
+from . import camera as cam_module
+from . import orchestrator
+from .routers import robot, amr, system as sys_router, prescription as presc_router, sensor as sensor_router, vision as vision_router, demo as demo_router, patient as patient_router, medicine as medicine_router, ocr as ocr_router, manual_calib as manual_calib_router, orchestrator as orchestrator_router
 from . import sensor_db
 from . import db_schema
 
@@ -76,6 +78,7 @@ def _build_state() -> dict:
         'motion_step':  robot_st.get('seq_step', 'IDLE'),
         'magnet_on':    robot_st.get('magnet_on', False),
         'marker_queue': ms.get_marker_queue(),
+        'orchestrator': orchestrator.get_state(),
     }
 
 
@@ -92,14 +95,19 @@ async def _broadcast_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db_schema.init_schema()
+    orchestrator.load_state_from_db()
     sensor_db.init_db()
     sensor_db.start_serial_reader()
     ros.init()
+    cam_module.camera.start()
     broadcast_task = asyncio.create_task(_broadcast_loop())
     poll_task      = asyncio.create_task(proxy.poll_loop())
+    orch_task      = asyncio.create_task(orchestrator.monitor_loop())
     yield
     broadcast_task.cancel()
     poll_task.cancel()
+    orch_task.cancel()
+    cam_module.camera.stop()
     sensor_db.stop_serial_reader()
     ros.shutdown()
 
@@ -118,9 +126,72 @@ app.include_router(demo_router.router)
 app.include_router(patient_router.router)
 app.include_router(medicine_router.router)
 app.include_router(ocr_router.router)
+app.include_router(manual_calib_router.router)
+app.include_router(orchestrator_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')
+
+
+@app.get('/api/status')
+async def robot_status():
+    """Compatibility endpoint for the old web_interface robot state API."""
+    return proxy.get_robot_state()
+
+
+@app.get('/camera/stream')
+async def camera_stream():
+    """Compatibility MJPEG stream endpoint previously owned by web_interface."""
+    if not cam_module.camera.available:
+        raise HTTPException(status_code=503, detail='pyrealsense2 not installed')
+
+    async def generate():
+        last_frame: bytes | None = None
+        while True:
+            frame = cam_module.camera.get_jpeg()
+            if frame:
+                last_frame = frame
+            if last_frame:
+                yield (
+                    b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n'
+                    + last_frame +
+                    b'\r\n'
+                )
+            await asyncio.sleep(1 / 30)
+
+    return StreamingResponse(
+        generate(),
+        media_type='multipart/x-mixed-replace; boundary=frame',
+    )
+
+
+@app.get('/camera/markers')
+async def camera_markers() -> dict:
+    """Compatibility ArUco marker endpoint previously owned by web_interface."""
+    return {
+        'markers': cam_module.camera.get_aruco_markers(),
+        'error': cam_module.camera.error,
+    }
+
+
+@app.get('/camera/detections')
+async def camera_detections() -> dict:
+    """Compatibility YOLO detections endpoint previously owned by web_interface."""
+    return {
+        'detections': cam_module.camera.get_detections(),
+        'model_loaded': cam_module.camera.detector_loaded,
+        'error': cam_module.camera.detector_error,
+    }
+
+
+@app.get('/camera/snapshot')
+async def camera_snapshot():
+    """Compatibility latest JPEG snapshot endpoint previously owned by web_interface."""
+    frame = cam_module.camera.get_jpeg()
+    if frame is None:
+        raise HTTPException(status_code=503, detail='카메라 프레임 없음')
+    return Response(content=frame, media_type='image/jpeg')
 
 
 @app.get('/', response_class=HTMLResponse)

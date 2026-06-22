@@ -1,81 +1,113 @@
 """
-Thin async proxy to RoToSY REST API (localhost:8000).
-Robot state is polled at POLL_HZ and cached; commands are forwarded as-is.
+Compatibility adapter for robot-arm control.
+
+Historically hospital_web called web_interface over HTTP at localhost:8000.
+The robot bridge now lives in-process, so this module keeps the old proxy API
+while dispatching directly to hospital_web.backend.robot_bridge.
 """
 
 import asyncio
-import threading
 from typing import Optional
 
-import httpx
 
-ROTOSY_BASE = 'http://localhost:8000'
-POLL_HZ     = 10
-_TIMEOUT    = httpx.Timeout(3.0)
+def _node():
+    try:
+        from . import robot_bridge
+        return robot_bridge.get_node()
+    except Exception:
+        return None
 
-_lock:         threading.Lock = threading.Lock()
-_robot_state:  dict           = {}
-_online:       bool           = False
-
-
-# ── State access ──────────────────────────────────────────────────────────────
 
 def get_robot_state() -> dict:
-    with _lock:
-        return dict(_robot_state)
+    node = _node()
+    return node.get_state() if node else {}
 
 
 def is_online() -> bool:
-    return _online
+    node = _node()
+    if node is None:
+        return False
+    state = node.get_state()
+    return bool(state.get('arm_ready') or state.get('robot_state', -1) != -1)
 
-
-# ── Background poll loop ──────────────────────────────────────────────────────
 
 async def poll_loop() -> None:
-    global _online
-    from . import ros_bridge  # vision_node heartbeat 갱신용 (지연 import로 순환참조 회피)
-    cam_tick = 0
-    async with httpx.AsyncClient(base_url=ROTOSY_BASE, timeout=_TIMEOUT) as client:
-        while True:
-            try:
-                r = await client.get('/api/status')
-                if r.status_code == 200:
-                    with _lock:
-                        _robot_state.update(r.json())
-                    _online = True
-                else:
-                    _online = False
-            except Exception:
-                _online = False
+    """Kept for main.py compatibility; robot state now arrives via ROS callbacks."""
+    while True:
+        await asyncio.sleep(1.0)
 
-            # vision_node = web_interface(:8000) 카메라(HTTP). ROS 토픽이 아니라
-            # 게이트웨이 HTTP로 살아있나 확인 → 카메라 켜져있으면 계속 ONLINE.
-            # 2Hz로만 체크(POLL_HZ=10 → 5사이클마다)해서 트래픽 절약.
-            cam_tick = (cam_tick + 1) % 5
-            if cam_tick == 0:
-                try:
-                    cr = await client.get('/camera/markers')
-                    if cr.status_code == 200 and not cr.json().get('error'):
-                        ros_bridge.update_node_seen('vision_node')
-                except Exception:
-                    pass
-
-            await asyncio.sleep(1.0 / POLL_HZ)
-
-
-# ── Command proxy ─────────────────────────────────────────────────────────────
 
 async def post(path: str, body: Optional[dict] = None) -> dict:
-    """Forward a POST command to RoToSY and return parsed JSON."""
-    async with httpx.AsyncClient(base_url=ROTOSY_BASE, timeout=httpx.Timeout(30.0)) as client:
-        try:
-            r = await client.post(path, json=body or {})
-            data = r.json()
-            if r.status_code >= 400:
-                detail = data.get('detail', str(data))
-                return {'success': False, 'message': detail}
-            return data
-        except httpx.ConnectError:
-            return {'success': False, 'message': 'RoToSY (localhost:8000) 연결 불가'}
-        except Exception as e:
-            return {'success': False, 'message': str(e)}
+    """Dispatch a legacy web_interface-style API path to the in-process bridge."""
+    node = _node()
+    if node is None:
+        return {'success': False, 'message': 'Robot ROS bridge not initialized'}
+
+    body = body or {}
+
+    try:
+        if path == '/api/servo':
+            return await node.call_servo(bool(body.get('enable')))
+        if path == '/api/jog':
+            return await node.call_jog(body.get('joint_index', 0), body.get('speed', 0.0))
+        if path == '/api/move_j':
+            return await node.call_movej(
+                body.get('joints', []),
+                body.get('velocity', 30.0),
+                body.get('acceleration', 60.0),
+            )
+        if path == '/api/move_l':
+            return await node.call_movel(
+                body.get('pose', []),
+                body.get('velocity', 50.0),
+                body.get('acceleration', 100.0),
+            )
+        if path == '/api/home':
+            return await node.call_home()
+        if path == '/api/teaching':
+            return await node.call_teaching(bool(body.get('enable')))
+        if path == '/api/estop':
+            return await node.call_estop()
+        if path in ('/api/recover', '/api/recovery'):
+            return await node.call_safety_recovery()
+
+        if path == '/api/motion/start':
+            node.start_sequence(int(body.get('marker_id', 0)))
+            return {'success': True}
+        if path == '/api/motion/next':
+            node.next_step()
+            return {'success': True}
+        if path == '/api/motion/stop':
+            node.stop_sequence()
+            return {'success': True}
+        if path == '/api/motion/reset':
+            node.reset_sequence()
+            return {'success': True}
+
+        if path == '/api/temp_motion/start':
+            node.start_temp_sequence(int(body.get('marker_id', 0)))
+            return {'success': True}
+        if path == '/api/temp_motion/next':
+            node.next_temp_step()
+            return {'success': True}
+        if path == '/api/temp_motion/stop':
+            node.stop_temp_sequence()
+            return {'success': True}
+
+        if path == '/api/gripper/on':
+            return await node.call_magnet(True)
+        if path == '/api/gripper/off':
+            return await node.call_magnet(False)
+
+        if path == '/api/jog_cart':
+            axis = body.get('axis', 0)
+            if isinstance(axis, str):
+                axis = {'x': 0, 'y': 1, 'z': 2, 'rx': 3, 'ry': 4, 'rz': 5}.get(axis, 0)
+            direction = int(body.get('direction', 1))
+            step = float(body.get('distance', body.get('speed', 5.0)))
+            ok = await node.call_jog_cart_step(int(axis), direction, step)
+            return {'success': ok, 'message': 'OK' if ok else 'Cartesian jog failed'}
+
+        return {'success': False, 'message': f'Unsupported robot path: {path}'}
+    except Exception as exc:
+        return {'success': False, 'message': f'Robot bridge error: {exc}'}
