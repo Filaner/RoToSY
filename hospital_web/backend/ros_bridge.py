@@ -59,6 +59,7 @@ _node            = None
 _executor        = None
 _thread          = None
 _mock_sensor_thr = None
+_robot_node      = None
 
 
 def get_state() -> dict:
@@ -72,7 +73,7 @@ def get_state() -> dict:
 # ── ROS2 init ─────────────────────────────────────────────────────────────────
 
 def init() -> bool:
-    global _ros_available, _node, _executor, _thread
+    global _ros_available, _node, _executor, _thread, _robot_node
     try:
         import rclpy
         from rclpy.executors import MultiThreadedExecutor
@@ -80,10 +81,16 @@ def init() -> bool:
         _node     = _AMRBridgeNode()
         _executor = MultiThreadedExecutor()
         _executor.add_node(_node.node)   # pass the real rclpy Node
+        try:
+            from . import robot_bridge
+            _robot_node = robot_bridge.init(_executor)
+        except Exception as e:
+            print(f'[ros_bridge] robot bridge unavailable ({e})')
+            _robot_node = None
         _thread   = threading.Thread(target=_executor.spin, daemon=True)
         _thread.start()
         _ros_available = True
-        print('[ros_bridge] ROS2 initialized — AMR/door topics active')
+        print('[ros_bridge] ROS2 initialized — AMR/door/robot topics active')
         return True
     except Exception as e:
         print(f'[ros_bridge] ROS2 unavailable ({e}) — running in mock mode')
@@ -93,7 +100,13 @@ def init() -> bool:
 
 
 def shutdown() -> None:
-    global _executor, _node
+    global _executor, _node, _robot_node
+    try:
+        from . import robot_bridge
+        robot_bridge.shutdown()
+        _robot_node = None
+    except Exception:
+        pass
     if _executor:
         try:
             _executor.shutdown(timeout_sec=2.0)
@@ -291,8 +304,8 @@ class _AMRBridgeNode:
         self.node.create_subscription(Bool, '/arm/ready', self._arm_heartbeat_cb, 10)
         # 시퀀스 진행 신호(step_info)도 arm 활성 신호로 보조 사용.
         self.node.create_subscription(String, '/motion/step_info', self._arm_heartbeat_cb, 10)
-        # NOTE: vision_node 는 ROS 토픽이 아니라 web_interface(:8000) 카메라(HTTP)다.
-        #       → robot_proxy.poll_loop 에서 /camera/markers 폴링으로 ONLINE 판정.
+        # Camera/vision is owned by hospital_web.backend.camera and exposed via
+        # /camera/* and /api/vision/*; it is not a ROS node.
 
         # Nav2 navigate_to_pose 액션 클라이언트 — 웹에서 받은 좌표로 골을 전송한다.
         from nav2_msgs.action import NavigateToPose

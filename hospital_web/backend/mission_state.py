@@ -290,6 +290,11 @@ def queue_clear() -> None:
         _marker_queue['index']   = 0
 
 
+def set_marker_queue_index(index: int) -> None:
+    with _lock:
+        _marker_queue['index'] = index
+
+
 # ── internal ─────────────────────────────────────────────────────────────────
 
 def _insert_audit(c, mission_id: Optional[int], actor: str,

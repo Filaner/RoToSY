@@ -104,6 +104,12 @@ def generate_launch_description():
     gazebo_ros_share = get_package_share_directory('gazebo_ros')
     turtlebot3_gazebo_share = get_package_share_directory('turtlebot3_gazebo')
     nav2_bringup_share = get_package_share_directory('nav2_bringup')
+
+    turtlebot3_model = os.environ.get('TURTLEBOT3_MODEL', 'waffle')
+    urdf_file_name = 'turtlebot3_' + turtlebot3_model + '.urdf'
+    urdf_path = os.path.join(turtlebot3_gazebo_share, 'urdf', urdf_file_name)
+    with open(urdf_path, 'r') as infp:
+        robot_desc = infp.read()
     turtlebot3_navigation_share = get_package_share_directory('turtlebot3_navigation2')
 
     existing_gazebo_model_path = os.environ.get('GAZEBO_MODEL_PATH')
@@ -124,7 +130,7 @@ def generate_launch_description():
     goal_y = LaunchConfiguration('goal_y')
     goal_yaw = LaunchConfiguration('goal_yaw')
 
-    nav_params = os.path.join(turtlebot3_navigation_share, 'param', 'humble', 'waffle.yaml')
+    nav_params = os.path.join(package_share, 'config', 'nav2_params.yaml')
 
     # [TF 레이스 방지] 최초 colcon build 후 첫 실행 시 gazebo/플러그인 로드가 느려
     # diff_drive(odom→base_footprint)가 늦게 떠서, nav2 local_costmap이 base_link→odom
@@ -137,6 +143,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('show_gazebo_client', default_value='true'),
+        DeclareLaunchArgument('show_camera_view', default_value='true'),
         DeclareLaunchArgument('auto_start_demo', default_value='false'),
         DeclareLaunchArgument('initial_x', default_value='-4.30'),
         DeclareLaunchArgument('initial_y', default_value='2.5'),
@@ -156,9 +163,15 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(os.path.join(gazebo_ros_share, 'launch', 'gzclient.launch.py')),
             condition=IfCondition(show_gazebo_client),
         ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(turtlebot3_gazebo_share, 'launch', 'robot_state_publisher.launch.py')),
-            launch_arguments={'use_sim_time': use_sim_time}.items(),
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            output='screen',
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'robot_description': robot_desc,
+            }],
         ),
         Node(
             package='gazebo_ros',
@@ -195,7 +208,7 @@ def generate_launch_description():
                     parameters=[{'initial_x': initial_x,
                                  'initial_y': initial_y,
                                  'initial_yaw': initial_yaw,
-                                 'repetitions': 15},
+                                 'repetitions': 3},
                                 {'use_sim_time': use_sim_time}]
                 ),
             ]
@@ -211,6 +224,14 @@ def generate_launch_description():
                         'goal_y': goal_y,
                         'goal_yaw': goal_yaw},
                         {'use_sim_time': use_sim_time}]
+        ),
+        Node(
+            package='rqt_image_view',
+            executable='rqt_image_view',
+            name='rqt_image_view',
+            arguments=['/camera/image_raw'],
+            condition=IfCondition(LaunchConfiguration('show_camera_view')),
+            output='screen'
         ),
         # Node(
         #     package='rviz2',
