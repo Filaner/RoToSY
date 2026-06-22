@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>RoToSY 통합 테스트</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
+    background: #11151c; color: #e6e8eb; margin: 0; padding: 20px;
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { color: #8a93a3; font-size: 13px; margin-bottom: 14px; }
+
+  .statusbar {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    background: #161b26; border: 1px solid #2a3346; border-radius: 10px;
+    padding: 10px 16px; margin-bottom: 16px; font-size: 13px;
+  }
+  .statusbar .item { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; display: inline-block; }
+  .dot.on  { background: #3ddc6a; box-shadow: 0 0 6px #3ddc6a; }
+  .dot.off { background: #e05a4e; }
+
+  button {
+    cursor: pointer; border: none; border-radius: 8px; font-weight: 600;
+    color: #fff; padding: 8px 14px; font-size: 13px;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-step  { background: #2b4a7a; }
+  .btn-step:hover:not(:disabled)  { background: #3a63a3; }
+  .btn-ok    { background: #1f8a4c; }
+  .btn-ok:hover:not(:disabled)    { background: #27ab5e; }
+  .btn-danger{ background: #7a2b2b; }
+  .btn-danger:hover:not(:disabled){ background: #a33a3a; }
+  .btn-robot { background: #b3691f; }
+  .btn-robot:hover:not(:disabled) { background: #d6821f; }
+  .btn-sm { padding: 4px 9px; font-size: 11px; margin-right: 4px; }
+
+  .card {
+    background: #1a2030; border: 1px solid #2a3346; border-radius: 12px;
+    padding: 14px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 10px; color: #cfd6e3; }
+  .card h2 .role { font-size: 11px; color: #6f7890; font-weight: 400; }
+  .card .toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 10px; }
+
+  .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
+  @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #262e3f; }
+  th { color: #8a93a3; font-weight: 600; }
+  tr:hover td { background: #20283a; }
+
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .pill-pending   { background: #3a3320; color: #e0c34a; }
+  .pill-approved  { background: #1f3a52; color: #5ab4f0; }
+  .pill-awaiting_load_confirm { background: #3a2c52; color: #b48af0; }
+  .pill-rejected  { background: #4a1f24; color: #f06a6a; }
+  .pill-completed { background: #1f4a2c; color: #6af0a0; }
+  .pill-yes { background:#1f4a2c; color:#6af0a0; }
+  .pill-no  { background:#3a2424; color:#e07a7a; }
+
+  .row-actions { white-space: nowrap; }
+
+  #log { max-height: 200px; overflow-y: auto; font-size: 12px; }
+  #log div { padding: 4px 0; border-bottom: 1px dashed #262e3f; color: #aab2c0; }
+  #log div b { color: #e6e8eb; }
+  .empty { color: #5b6376; font-style: italic; padding: 10px 0; }
+  .note { font-size: 11.5px; color: #6f7890; margin: -4px 0 10px; }
+
+  .toast {
+    position: fixed; top: 16px; right: 16px; max-width: 380px; background: #1f8a4c; color: #fff;
+    padding: 10px 16px; border-radius: 8px; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,.4);
+    opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 99;
+  }
+  .toast.show { opacity: 1; }
+  .toast.err { background: #a33a3a; }
+</style>
+</head>
+<body>
+
+<h1>🧪 RoToSY 통합 테스트 — 간호사 / 약사 / 관리자</h1>
+<div class="sub">각 단계를 직접 눌러서 처방 승인 → 로봇 피킹 트리거 → 적재 → AMR 배송까지 확인합니다.</div>
+
+<div class="statusbar">
+  <div class="item"><span class="dot on"></span> hospital_web (8080)</div>
+  <div class="item"><span class="dot" id="dotRobot"></span> web_interface / RoToSY (8000): <b id="robotOnline">확인 중</b></div>
+  <div class="item">모션 단계: <b id="motionStep">-</b></div>
+  <div class="item">전자석: <b id="magnetOn">-</b></div>
+  <div class="item">AMR: <b id="amrStatus">-</b></div>
+  <div class="item">마커 큐: <b id="markerQueue">-</b></div>
+</div>
+
+<div class="grid">
+  <div>
+    <div class="card">
+      <h2>① 처방 목록 <span class="role">(간호사 발행 · 약사 승인/반려 · 관리자 조제시작)</span></h2>
+      <div class="note">상태에 따라 행마다 누를 수 있는 버튼이 다릅니다 — pending→승인/반려, approved→배송요청, 배송요청됨→조제시작(실제 로봇 트리거).</div>
+      <table>
+        <thead><tr>
+          <th>코드</th><th>환자</th><th>병동</th><th>약품</th><th>우선도</th>
+          <th>상태</th><th>배송요청</th><th>처리</th>
+        </tr></thead>
+        <tbody id="presTbody"><tr><td colspan="8" class="empty">로딩 중…</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>② 로봇 피킹 진행 <span class="role">(web_interface :8000 마커 큐)</span></h2>
+      <div class="toolbar">
+        <button class="btn-robot" id="btnAutoNext">다음 약품 집기 (auto/next)</button>
+        <button class="btn-danger" id="btnAutoStop">피킹 중단 (auto/stop)</button>
+      </div>
+      <div class="note" id="queueDetail">마커 큐 없음 — '조제시작'을 먼저 누르세요.</div>
+    </div>
+
+    <div class="card">
+      <h2>적재 슬롯 <span class="role">(pallet_plan — 로봇이 채우는 박스 레이아웃)</span></h2>
+      <table>
+        <thead><tr>
+          <th>#</th><th>약품</th><th>local_x</th><th>local_y</th>
+          <th>w×h(mm)</th><th>회전</th><th>적층높이</th><th>배치완료</th>
+        </tr></thead>
+        <tbody id="palletTbody"><tr><td colspan="8" class="empty">plan 없음</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>미션 현황 <span class="role">(관리자)</span></h2>
+      <table>
+        <tbody id="missionTbody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>③ AMR 배송 단계 <span class="role">(시뮬레이션 — 실 AMR 하드웨어 없음)</span></h2>
+      <div class="toolbar">
+        <button class="btn-step" data-step="confirm_all">적재확인</button>
+        <button class="btn-step" data-step="dispatch">AMR 출발</button>
+        <button class="btn-step" data-step="amr_arrive">AMR 도착</button>
+        <button class="btn-ok" data-step="complete">배송완료</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>최근 활동 로그</h2>
+      <div id="log"><div class="empty">활동 없음</div></div>
+    </div>
+
+    <div class="card">
+      <h2>유지보수</h2>
+      <button class="btn-danger" id="btnReset">DB 전체 초기화 (재시딩)</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+
+function toast(msg, isErr) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
+}
+
+// ── 실시간 연결 상태 (web_interface :8000 데이터를 hospital_web의 /ws에서 그대로 가져옴) ──
+let lastMarkerQueue = { markers: [], labels: [], index: 0 };
+
+function connectWs() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = (ev) => {
+    const d = JSON.parse(ev.data);
+    $('#dotRobot').className = 'dot ' + (d.robot_online ? 'on' : 'off');
+    $('#robotOnline').textContent = d.robot_online ? '온라인' : '오프라인 (8000 미연결)';
+    $('#motionStep').textContent = d.motion_step || '-';
+    $('#magnetOn').textContent = d.magnet_on ? 'ON' : 'OFF';
+    $('#amrStatus').textContent = (d.amr && d.amr.status) || '-';
+    const q = d.marker_queue || lastMarkerQueue;
+    lastMarkerQueue = q;
+    if (q.total) {
+      const doneAll = q.index >= q.total;
+      $('#markerQueue').textContent = `${q.index}/${q.total} (${doneAll ? '완료' : (q.labels||[])[q.index]})`;
+      $('#queueDetail').textContent =
+        `큐: [${(q.labels||[]).map((l,i)=> i===q.index ? `▶${l}` : l).join(', ')}] — 마커ID ${q.markers.join(',')}`;
+    } else {
+      $('#markerQueue').textContent = '-';
+      $('#queueDetail').textContent = "마커 큐 없음 — '조제시작'을 먼저 누르세요.";
+    }
+  };
+  ws.onclose = () => setTimeout(connectWs, 2000);
+  ws.onerror = () => ws.close();
+}
+
+const STATUS_LABEL = {
+  pending: '대기', approved: '승인됨', awaiting_load_confirm: '적재확인대기',
+  rejected: '반려', completed: '완료',
+};
+
+function pill(status) {
+  return `<span class="pill pill-${status}">${STATUS_LABEL[status] || status}</span>`;
+}
+
+function rowActions(p) {
+  if (p.status === 'pending') {
+    return `<button class="btn-ok btn-sm" onclick="approveOne('${p.id}')">승인</button>
+            <button class="btn-danger btn-sm" onclick="rejectOne('${p.id}')">반려</button>`;
+  }
+  if (p.status === 'approved' && !p.delivery_requested) {
+    return `<button class="btn-step btn-sm" onclick="requestDelivery('${p.id}')">배송요청</button>`;
+  }
+  if (p.status === 'approved' && p.delivery_requested) {
+    return `<button class="btn-robot btn-sm" onclick="startPicking('${p.id}')">조제시작(로봇피킹)</button>`;
+  }
+  return '';
+}
+
+async function refreshPrescriptions() {
+  const list = await api('GET', '/api/prescription');
+  const tbody = $('#presTbody');
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">처방 없음</td></tr>'; return; }
+  tbody.innerHTML = list.map(p => `
+    <tr>
+      <td>${p.id}</td>
+      <td>${p.patient_name}</td>
+      <td>${p.ward}</td>
+      <td>${p.drugs.map(d => `${d.name}×${d.quantity}`).join(', ')}</td>
+      <td>${p.priority}</td>
+      <td>${pill(p.status)}</td>
+      <td><span class="pill ${p.delivery_requested ? 'pill-yes' : 'pill-no'}">${p.delivery_requested ? 'Y' : 'N'}</span></td>
+      <td class="row-actions">${rowActions(p)}</td>
+    </tr>
+  `).join('');
+}
+
+async function approveOne(pid) {
+  try {
+    await api('POST', `/api/prescription/${pid}/approve`, { note: '[테스트페이지] 승인' });
+    toast(`${pid} 승인 완료 — 다음: 배송요청`);
+  } catch (e) { toast(e.message, true); }
+  await refreshAll();
+}
+
+async function rejectOne(pid) {
+  const reason = prompt('반려 사유를 입력하세요', '재고 부족');
+  if (!reason) return;
+  try {
+    await api('POST', `/api/prescription/${pid}/reject`, { reason });
+    toast(`${pid} 반려`);
+  } catch (e) { toast(e.message, true); }
+  await refreshAll();
+}
+
+async function requestDelivery(pid) {
+  try {
+    await api('POST', `/api/prescription/${pid}/request_delivery`);
+    toast(`${pid} 배송요청 완료 — 다음: 조제시작(로봇피킹)`);
+  } catch (e) { toast(e.message, true); }
+  await refreshAll();
+}
+
+async function startPicking(pid) {
+  try {
+    const r = await api('POST', `/api/prescription/${pid}/start_picking`);
+    const arm = r.arm_trigger || {};
+    const plan = r.pallet_plan || {};
+    if (arm.success) {
+      toast(`로봇 피킹 트리거 성공 — 미션 ${r.mission.mission_id}` +
+            (plan.ok ? ` / 적재계획 ${plan.placed_count}슬롯` : ' / 적재계획 실패: ' + plan.error));
+    } else {
+      toast(`로봇 피킹 트리거 실패: ${arm.detail || '알 수 없는 오류'} — web_interface(:8000)가 실행 중인지 확인하세요.`, true);
+    }
+    if (r.missing && r.missing.length) {
+      toast(`서랍 미매핑 약품: ${r.missing.join(', ')}`, true);
+    }
+  } catch (e) {
+    toast(`조제시작 실패: ${e.message}`, true);
+  }
+  await refreshAll();
+}
+
+async function refreshMission() {
+  const m = await api('GET', '/api/system/mission');
+  $('#missionTbody').innerHTML = `
+    <tr><th>미션 코드</th><td>${m.mission_id || '-'}</td></tr>
+    <tr><th>처방 코드</th><td>${m.prescription_id || '-'}</td></tr>
+    <tr><th>목적지</th><td>${m.destination || '-'}</td></tr>
+    <tr><th>상태</th><td>${m.status}</td></tr>
+    <tr><th>약사 적재확인</th><td><span class="pill ${m.pharmacist_confirmed ? 'pill-yes' : 'pill-no'}">${m.pharmacist_confirmed ? '완료' : '대기'}</span></td></tr>
+    <tr><th>관리자 적재확인</th><td><span class="pill ${m.admin_confirmed ? 'pill-yes' : 'pill-no'}">${m.admin_confirmed ? '완료' : '대기'}</span></td></tr>
+    <tr><th>AMR 출발 가능</th><td><span class="pill ${m.can_dispatch ? 'pill-yes' : 'pill-no'}">${m.can_dispatch ? 'YES' : 'NO'}</span></td></tr>
+  `;
+  return m;
+}
+
+async function refreshPallet(missionId) {
+  const tbody = $('#palletTbody');
+  if (!missionId) { tbody.innerHTML = '<tr><td colspan="8" class="empty">미션 없음</td></tr>'; return; }
+  try {
+    const plan = await api('GET', `/api/pallet/plan?mission_code=${missionId}`);
+    if (!plan.ok || !plan.layout || !plan.layout.length) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty">${plan.error || 'plan 없음'}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = plan.layout.map(s => `
+      <tr>
+        <td>${s.slot_idx}</td>
+        <td>${s.medicine_name}</td>
+        <td>${s.local_x}</td>
+        <td>${s.local_y}</td>
+        <td>${s.w}×${s.h}</td>
+        <td>${s.rot_deg}°</td>
+        <td>${s.z_offset_mm || 0}mm</td>
+        <td><span class="pill ${s.placed ? 'pill-yes' : 'pill-no'}">${s.placed ? '✅' : '대기'}</span></td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+async function refreshLog() {
+  const log = await api('GET', '/api/system/audit?limit=20');
+  const el = $('#log');
+  if (!log.length) { el.innerHTML = '<div class="empty">활동 없음</div>'; return; }
+  el.innerHTML = log.map(a => `<div><b>[${a.actor}]</b> ${a.action} — ${a.detail} <span style="float:right;color:#5b6376;">${(a.timestamp||'').slice(11,19)}</span></div>`).join('');
+}
+
+async function refreshAll() {
+  try {
+    const m = await refreshMission();
+    await Promise.all([
+      refreshPrescriptions(),
+      refreshPallet(m.mission_id),
+      refreshLog(),
+    ]);
+  } catch (e) { console.error(e); }
+}
+
+document.querySelectorAll('.btn-step').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      await api('POST', `/api/demo/step/${btn.dataset.step}`);
+      toast(`${btn.textContent} 완료`);
+    } catch (e) { toast(e.message, true); }
+    btn.disabled = false;
+    await refreshAll();
+  });
+});
+
+$('#btnAutoNext').addEventListener('click', async () => {
+  try {
+    const r = await api('POST', '/api/robot/auto/next');
+    toast(r.done ? '전 품목 피킹 완료' : `다음 마커 ${r.marker_id} 로 이동`);
+  } catch (e) { toast(e.message, true); }
+  await refreshAll();
+});
+
+$('#btnAutoStop').addEventListener('click', async () => {
+  try {
+    await api('POST', '/api/robot/auto/stop');
+    toast('피킹 중단 + 미션 초기화');
+  } catch (e) { toast(e.message, true); }
+  await refreshAll();
+});
+
+$('#btnReset').addEventListener('click', async () => {
+  if (!confirm('DB 전체를 초기화하고 데모 데이터를 다시 시딩합니다. 계속할까요?')) return;
+  try {
+    await api('POST', '/api/demo/full_reset');
+    toast('초기화 + 재시딩 완료');
+  } catch (e) { toast(e.message, true); }
+  await refreshAll();
+});
+
+connectWs();
+refreshAll();
+setInterval(refreshAll, 1500);
+</script>
+</body>
+</html>

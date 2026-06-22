@@ -157,6 +157,11 @@ async def pallet_viewer():
     return HTMLResponse((STATIC_DIR / 'pallet.html').read_text())
 
 
+@app.get('/test', response_class=HTMLResponse)
+async def integration_test_page():
+    return HTMLResponse((STATIC_DIR / 'test.html').read_text())
+
+
 @app.websocket('/ws')
 async def websocket_endpoint(ws: WebSocket):
     await manager.connect(ws)

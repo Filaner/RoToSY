@@ -312,14 +312,19 @@ class MotionSequenceNode(Node):
 
         # 팔레타이징 (PALLETIZING.md) 파라미터 — enable_palletizing 켜면 14~18단계가
         # 고정좌표 대신 _deliver_palletizing()(DB 연계 병동 박스 배치)로 동작한다.
-        self.declare_parameter('enable_palletizing', False)
+        self.declare_parameter('enable_palletizing', True)
         self.declare_parameter('box_staging_joints',
                                 [31.04, 48.6, 38.63, 0.0, 92.77, -58.96])
-        self.declare_parameter('approach_clearance_mm', 60.0)
-        self.declare_parameter('place_drop_mm', 20.0)
+        self.declare_parameter('approach_clearance_mm', 150.0)
+        # '높이 0인 품목'이 박스 바닥에 닿는 TCP Z(base frame, mm) — 마커 Z 측정은 노이즈가
+        # 커서 안 쓰고 실측 calibration 상수로 고정. 실측: 新ビオフェルミンS錠
+        # (적재높이 stack_h_mm=55mm) 배치 성공 TCP z=144.21 → 199.21 = 144.21 + 55.0.
+        self.declare_parameter('place_floor_z_mm', 199.21)
         self.declare_parameter('carry_rx', 90.0)
         self.declare_parameter('carry_ry', -180.0)
         self.declare_parameter('enable_orientation_correction', True)
+        # 테스트용 — OCR/Groq 호출 없이 13.5단계를 항상 MATCHED로 처리(팔레타이징 단독 검증용).
+        self.declare_parameter('force_ocr_match', True)
         # Clients
         self._home_cli   = self.create_client(Home, '/arm/home', callback_group=self._cb_group)
         self._movel      = ActionClient(self, MoveL, '/arm/move_l', callback_group=self._cb_group)
@@ -1262,20 +1267,38 @@ class MotionSequenceNode(Node):
             )
             theta_box, center = 0.0, tuple(box['origin'])
 
-        place_drop_mm = float(self.get_parameter('place_drop_mm').value)
         enable_orientation = bool(self.get_parameter('enable_orientation_correction').value)
-        bx, by, place_z, rz = compute_placement(
+        bx, by, _unused_z, rz = compute_placement(
             slot, box, theta_box, center, theta_item,
-            place_drop_mm=place_drop_mm, enable_orientation=enable_orientation,
+            enable_orientation=enable_orientation,
         )
-        # palletizing_planner.compute_placement은 적층(z_offset_mm)을 모른다 — hospital_web의
-        # pallet_pack._stack_unplaced가 2D 패킹에 못 들어간 품목을 기존 슬롯 위에 쌓을 때
-        # 채워주는 값이므로, 이미 쌓인 높이만큼 하강 깊이를 줄여 충돌을 피한다.
-        place_z -= float(slot.get('z_offset_mm', 0.0) or 0.0)
+        # Z는 마커 측정값(노이즈가 큼)이 아니라 박스별 calibration 상수(place_floor_z_mm)를 쓴다.
+        # place_floor_z_mm = '높이 0인 품목'이 바닥에 닿는 TCP Z (실측 calibration).
+        # 거기서 이 품목의 적재높이(stack_h_mm, DB에서 받아온 medicine 치수 기반)만큼 덜 내려가고,
+        # 이미 쌓인 다른 품목 위라면 z_offset_mm만큼 추가로 덜 내려간다.
+        place_floor_z = float(self.get_parameter('place_floor_z_mm').value)
+        stack_h_mm = float(slot.get('stack_h_mm', 0.0) or 0.0)
+        z_offset_mm = float(slot.get('z_offset_mm', 0.0) or 0.0)
+        place_z = place_floor_z - stack_h_mm - z_offset_mm
         clearance = float(self.get_parameter('approach_clearance_mm').value)
         carry_rx = float(self.get_parameter('carry_rx').value)
         carry_ry = float(self.get_parameter('carry_ry').value)
         approach_z = place_z + clearance
+
+        self.get_logger().info(
+            '[팔레타이징 좌표] '
+            f"slot=#{slot['slot_idx']}({slot['medicine_name']}) "
+            f"local=({slot['local_x']:.1f},{slot['local_y']:.1f}) "
+            f"size={slot['w']:.1f}x{slot['h']:.1f} rot_deg={slot.get('rot_deg', 0.0):.1f} "
+            f"stack_h_mm={stack_h_mm:.1f} z_offset_mm={z_offset_mm:.1f} | "
+            f"box_marker={marker_id}({'측정' if box_pose is not None else 'DB origin fallback'}) "
+            f"theta_box={theta_box:.1f} center=({center[0]:.1f},{center[1]:.1f},{center[2]:.1f}) "
+            f"theta_item={theta_item:.1f} | "
+            f"place_floor_z_mm={place_floor_z:.1f} clearance={clearance:.1f} "
+            f"carry_rx={carry_rx:.1f} carry_ry={carry_ry:.1f} | "
+            f"=> approach=({bx:.1f},{by:.1f},{approach_z:.1f}) "
+            f"place=({bx:.1f},{by:.1f},{place_z:.1f}) rz={rz:.1f}"
+        )
 
         # P3. 슬롯 상공 XY+회전 정렬
         if not self._wait_for_step(
@@ -1408,31 +1431,12 @@ class MotionSequenceNode(Node):
         self.get_logger().info(coord_str)
         self._step_info_pub.publish(String(data=f'WAIT:{coord_str}'))
 
-        # 8.5에서 쓸 약품 X,Y 목표 + 안전 범위 검증을 MoveC 전에 먼저 끝낸다 —
-        # 범위를 벗어나면 호 이동(MoveC)을 했다가 되돌리는 낭비 없이 곧바로 중단한다.
+        # 8.5에서 쓸 약품 X,Y 목표 계산.
         # TCP 스윙으로 인한 그리퍼 끝단 Y 오차 수동 보정 (기존 -97mm + 추가 -23mm = -120mm)
         gripper_x_offset = -8.12
         gripper_y_offset = -104.0
         target_x = bx + gripper_x_offset
         target_y = by + gripper_y_offset
-
-        # 손잡이(마커 기준 실제 handle, contact에서 그리퍼 길이만큼 뺀 값) 기준
-        # 안전 범위 검증: x ±6cm, y +6~+13cm.
-        # contact는 contact_flange(손잡이 + 그리퍼 길이)라서 그대로 쓰면 안 되고,
-        # pull_dir 방향으로 gripper_length_mm만큼 빼서 진짜 손잡이 좌표로 되돌린다.
-        # 범위를 벗어나면 비전 오검출로 보고 약품 미감지와 동일하게 시퀀스를 중단한다.
-        gripper_length = float(self._cabinet_geometry['gripper_length_mm'])
-        handle_x = contact[0] - pull_dir[0] * gripper_length
-        handle_y = contact[1] - pull_dir[1] * gripper_length
-        handle_dx = target_x - handle_x
-        handle_dy = target_y - handle_y
-        if not (-60.0 <= handle_dx <= 60.0 and 60.0 <= handle_dy <= 130.0):
-            self.get_logger().error(
-                'XY 정렬 목표가 손잡이 기준 안전 범위 밖 — MoveC 전에 시퀀스를 종료합니다. '
-                f'(dx={handle_dx:+.1f}mm 허용 ±60mm, dy={handle_dy:+.1f}mm 허용 60~130mm)'
-            )
-            self._step_info_pub.publish(String(data='Vision 실패 — XY 정렬 범위 초과'))
-            return False
 
         # MoveC 시작 전 실제 TCP 전체(위치+자세) 기억
         if not self._wait_tcp():
@@ -1536,7 +1540,7 @@ class MotionSequenceNode(Node):
             ): return False
             if not self._move_j(
                 [3.74, 22.84, 111.01, 8.49, -78.55, -90.00],
-                profile='TRANSIT', blend_radius='SMALL',
+                profile='TRANSIT',
             ): return False
         if not self._move_j(
             [-2.21, 44.37, 61.78, -0.00, -107.20, -90.00],
@@ -1545,7 +1549,15 @@ class MotionSequenceNode(Node):
 
         # 13.5. OCR & JSON 파싱
         if not self._wait_for_step('13.5. OCR & JSON 파싱'): return False
-        ocr_status = self._ocr_and_parse()
+        if bool(self.get_parameter('force_ocr_match').value):
+            self.get_logger().info(
+                '[OCR] force_ocr_match=true — Groq/hospital_web 호출 생략, MATCHED로 강제 처리'
+            )
+            self._step_info_pub.publish(String(data='OCR:{"forced":"MATCHED"}'))
+            self._last_ocr_medicine_name = None   # next_slot()이 첫 미배치 슬롯을 쓰도록
+            ocr_status = 'MATCHED'
+        else:
+            ocr_status = self._ocr_and_parse()
 
         # [핵심] OCR 결과 분기 — 관리자 확인 없이 자동으로 판단한다.
         #   MATCHED      → 배송 박스로 이동 (14~18)

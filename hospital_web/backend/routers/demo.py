@@ -9,8 +9,36 @@ from .. import mission_state as ms
 from .. import prescription_state as ps
 from .. import ros_bridge as ros
 from .. import sensor_db as sdb
+from .. import pallet_pack as pp
+from .. import demo_create
 
 router = APIRouter(prefix='/api/demo', tags=['demo'])
+
+
+@router.post('/full_reset')
+async def demo_full_reset():
+    """DB 전체 초기화 + 데모 시드 재생성 (테스트 페이지 '전체 초기화' 버튼용)."""
+    demo_create.reset()
+    ms.add_audit('demo', 'DEMO_FULL_RESET', 'DB 전체 초기화 + 재시딩')
+    return {'step': 'full_reset', 'ok': True}
+
+
+@router.post('/quick_start')
+async def demo_quick_start():
+    """원클릭 테스트 — DB 전체 초기화·재시딩 → 처방 승인 → 로봇 집기 시작(미션+적재계획 생성)까지 한 번에.
+
+    적재(palletizing) 단독 테스트용 단축 경로. 이후 단계(적재확인/AMR출발/도착/완료)는
+    필요할 때 /api/demo/step/* 를 개별 호출한다.
+    """
+    await demo_full_reset()
+    approve_result = await demo_approve()
+    robot_result   = await demo_robot_start()
+
+    return {
+        'step':     'quick_start',
+        'approve':  approve_result,
+        'robot':    robot_result,
+    }
 
 
 @router.post('/step/approve')
@@ -54,11 +82,27 @@ async def demo_robot_start():
         f"로봇 암 집기 시작 — {target['patient_name']} | "
         + ', '.join(f"{d['name'].split()[0]}×{d['quantity']}" for d in target['drugs'])
     )
+
+    # 적재 레이아웃 계산 + DB 저장 (실패해도 미션 자체는 막지 않음) — start_picking과 동일.
+    pallet_plan = None
+    try:
+        pallet_plan = pp.plan_for_mission(mission['mission_id'])
+        if pallet_plan.get('ok'):
+            ms.add_audit('system', 'PALLET_PLAN',
+                         f"{mission['mission_id']} → {pallet_plan['box_code']} "
+                         f"{pallet_plan['placed_count']}슬롯 계획 완료")
+        else:
+            ms.add_audit('system', 'PALLET_PLAN_WARN',
+                         f"{mission['mission_id']} plan 실패: {pallet_plan.get('error')}")
+    except Exception as exc:
+        ms.add_audit('system', 'PALLET_PLAN_ERROR', f'plan_for_mission 예외: {exc}')
+
     return {
         'step':            'robot_start',
         'mission':         mission,
         'prescription_id': target['id'],
         'drug_payload':    drug_payload,
+        'pallet_plan':      pallet_plan,
         'message':         f"로봇 암이 {len(drug_payload)}종 약품 집기를 시작했습니다.",
     }
 

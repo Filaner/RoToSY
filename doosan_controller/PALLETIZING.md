@@ -52,8 +52,13 @@ packing 슬롯 로컬좌표는 박스 좌하단 원점 기준이지만, **기준
 ```
 XY_place = center + Rz(θ_box) · [local_x − inner_w/2, local_y − inner_d/2]
 rz_place = wrap(θ_box + slot_rot − θ_item)
-place_z  = center_z + place_drop_mm
+place_z  = place_floor_z_mm − stack_h_mm − z_offset_mm
 ```
+
+`place_z`는 마커의 Z 측정값(노이즈가 커서 신뢰 불가)을 쓰지 않고, motion_sequence.py에서
+박스별 calibration 상수(`place_floor_z_mm`, '높이 0인 품목'이 바닥에 닿는 TCP Z)에서
+이 품목의 적재높이(`stack_h_mm`, DB medicine 치수 기반)와 기존 적층 높이(`z_offset_mm`)를
+뺀 값으로 계산한다. (XY/rz는 여전히 `compute_placement`가 마커 측정값으로 계산.)
 
 - `center` : 박스 정중앙(ArUco 마커)의 base 좌표. **빈 박스(plan 0개 배치)일 때 1회 측정해
   캐시**하고 이후 적재는 재사용한다 — 적재로 중앙 마커가 가려져도 재측정하지 않아 무영향.
@@ -137,14 +142,14 @@ ros2 run doosan_controller palletizing_sequence 0 --step
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
 | `box_staging_joints` | `[31.04, 48.6, 38.63, 0.0, 92.77, -58.96]` | 박스 진입 전 안전 staging 관절 자세(deg) |
-| `approach_clearance_mm` | `60.0` | 슬롯 상공 접근 높이(배치점 위 mm) |
-| `place_drop_mm` | `20.0` | 박스 원점(바닥) 기준 배치 하강 깊이 mm |
+| `approach_clearance_mm` | `150.0` | 슬롯 상공 접근 높이(배치점 위 mm, 15cm) — 여기서 XY+회전 정렬 후 하강 |
+| `place_floor_z_mm` | `199.21` | '높이 0인 품목'이 박스 바닥에 닿는 TCP Z(base, mm) 실측 calibration. 실제 하강 목표 = 이 값 − `stack_h_mm` − `z_offset_mm` |
 | `carry_rx` / `carry_ry` | `90.0` / `-180.0` | 약품 캐리/배치 자세(rx, ry). `rz` 만 슬롯에 맞춰 회전 |
 | `enable_orientation_correction` | `True` | `θ_item`/`θ_box` 보정 적용 여부(False 면 origin·rz 고정) |
 
 ```bash
 ros2 run doosan_controller palletizing_sequence --ros-args \
-  -p place_drop_mm:=15.0 -p approach_clearance_mm:=80.0
+  -p place_floor_z_mm:=199.21 -p approach_clearance_mm:=150.0
 ```
 
 상수 `MAX_ITEM_YAW_CORRECTION_DEG`(기본 45°): 측정 yaw 가 이 값을 넘으면 오측정으로 보고
@@ -157,7 +162,7 @@ ros2 run doosan_controller palletizing_sequence --ros-args \
 - `delivery_box.origin_x/y/z` (박스 **정중앙** base 좌표, 마커 미검출 시 fallback). 정상 운용은
   박스 정중앙 ArUco 마커(BOX-A=4, BOX-B=3)로 자동 측정하므로, 마커가 카메라에 보이는지 우선 확인
 - `box_staging_joints` (실제 박스 위치 기준 안전 상공 자세)
-- `place_drop_mm` / `approach_clearance_mm` (박스 높이·약품 높이 고려)
+- `place_floor_z_mm` / `approach_clearance_mm` (박스마다 다름 — 박스를 바꾸면 재실측 필요)
 - 카메라–TCP 픽셀→mm 환산 캘리브(`rotosy_calibration`) — vision 중심/각도 정확도에 직결
 
 ## 제약
