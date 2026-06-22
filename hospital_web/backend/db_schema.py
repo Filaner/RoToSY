@@ -69,7 +69,7 @@ def init_schema() -> None:
             height          REAL,
             depth           REAL,
             img_path        TEXT,
-            barcode_plane   TEXT
+            drawer_num      TEXT
         );
 
         CREATE TABLE IF NOT EXISTS prescription (
@@ -160,6 +160,35 @@ def init_schema() -> None:
                         DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now'))
         );
 
+        CREATE TABLE IF NOT EXISTS delivery_box (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ward_id         INTEGER REFERENCES ward(id),
+            code            TEXT UNIQUE NOT NULL,
+            inner_w         REAL NOT NULL DEFAULT 0,   -- 내부 가용 폭 (mm, 박스 로컬 X)
+            inner_d         REAL NOT NULL DEFAULT 0,   -- 내부 가용 깊이 (mm, 박스 로컬 Y)
+            inner_h         REAL NOT NULL DEFAULT 0,   -- 내부 가용 높이 (mm)
+            wall_margin     REAL NOT NULL DEFAULT 5,   -- 벽면 안전 여유 (mm)
+            item_gap        REAL NOT NULL DEFAULT 3,   -- 품목 간 간격 (mm)
+            aruco_marker_id INTEGER UNIQUE,            -- 박스 정중앙 ArUco 마커 ID (각도/중앙 기준)
+            origin_x        REAL DEFAULT 0,            -- 마커 미검출 시 박스 '정중앙' base 좌표 (mm)
+            origin_y        REAL DEFAULT 0,            --   (마커가 중앙에 있으므로 origin = 중앙 fallback)
+            origin_z        REAL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS pallet_plan (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            mission_id      INTEGER REFERENCES mission(id),
+            box_id          INTEGER REFERENCES delivery_box(id),
+            layout_json     TEXT NOT NULL DEFAULT '[]',  -- [{item_id, medicine_name, slot_idx,
+                                                          --   local_x, local_y, w, h, rot_deg, placed}]
+            status          TEXT NOT NULL DEFAULT 'PLANNED'
+                            CHECK (status IN ('PLANNED','IN_PROGRESS','DONE','FAILED')),
+            created_at      TEXT NOT NULL
+                            DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+            updated_at      TEXT NOT NULL
+                            DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now'))
+        );
+
         CREATE TABLE IF NOT EXISTS ocr_scan (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             mission_id      INTEGER REFERENCES mission(id),
@@ -185,4 +214,11 @@ def init_schema() -> None:
         CREATE INDEX IF NOT EXISTS idx_mission_created ON mission(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_scan_mission ON ocr_scan(mission_id);
         CREATE INDEX IF NOT EXISTS idx_scan_scanned ON ocr_scan(scanned_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_box_ward ON delivery_box(ward_id);
+        CREATE INDEX IF NOT EXISTS idx_plan_mission ON pallet_plan(mission_id);
         ''')
+
+        # barcode_plane → drawer_num 컬럼 이름 변경 (기존 DB 마이그레이션)
+        cols = {row[1] for row in c.execute("PRAGMA table_info(medicine)")}
+        if 'barcode_plane' in cols and 'drawer_num' not in cols:
+            c.execute('ALTER TABLE medicine RENAME COLUMN barcode_plane TO drawer_num')
