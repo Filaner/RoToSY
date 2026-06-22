@@ -36,7 +36,7 @@ from rclpy.executors import MultiThreadedExecutor, ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray, Empty, String, Int32
 
-from dsr_msgs2.srv import MoveCircle
+from dsr_msgs2.srv import Ikin, MoveCircle
 from robot_arm_interfaces.action import MoveJ, MoveL
 from robot_arm_interfaces.msg import PlcCommand, RobotStatus
 from robot_arm_interfaces.srv import Home
@@ -61,6 +61,21 @@ ACC_DEG          = 60.0
 
 DEFAULT_RADIUS   = 200.0   # MoveC 기본 반지름 (mm)
 DEFAULT_RZ       = 0.0
+
+# E0509 실제 관절 한계 (deg) — dsr_moveit_config_e0509/config/joint_limits.yaml 기준,
+# 실기 알람(JNT(2) MAX 95 / MIN -95)과 일치 확인됨. URDF의 ±360°는 실제 한계가 아님.
+JOINT_LIMITS_DEG = (
+    (-180.0, 180.0),
+    (-95.0, 95.0),
+    (-135.0, 135.0),
+    (-180.0, 180.0),
+    (-135.0, 135.0),
+    (-180.0, 180.0),
+)
+
+
+def _within_joint_limits(joints: list) -> bool:
+    return all(lo <= j <= hi for j, (lo, hi) in zip(joints, JOINT_LIMITS_DEG))
 
 
 @dataclass(frozen=True)
@@ -298,6 +313,9 @@ class MotionSequenceNode(Node):
         self._movej      = ActionClient(self, MoveJ, '/arm/move_j', callback_group=self._cb_group)
         self._cli_circle = self.create_client(
             MoveCircle, f'/{ROBOT_NS}/motion/move_circle', callback_group=self._cb_group
+        )
+        self._ikin_cli = self.create_client(
+            Ikin, f'/{ROBOT_NS}/motion/ikin', callback_group=self._cb_group
         )
         self._gripper = KeyboardElectromagnetGripper(self)
 
@@ -677,6 +695,80 @@ class MotionSequenceNode(Node):
         self.get_logger().error(f'MoveJ 실패: {result.message}')
         return False
 
+    def _dsr_ik(self, pose6: list) -> tuple:
+        """DSR ikin을 8개 solution space에 대해 호출, 현재 관절과 가장 가까운 해 반환.
+
+        Returns:
+            (joint_angles_deg, '') 성공 시
+            (None, reason_str)    실패 시
+        """
+        if not self._ikin_cli.wait_for_service(timeout_sec=2.0):
+            return None, 'ikin 서비스 없음'
+
+        best_joints = None
+        best_dist   = float('inf')
+
+        for sol in range(8):
+            req           = Ikin.Request()
+            req.pos       = [float(v) for v in pose6]
+            req.sol_space = sol
+            req.ref       = 0   # DR_BASE
+
+            fut = self._ikin_cli.call_async(req)
+            while rclpy.ok() and not fut.done():
+                time.sleep(0.02)
+            resp = fut.result()
+            if resp is None or not resp.success:
+                continue
+
+            joints = list(resp.conv_posj)
+            if not _within_joint_limits(joints):
+                continue
+            dist = sum((a - b) ** 2 for a, b in zip(joints, self._joints))
+            if dist < best_dist:
+                best_dist   = dist
+                best_joints = joints
+
+        if best_joints is None:
+            return None, '8개 solution space 모두 실패 또는 관절 한계 초과'
+        return best_joints, ''
+
+    def _move_l_hybrid(self, x, y, z, rx=0.0, ry=0.0, rz=0.0,
+                        blend_radius: str | float | int | None = None,
+                        vel_mm: float | None = None, vel_deg: float | None = None,
+                        acc_mm: float | None = None, acc_deg: float | None = None,
+                        profile: str | MotionProfile | None = None) -> bool:
+        """절대 좌표 MoveL을 IK 기반 MoveJ + 잔차 보정 MoveL로 대체.
+
+        원거리/큰 자세 변화 이동에서 MoveL 직선보간 대신 DSR ikin으로 목표
+        joint를 구해 MoveJ로 먼저 이동시키고, 남는 오차만 MoveL로 보정한다
+        (test_movel.py와 동일한 방식). IK가 실패하면 기존처럼 MoveL 단독
+        이동으로 대체한다. relative 이동에는 적용하지 않는다(IK는 절대좌표만).
+        """
+        fallback = lambda: self._move_l(
+            x, y, z, rx, ry, rz,
+            blend_radius=blend_radius, vel_mm=vel_mm, vel_deg=vel_deg,
+            acc_mm=acc_mm, acc_deg=acc_deg, profile=profile,
+        )
+
+        if not self._joints:
+            self.get_logger().warning('Hybrid MoveL: 관절 위치 미수신 — MoveL 단독 이동으로 대체')
+            return fallback()
+
+        ik_joints, err_msg = self._dsr_ik([x, y, z, rx, ry, rz])
+        if ik_joints is None:
+            self.get_logger().warning(
+                f'Hybrid MoveL: DSR IK 실패({err_msg}) — MoveL 단독 이동으로 대체'
+            )
+            return fallback()
+
+        self.get_logger().info(f'Hybrid MoveL: IK → {[round(j, 1) for j in ik_joints]}')
+        if not self._move_j(ik_joints, profile=profile):
+            return False
+        time.sleep(0.2)
+
+        return fallback()
+
     def _set_magnet(self, enabled: bool) -> bool:
         """전자석 ON(enabled=True) / OFF(enabled=False)."""
         return self._gripper.set_gripper(enabled)
@@ -853,6 +945,55 @@ class MotionSequenceNode(Node):
                 profile='VISION_ALIGN',
             ):
                 self.get_logger().error(f'역방향 호 이동 실패 θ={theta_deg:.0f}°')
+                return False
+
+        return True
+
+    def _move_c_retreat(self, radius_mm: float) -> bool:
+        """현재 TCP를 시작점으로 진짜 원호를 그리며 후퇴 (test_moveC.py direction=2와 동일 동작).
+
+        원 중심 C = (x0, y0+r, z0). P(θ) = (x0, y0 + r·(1-cosθ), z0 + r·sinθ),
+        θ: 0°→90° → Y, Z 모두 단조 증가. 자세는 Rx=90, Rz=0 고정, Ry만 현재값에서
+        +90°(예: -180 → -90, 코드베이스 전체에서 쓰는 '손잡이' 표준 포즈로 복귀).
+        """
+        if not self._tcp:
+            self.get_logger().error('MoveC 후퇴: TCP 위치 미수신')
+            return False
+
+        x0, y0, z0, _rx0, ry0, _rz0 = self._tcp[:6]
+        r = float(radius_mm)
+        N = 6
+
+        self.get_logger().info(
+            f'호 이동(후퇴, MoveL×{N})  시작({x0:.1f},{y0:.1f},{z0:.1f})'
+            f'  center({x0:.1f},{y0 + r:.1f},{z0:.1f})  r={r:.0f}mm'
+        )
+
+        for i in range(1, N + 1):
+            theta_deg = i * 90.0 / N
+            theta_rad = math.radians(theta_deg)
+
+            px = x0
+            py = y0 + r * (1.0 - math.cos(theta_rad))
+            pz = z0 + r * math.sin(theta_rad)
+
+            r_y_raw = ry0 + theta_deg
+            r_y = r_y_raw - 360.0 if r_y_raw > 180.0 else r_y_raw
+
+            blend = 'SMALL' if i == N else 'ARC'
+
+            self.get_logger().info(
+                f'  [{i}/{N}] θ={theta_deg:.0f}°'
+                f'  pos=({px:.1f},{py:.1f},{pz:.1f})'
+                f'  ori=(90,{r_y:.0f},0)'
+            )
+
+            if not self._move_l(
+                px, py, pz, 90.0, r_y, 0.0,
+                blend_radius=blend,
+                profile='LIFT',
+            ):
+                self.get_logger().error(f'후퇴 호 이동 실패 θ={theta_deg:.0f}°')
                 return False
 
         return True
@@ -1070,6 +1211,7 @@ class MotionSequenceNode(Node):
         radius_mm: float,
         contact: tuple,
         pull_dir: tuple,
+        pull_target: tuple,
     ) -> bool:
         """8~18단계: 약품을 집어 OCR로 검수하고 배송 박스(또는 컨베이어 롤백)로 옮긴다.
 
@@ -1100,22 +1242,8 @@ class MotionSequenceNode(Node):
         self.get_logger().info(coord_str)
         self._step_info_pub.publish(String(data=f'WAIT:{coord_str}'))
 
-        # MoveC 시작 전 실제 TCP 전체(위치+자세) 기억
-        if not self._wait_tcp():
-            self.get_logger().error('MoveC 전 TCP 위치 미수신')
-            return False
-        pre_movec_pos = tuple(self._tcp[:6])  # (x, y, z, rx, ry, rz)
-        cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
-
-        # 8. MoveC 호 이동
-        if not self._wait_for_step(f'8. MoveC r={radius_mm:.0f} 호 이동'): return False
-        end_pos = self._move_c(radius_mm, -1)
-        if end_pos is None:
-            self._step_info_pub.publish(String(data='MoveC 실패 — 작업 공간 초과 가능'))
-            return False
-        cx, cy, cz = end_pos
-
-        # 8.5 약품 X, Y 위치로 정렬 (현재 높이 유지)
+        # 8.5에서 쓸 약품 X,Y 목표 + 안전 범위 검증을 MoveC 전에 먼저 끝낸다 —
+        # 범위를 벗어나면 호 이동(MoveC)을 했다가 되돌리는 낭비 없이 곧바로 중단한다.
         # TCP 스윙으로 인한 그리퍼 끝단 Y 오차 수동 보정 (기존 -97mm + 추가 -23mm = -120mm)
         gripper_x_offset = -8.12
         gripper_y_offset = -104.0
@@ -1134,12 +1262,43 @@ class MotionSequenceNode(Node):
         handle_dy = target_y - handle_y
         if not (-60.0 <= handle_dx <= 60.0 and 60.0 <= handle_dy <= 130.0):
             self.get_logger().error(
-                'XY 정렬 목표가 손잡이 기준 안전 범위 밖 — 시퀀스를 종료합니다. '
+                'XY 정렬 목표가 손잡이 기준 안전 범위 밖 — MoveC 전에 시퀀스를 종료합니다. '
                 f'(dx={handle_dx:+.1f}mm 허용 ±60mm, dy={handle_dy:+.1f}mm 허용 60~130mm)'
             )
             self._step_info_pub.publish(String(data='Vision 실패 — XY 정렬 범위 초과'))
             return False
 
+        # MoveC 시작 전 실제 TCP 전체(위치+자세) 기억
+        if not self._wait_tcp():
+            self.get_logger().error('MoveC 전 TCP 위치 미수신')
+            return False
+        pre_movec_pos = tuple(self._tcp[:6])  # (x, y, z, rx, ry, rz)
+        cx, cy, cz = pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2]
+
+        # 8. MoveC 호 이동 (캐비닛 5번은 MoveJ 경유 이동으로 대체)
+        if drawer_index == 4:   # 캐비닛 5번
+            if not self._wait_for_step('8. MoveJ 경유 이동 (캐비닛 5번)'): return False
+            if not self._move_j(
+                [9.13, 27.07, 62.71, -42.23, 100.62, -95.49],
+                profile='TRANSIT',
+            ): return False
+            if not self._move_j(
+                [-16.97, 46.67, 32.19, 0.0, 101.14, -106.97],
+                profile='TRANSIT',
+            ): return False
+            if not self._wait_tcp():
+                self.get_logger().error('8번 MoveJ 경유 이동 후 TCP 위치 미수신')
+                return False
+            cx, cy, cz = self._tcp[0], self._tcp[1], self._tcp[2]
+        else:
+            if not self._wait_for_step(f'8. MoveC r={radius_mm:.0f} 호 이동'): return False
+            end_pos = self._move_c(radius_mm, -1)
+            if end_pos is None:
+                self._step_info_pub.publish(String(data='MoveC 실패 — 작업 공간 초과 가능'))
+                return False
+            cx, cy, cz = end_pos
+
+        # 8.5 약품 X, Y 위치로 정렬 (현재 높이 유지, target_x/target_y는 MoveC 전에 계산함)
         if not self._wait_for_step(f'8.5 약품 XY 정렬 (X:{target_x:.0f}, Y:{target_y:.0f})'): return False
         # 호 이동이 끝나면 카메라가 아래를 보는 자세(rx=90, ry=-180, rz=0)가 됨. 이 자세 유지.
         if not self._move_l(
@@ -1163,21 +1322,35 @@ class MotionSequenceNode(Node):
         if not self._wait_for_step('10. 전자석 ON'): return False
         if not self._set_magnet(True): return False
 
-        # 11. Z +100mm 상승
-        if not self._wait_for_step('11. Z +100mm 상승'): return False
-        if not self._move_l(0, 0, 100, relative=True, profile='LIFT'): return False
-        cz += 100
+        # 11~12. 픽업 후 후퇴 — 캐비닛 1~3번은 원호 후퇴, 4~6번은 기존 방식(단순 상승)
+        if drawer_index in (0, 1, 2):   # 캐비닛 1~3번 — 원호 후퇴
+            retreat_approach = (
+                pull_target[0],
+                pull_target[1] - 170.0,
+                pull_target[2] + 160.0,
+            )
+            if not self._wait_for_step('11. 손잡이 기준 후퇴 접근점으로 이동'): return False
+            if not self._move_l(*retreat_approach, 90.0, -180.0, 0.0, profile='LIFT'): return False
 
-        # 12. Y+50 Z+50 이동
-        if not self._wait_for_step('12. Y+50 Z+50 이동'): return False
-        if not self._move_l(
-            0, 50, 50,
-            relative=True,
-            blend_radius='SMALL',
-            profile='LIFT',
-        ): return False
-        cy += 50
-        cz += 50
+            # 12. 원호 후퇴 (test_moveC 150 2와 동일 동작) — Ry -180°→-90° 표준 포즈로 복귀
+            if not self._wait_for_step('12. 원호 후퇴 (r=150mm)'): return False
+            if not self._move_c_retreat(150.0): return False
+        else:   # 캐비닛 4~6번 — 기존 방식. 두 구간 사이를 blend로 매끄럽게 이어붙인다.
+            if not self._wait_for_step('11. Z +100mm 상승'): return False
+            if not self._move_l(
+                0, 0, 100,
+                relative=True,
+                blend_radius='SMALL',
+                profile='LIFT',
+            ): return False
+
+            if not self._wait_for_step('12. Y+50 Z+50 이동'): return False
+            if not self._move_l(
+                0, 50, 50,
+                relative=True,
+                blend_radius='SMALL',
+                profile='LIFT',
+            ): return False
 
         # 13. MoveJ 카메라 앞 정렬
         if not self._wait_joints():
@@ -1185,16 +1358,22 @@ class MotionSequenceNode(Node):
             return False
         pre_camera_joints = tuple(self._joints[:6])
         if not self._wait_for_step('13. MoveJ 카메라 앞 정렬'): return False
+        if drawer_index in (0, 1):   # 캐비닛 1~2번 — 짧은 경로
+            if not self._move_j(
+                [1.67, 8.24, 82.41, 0.0, 0.0, -90.00],
+                profile='TRANSIT', blend_radius='SMALL',
+            ): return False
+        else:   # 캐비닛 3~6번 — 기존 경로
+            if not self._move_j(
+                [-12.78, -20.47, 78.55, 12.02, 67.58, -113.36],
+                profile='TRANSIT', blend_radius='SMALL',
+            ): return False
+            if not self._move_j(
+                [3.74, 22.84, 111.01, 8.49, -78.55, -90.00],
+                profile='TRANSIT', blend_radius='SMALL',
+            ): return False
         if not self._move_j(
-            [-1.00, -13.30, 94.01, 18.55, 49.57, -113.36],
-            profile='TRANSIT', blend_radius='SMALL',
-        ): return False
-        if not self._move_j(
-            [3.74, 22.84, 111.01, 8.49, -78.55, -180.00],
-            profile='TRANSIT', blend_radius='SMALL',
-        ): return False
-        if not self._move_j(
-            [-2.21, 44.37, 61.78, -0.00, -107.20, -180.00],
+            [-2.21, 44.37, 61.78, -0.00, -107.20, -90.00],
             profile='TRANSIT',
         ): return False
 
@@ -1237,7 +1416,7 @@ class MotionSequenceNode(Node):
             self._set_inverter_freq(freq=3000)  # 컨베이어 주파수 30Hz
             self._set_inverter_run(True)  # 컨베이어 ON
             if not self._move_j(
-                [-66.80, -19.25, 57.07, 0.0, 91.48, -180.0],
+                [-80.0, -19.25, 57.07, 0.0, 91.48, -180.0],
                 profile='OCR_ROLLBACK',
                 blend_radius='SMALL',
             ): return False
@@ -1352,7 +1531,7 @@ class MotionSequenceNode(Node):
             result = self._get_drawer_target(drawer_index)
             if result is None: return
             approach, contact, pull_dir = result
-            if not self._move_l(
+            if not self._move_l_hybrid(
                 *approach, 90.0, -90.0, 0.0,
                 blend_radius='SMALL',
                 profile='APPROACH',
@@ -1397,7 +1576,9 @@ class MotionSequenceNode(Node):
             # 서랍을 닫고 홈으로 복귀시킨다(아래 _close_drawer_and_home은 결과와 무관하게 항상 실행).
             pick_ok = False
             try:
-                pick_ok = self._pick_verify_and_deliver(drawer_index, radius_mm, contact, pull_dir)
+                pick_ok = self._pick_verify_and_deliver(
+                    drawer_index, radius_mm, contact, pull_dir, pull_target,
+                )
             except Exception as exc:
                 self.get_logger().error(f'픽업/배송 중 예외 발생: {exc}')
 
