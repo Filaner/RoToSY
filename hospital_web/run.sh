@@ -10,4 +10,4 @@ cd "$(dirname "$0")"
 
 pip install -q -r backend/requirements.txt
 
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload
+python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8081 --reload

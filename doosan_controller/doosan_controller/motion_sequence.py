@@ -48,6 +48,8 @@ CAMERA_API          = 'http://localhost:8000/camera/markers'
 MEDICINE_DETECTION_API = 'http://localhost:8000/camera/detections'
 CAMERA_SNAPSHOT_API = 'http://localhost:8000/camera/snapshot'
 OCR_VERIFY_API      = 'http://localhost:8080/api/ocr/verify'
+PALLET_PLAN_API     = 'http://localhost:8080/api/pallet/plan'
+PALLET_PLACED_API   = 'http://localhost:8080/api/pallet/placed'
 ROBOT_NS            = 'dsr01'
 GROQ_API_KEY        = os.environ.get('GROQ_API_KEY', '')
 
@@ -307,6 +309,17 @@ class MotionSequenceNode(Node):
         super().__init__(node_name)
         self._cb_group = ReentrantCallbackGroup()
         self._topic_prefix = topic_prefix.strip('/') or DEFAULT_MOTION_TOPIC_PREFIX
+
+        # 팔레타이징 (PALLETIZING.md) 파라미터 — enable_palletizing 켜면 14~18단계가
+        # 고정좌표 대신 _deliver_palletizing()(DB 연계 병동 박스 배치)로 동작한다.
+        self.declare_parameter('enable_palletizing', False)
+        self.declare_parameter('box_staging_joints',
+                                [31.04, 48.6, 38.63, 0.0, 92.77, -58.96])
+        self.declare_parameter('approach_clearance_mm', 60.0)
+        self.declare_parameter('place_drop_mm', 20.0)
+        self.declare_parameter('carry_rx', 90.0)
+        self.declare_parameter('carry_ry', -180.0)
+        self.declare_parameter('enable_orientation_correction', True)
         # Clients
         self._home_cli   = self.create_client(Home, '/arm/home', callback_group=self._cb_group)
         self._movel      = ActionClient(self, MoveL, '/arm/move_l', callback_group=self._cb_group)
@@ -344,6 +357,8 @@ class MotionSequenceNode(Node):
         self._tcp    = None   # [x, y, z, rx, ry, rz] mm / deg
         self._joints = None   # [j1..j6] deg
         self._prev_servo_on = False
+        self._last_ocr_medicine_name: str | None = None
+        self._box_pose_cache: dict[int, tuple] = {}   # marker_id -> (theta_box_deg, (x,y,z))
 
         self._step_mode = self._DEFAULT_STEP_MODE
         self._next_step_event = threading.Event()
@@ -1065,6 +1080,7 @@ class MotionSequenceNode(Node):
             return None
 
         self.get_logger().info(f'[OCR] 파싱 결과: {result}')
+        self._last_ocr_medicine_name = result.get('medicine_name') or None
         self._step_info_pub.publish(
             String(data=f'OCR:{json.dumps(result, ensure_ascii=False)}')
         )
@@ -1144,6 +1160,156 @@ class MotionSequenceNode(Node):
     ) -> tuple[float, float, float] | None:
         """Hook for subclasses that want to continue without a detected box."""
         return None
+
+    # ── 팔레타이징 (PALLETIZING.md) ──────────────────────────────────────────
+
+    def _get_box_pose(self, marker_id: int) -> tuple | None:
+        """배송 박스 ArUco 마커에서 (theta_box_deg, center_xyz) 취득, 1회 측정 후 캐시.
+
+        적재가 쌓이면 중앙 마커가 가려질 수 있으므로, 같은 마커를 한 번 측정에
+        성공하면 이후로는 재측정하지 않고 캐시를 재사용한다.
+        """
+        if marker_id in self._box_pose_cache:
+            return self._box_pose_cache[marker_id]
+
+        marker = self._get_marker(marker_id)
+        if marker is None:
+            return None
+
+        R = marker['rotation_matrix_base']
+        theta_box = math.degrees(math.atan2(R[1][0], R[0][0]))
+        center = (float(marker['x_mm']), float(marker['y_mm']), float(marker['z_mm']))
+        self._box_pose_cache[marker_id] = (theta_box, center)
+        self.get_logger().info(
+            f'[팔레타이징] 박스 마커 {marker_id} 측정·캐시: '
+            f'theta_box={theta_box:.1f}° center=({center[0]:.1f},{center[1]:.1f},{center[2]:.1f})'
+        )
+        return self._box_pose_cache[marker_id]
+
+    def _get_grasped_yaw(self) -> float:
+        """그리퍼로 잡은 약품의 yaw 오차(theta_item).
+
+        TODO: vision OBB(obb_angle_deg)가 아직 web_interface에 구현되어 있지 않아
+        현재는 0.0(보정 없음)을 반환한다. theta_box(박스 회전) 보정은 정상 적용된다.
+        """
+        return 0.0
+
+    def _fetch_pallet_plan(self) -> dict | None:
+        """hospital_web에 저장된 현재 미션의 적재 레이아웃 + 박스 메타 조회."""
+        try:
+            with urllib.request.urlopen(PALLET_PLAN_API, timeout=5) as resp:
+                plan = json.loads(resp.read())
+        except Exception as e:
+            self.get_logger().error(f'[팔레타이징] plan 조회 실패: {e}')
+            return None
+        if not plan.get('ok'):
+            self.get_logger().error(f"[팔레타이징] plan 없음: {plan.get('error')}")
+            return None
+        return plan
+
+    def _mark_pallet_placed(self, slot_idx: int) -> bool:
+        """슬롯 배치 완료를 hospital_web(pallet_plan)에 보고."""
+        try:
+            payload = json.dumps({'slot_idx': slot_idx}).encode()
+            req = urllib.request.Request(
+                PALLET_PLACED_API, data=payload,
+                headers={'Content-Type': 'application/json'}, method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                result = json.loads(resp.read())
+            if not result.get('ok'):
+                self.get_logger().warning(f"[팔레타이징] 배치 완료 보고 실패: {result.get('error')}")
+                return False
+            return True
+        except Exception as e:
+            self.get_logger().warning(f'[팔레타이징] 배치 완료 보고 실패: {e}')
+            return False
+
+    def _deliver_palletizing(self, pre_movec_pos: tuple) -> bool:
+        """14~18단계 대체: DB 연계 적재 plan에 따라 병동 박스의 계산된 슬롯에 배치한다.
+
+        흐름(PALLETIZING.md P1~P7): 그리퍼 yaw 측정 → 박스 staging 자세 →
+        plan에서 다음 슬롯 조회 → 박스 마커로 theta_box/center 측정(캐시) →
+        슬롯 좌표 계산 → XY+회전 정렬 → Z 하강 → 전자석 OFF → 상승 → 배치 보고 →
+        MoveC 전 위치로 복귀.
+        """
+        from .palletizing_planner import compute_placement, next_slot
+
+        theta_item = self._get_grasped_yaw()   # P1
+
+        staging = list(self.get_parameter('box_staging_joints').value)
+        if not self._wait_for_step('14. 병동 박스 staging 자세로 이동'): return False
+        if not self._move_j(staging, profile='TRANSIT'): return False   # P2
+
+        plan = self._fetch_pallet_plan()
+        if plan is None:
+            self._step_info_pub.publish(String(data='팔레타이징 실패 — plan 조회 불가'))
+            return False
+        box = plan['box']
+        slot = next_slot(plan['layout'], self._last_ocr_medicine_name)
+        if slot is None:
+            self.get_logger().error('[팔레타이징] 배치할 슬롯 없음 (전부 배치됨 또는 plan 비어있음)')
+            self._step_info_pub.publish(String(data='팔레타이징 실패 — 빈 슬롯 없음'))
+            return False
+
+        marker_id = box.get('aruco_marker_id')
+        box_pose = self._get_box_pose(int(marker_id)) if marker_id is not None else None
+        if box_pose is not None:
+            theta_box, center = box_pose
+        else:
+            self.get_logger().warning(
+                f'[팔레타이징] 박스 마커 {marker_id} 미검출 — DB origin fallback 사용'
+            )
+            theta_box, center = 0.0, tuple(box['origin'])
+
+        place_drop_mm = float(self.get_parameter('place_drop_mm').value)
+        enable_orientation = bool(self.get_parameter('enable_orientation_correction').value)
+        bx, by, place_z, rz = compute_placement(
+            slot, box, theta_box, center, theta_item,
+            place_drop_mm=place_drop_mm, enable_orientation=enable_orientation,
+        )
+        # palletizing_planner.compute_placement은 적층(z_offset_mm)을 모른다 — hospital_web의
+        # pallet_pack._stack_unplaced가 2D 패킹에 못 들어간 품목을 기존 슬롯 위에 쌓을 때
+        # 채워주는 값이므로, 이미 쌓인 높이만큼 하강 깊이를 줄여 충돌을 피한다.
+        place_z -= float(slot.get('z_offset_mm', 0.0) or 0.0)
+        clearance = float(self.get_parameter('approach_clearance_mm').value)
+        carry_rx = float(self.get_parameter('carry_rx').value)
+        carry_ry = float(self.get_parameter('carry_ry').value)
+        approach_z = place_z + clearance
+
+        # P3. 슬롯 상공 XY+회전 정렬
+        if not self._wait_for_step(
+            f"14.5 슬롯 #{slot['slot_idx']} 정렬 (X:{bx:.0f}, Y:{by:.0f}, rz:{rz:.0f})"
+        ): return False
+        if not self._move_l(bx, by, approach_z, carry_rx, carry_ry, rz, profile='VISION_ALIGN'):
+            return False
+
+        # P4. Z 하강
+        if not self._wait_for_step(f'15. Z 하강 (목표 Z={place_z:.1f})'): return False
+        if not self._move_l(bx, by, place_z, carry_rx, carry_ry, rz, profile='CONTACT'):
+            return False
+
+        # P5. 전자석 OFF (배치)
+        if not self._wait_for_step('16. 전자석 OFF'): return False
+        if not self._set_magnet(False): return False
+
+        # P6. 상승 + 배치 완료 보고
+        if not self._wait_for_step('17. Z 상승'): return False
+        if not self._move_l(
+            0, 0, clearance, relative=True, profile='LIFT', blend_radius='SMALL',
+        ): return False
+        if self._mark_pallet_placed(slot['slot_idx']):
+            self._step_info_pub.publish(
+                String(data=f"WAIT:슬롯 #{slot['slot_idx']} ({slot['medicine_name']}) 배치 완료")
+            )
+
+        # P7. MoveC 전 위치로 복귀
+        if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return False
+        if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
+                            pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5],
+                            profile='TRANSIT',
+                            blend_radius='SMALL'): return False
+        return True
 
     # ── 시퀀스 ───────────────────────────────────────────────────────────────
 
@@ -1442,7 +1608,10 @@ class MotionSequenceNode(Node):
 
         # 14~18: 배송 박스 전달 (롤백 시 건너뜀)
         if not ocr_rollback:
-            # 14. MoveJ 병동 박스 정렬
+            if bool(self.get_parameter('enable_palletizing').value):
+                return self._deliver_palletizing(pre_movec_pos)
+
+            # 14. MoveJ 병동 박스 정렬 (고정좌표)
             if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return False
             if not self._move_j(
                 [31.04, 48.6, 38.63, 0.0, 92.77, -58.96],
