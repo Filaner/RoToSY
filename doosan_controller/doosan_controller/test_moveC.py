@@ -265,7 +265,7 @@ class TestMoveCNode(Node):
         ry_arc_end = waypoints[-1][4]
         final_y = y0 + RETREAT_FINAL_Y_OFFSET_MM
         final_z = z0 + RETREAT_FINAL_Z_OFFSET_MM
-        waypoints.append((x0, final_y, final_z, 90.0, ry_arc_end, 0.0))
+        # waypoints.append((x0, final_y, final_z, 90.0, ry_arc_end, 0.0))
 
         last_idx = len(waypoints) - 1
         seg_lengths = [

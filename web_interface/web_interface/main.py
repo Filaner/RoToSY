@@ -23,6 +23,7 @@ _MUTED_PATHS = {
     '/camera/detections',
     '/camera/stream',
     '/api/manual_calib/touch/status',
+    '/api/status',
 }
 
 class _MutePollingFilter(logging.Filter):
