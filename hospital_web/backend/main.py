@@ -25,7 +25,7 @@ from .routers import (robot, amr, system as sys_router, prescription as presc_ro
                       sensor as sensor_router, vision as vision_router, demo as demo_router,
                       patient as patient_router, medicine as medicine_router, ocr as ocr_router,
                       manual_calib as manual_calib_router, orchestrator as orchestrator_router,
-                      pallet as pallet_router)
+                      pallet as pallet_router, web_compat as web_compat_router)
 from . import sensor_db
 from . import db_schema
 
@@ -133,6 +133,7 @@ app.include_router(ocr_router.router)
 app.include_router(manual_calib_router.router)
 app.include_router(orchestrator_router.router)
 app.include_router(pallet_router.router)
+app.include_router(web_compat_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')

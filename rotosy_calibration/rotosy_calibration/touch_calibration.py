@@ -38,7 +38,8 @@ from robot_arm_interfaces.msg import RobotStatus
 from robot_arm_interfaces.srv import Teaching
 
 # ── 설정 ─────────────────────────────────────────────────────────────────────
-CAMERA_API    = 'http://localhost:8000/camera/markers'
+HOSPITAL_WEB_BASE_URL = os.environ.get('HOSPITAL_WEB_BASE_URL', 'http://localhost:8080')
+CAMERA_API = f'{HOSPITAL_WEB_BASE_URL}/camera/markers'
 
 
 def _calib_candidates() -> list[Path]:

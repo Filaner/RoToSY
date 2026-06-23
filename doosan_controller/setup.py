@@ -30,6 +30,7 @@ setup(
             'test_movel      = doosan_controller.test_movel:main',
             'test_moveC      = doosan_controller.test_moveC:main',
             'motion_sequence = doosan_controller.motion_sequence:main',
+            'palletizing_sequence = doosan_controller.palletizing_sequence:main',
             'temp_sequence   = doosan_controller.temp_sequence:main',
             'tcp_monitor     = doosan_controller.tcp_monitor:main',
             'hybrid_ik       = doosan_controller.hybrid_ik_node:main',

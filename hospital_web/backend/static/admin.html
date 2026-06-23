@@ -371,6 +371,7 @@ body{
     <div class="nav-divider"></div>
     <div class="nav-section">장치</div>
     <div class="nav-item" onclick="showTab('plc')" id="nav-plc">컨베이어 / PLC</div>
+    <div class="nav-item" onclick="showTab('calib')" id="nav-calib">캘리브레이션</div>
     <div class="nav-item" onclick="showTab('arduino')" id="nav-arduino">온습도 센서</div>
     <div class="nav-divider"></div>
     <div class="nav-section">시스템</div>
@@ -566,6 +567,46 @@ body{
         </div>
       </div>
 
+      <!-- 전자석 제어: web_interface처럼 로봇 제어 상단에 고정 -->
+      <div class="card" id="magnet-card" style="border-left:3px solid var(--green);">
+        <div style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;">
+          <div style="flex:1;min-width:220px;">
+            <div class="card-title" style="margin-bottom:.5rem;">전자석 제어</div>
+            <div class="st-item"><div class="st-label">현재 상태</div>
+              <div class="st-val" id="magnet-state" style="font-size:2rem;letter-spacing:.05em;">OFF</div>
+            </div>
+          </div>
+          <div class="btn-group" style="flex-shrink:0;min-width:240px;">
+            <button class="btn btn-green btn-full" onclick="magnetOn()">⚡ ON</button>
+            <button class="btn btn-red btn-full"   onclick="magnetOff()">✕ OFF</button>
+          </div>
+        </div>
+        <div class="feedback" id="magnet-feedback"></div>
+      </div>
+
+      <!-- 로봇 제어 화면 안의 카메라: 비전 탭과 별개로 추가 -->
+      <div class="card" id="robot-camera-card">
+        <div class="card-title">Robot Camera Monitor
+          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.85rem;">
+            로봇 조작 중 확인용 보조 화면
+          </span>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;align-items:stretch;">
+          <div style="position:relative;width:100%;aspect-ratio:4/3;background:var(--bg);border:1px solid var(--border);border-radius:.5rem;overflow:hidden;">
+            <img id="robot-camera-frame" src="/camera/stream" alt="로봇 제어 카메라"
+              style="width:100%;height:100%;object-fit:cover;display:block;"
+              onerror="this.style.display='none'; const e=document.getElementById('robot-camera-error'); if(e)e.style.display='flex';">
+            <div id="robot-camera-error" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--muted);font-size:.9rem;text-align:center;padding:1rem;">
+              카메라 연결 대기 중
+            </div>
+          </div>
+          <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:1rem;overflow:auto;">
+            <div class="st-label" style="margin-bottom:.5rem;">감지 결과</div>
+            <div id="robot-camera-detections" style="font-family:var(--mono);font-size:.82rem;color:var(--muted);line-height:1.55;">대기 중...</div>
+          </div>
+        </div>
+      </div>
+
       <!-- TCP / Joints -->
       <div class="grid-2">
         <div class="card">
@@ -596,12 +637,24 @@ body{
       <div class="card">
         <div class="card-title">
           Joint Jog Control
-          <span id="jog-badge" style="margin-left:.5rem;color:var(--red);display:none;"></span>
+          <span id="jog-status-badge" style="margin-left:.5rem;color:var(--red);display:none;">[DISABLED: SERVO OFF]</span>
         </div>
+        <template id="jog-row-template">
+          <div class="jog-cell">
+            <div class="jog-axis">
+              <span>J<span class="j-idx"></span></span>
+              <span style="color:var(--text);font-family:var(--mono)"><span class="j-val">0.00</span>°</span>
+            </div>
+            <div class="jog-btns">
+              <button class="btn btn-red jog-btn" data-dir="-1">-</button>
+              <button class="btn btn-green jog-btn" data-dir="1">+</button>
+            </div>
+          </div>
+        </template>
         <div class="jog-row" id="jog-container"></div>
         <div style="display:flex;align-items:center;gap:1rem;margin-top:1rem;">
           <span class="st-label">속도</span>
-          <input type="range" id="jog-speed" min="1" max="50" value="5" style="flex:1;accent-color:var(--blue);">
+          <input type="range" id="jog-speed-range" min="1" max="50" value="5" style="flex:1;accent-color:var(--blue);">
           <span id="jog-speed-val" class="st-val" style="width:2.5ch;">5</span>
           <span class="st-label">%</span>
         </div>
@@ -644,105 +697,71 @@ body{
         </div>
       </div>
 
-      <!-- ── 자동 조제 시퀀스 (옵션 Y) ── -->
-      <div class="card" id="seq-auto-card" style="border-left:3px solid var(--green);">
-        <div class="card-title">
-          ▶ 자동 조제 시퀀스
-          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.85rem;">
-            처방 → 슬롯 → ArUco 마커 자동 호출
-          </span>
-        </div>
-        <div style="display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;">
-          <div style="flex:1;min-width:280px;">
-            <div class="st-item"><div class="st-label">진행도</div>
-              <div class="st-val" id="seq-progress">— / —</div>
-            </div>
-            <div class="st-item"><div class="st-label">현재 마커</div>
-              <div class="st-val" id="seq-current-marker">—</div>
-            </div>
-            <div class="st-item"><div class="st-label">현재 약품</div>
-              <div class="st-val" id="seq-current-label" style="font-size:.95rem;">—</div>
-            </div>
-            <div class="st-item"><div class="st-label">시퀀스 단계</div>
-              <div class="st-val" id="seq-motion-step">IDLE</div>
-            </div>
-            <div class="st-item" style="margin-top:.5rem;"><div class="st-label">마커 큐</div>
-              <div id="seq-queue" style="font-family:monospace;color:var(--muted);font-size:.85rem;">—</div>
-            </div>
-            <div class="feedback" id="seq-feedback"></div>
-          </div>
-          <div class="btn-group" style="flex-shrink:0;flex-direction:column;gap:.4rem;">
-            <button class="btn btn-green"  id="btn-seq-start"   onclick="seqAutoStart()">▶ 자동 시작</button>
-            <button class="btn btn-blue"   id="btn-seq-step"    onclick="seqAutoStep()" disabled>▶ 단계 진행
-              <span style="font-size:.7rem;font-weight:400;opacity:.8;">(현재 마커 내)</span>
-            </button>
-            <button class="btn btn-yellow" id="btn-seq-marker"  onclick="seqAutoNextMarker()" disabled>▶ 다음 마커
-              <span style="font-size:.7rem;font-weight:400;opacity:.8;">(큐 진행)</span>
-            </button>
-            <button class="btn btn-red"    id="btn-seq-stop"    onclick="seqAutoStop()" disabled>■ 중지</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ── 수동 호출 (옵션 X) ── -->
-      <div class="card" id="seq-manual-card" style="border-left:3px solid var(--yellow);">
-        <div class="card-title">
-          수동 호출
-          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.85rem;">
-            ArUco 마커 번호 직접 입력 (디버깅 · 폴백)
-          </span>
-        </div>
-        <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
-          <label class="st-label">마커 ID</label>
-          <input type="number" id="manual-marker" min="0" max="999" class="num-in" style="width:6rem;" placeholder="예: 3">
-          <button class="btn btn-yellow" id="btn-manual-go"   onclick="seqManualGo()">▶ 호출</button>
-          <button class="btn btn-blue"   id="btn-manual-next" onclick="motionNext()">▶ 다음 단계</button>
-          <button class="btn btn-red"    id="btn-manual-stop" onclick="motionStop()">■ 정지</button>
-          <span style="color:var(--muted);font-size:.85rem;margin-left:.5rem;">
-            ※ 자동 시퀀스 중에는 비활성화
-          </span>
-        </div>
-        <div class="feedback" id="manual-feedback"></div>
-      </div>
-
-      <!-- ── 마그넷 (그리퍼) ── -->
-      <div class="card" id="magnet-card">
-        <div style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;">
-          <div style="flex:1;min-width:200px;">
-            <div class="card-title">마그넷</div>
-            <div class="st-item"><div class="st-label">상태</div>
-              <div class="st-val" id="magnet-state">OFF</div>
-            </div>
-          </div>
-          <div class="btn-group" style="flex-shrink:0;">
-            <button class="btn btn-green" onclick="magnetOn()">⚡ ON</button>
-            <button class="btn btn-red"   onclick="magnetOff()">✕ OFF</button>
-          </div>
-        </div>
-        <div class="feedback" id="magnet-feedback"></div>
-      </div>
-
       <!-- ── 카테시안 조그 ── -->
       <div class="card" id="cart-jog-card">
-        <div class="card-title">Cartesian Jog
-          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.85rem;">
-            X / Y / Z 직선 미세이동 (mm)
-          </span>
+        <div class="card-title">
+          TCP Jog (Cartesian)
+          <span id="cart-jog-badge" style="margin-left:.5rem;color:var(--red);display:none;">[DISABLED: SERVO OFF]</span>
         </div>
-        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
-          <label class="st-label">거리</label>
-          <input type="number" id="cart-dist" min="0.1" max="50" step="0.5" value="5" class="num-in" style="width:5rem;">
-          <span class="st-label">mm</span>
-          <div style="display:flex;gap:.5rem;margin-left:1rem;flex-wrap:wrap;">
-            <button class="btn btn-ghost" onclick="jogCart('x',-1)">X−</button>
-            <button class="btn btn-ghost" onclick="jogCart('x', 1)">X+</button>
-            <button class="btn btn-ghost" onclick="jogCart('y',-1)">Y−</button>
-            <button class="btn btn-ghost" onclick="jogCart('y', 1)">Y+</button>
-            <button class="btn btn-ghost" onclick="jogCart('z',-1)">Z−</button>
-            <button class="btn btn-ghost" onclick="jogCart('z', 1)">Z+</button>
+        <template id="cart-jog-template">
+          <div class="jog-cell">
+            <div class="jog-axis">
+              <span data-label></span>
+              <span style="color:var(--text);font-family:var(--mono)"><span data-val>0.00</span><span data-unit></span></span>
+            </div>
+            <div class="jog-btns">
+              <button class="btn btn-red cart-jog-btn" data-dir="-1">-</button>
+              <button class="btn btn-green cart-jog-btn" data-dir="1">+</button>
+            </div>
+          </div>
+        </template>
+        <div class="jog-row" id="cart-jog-container"></div>
+        <div style="margin-top:1rem;display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:.5rem;">
+            <span class="st-label">이동 (mm)</span>
+            <input type="number" id="cart-step-trans" value="50" min="1" max="200" step="1" class="num-in" style="width:5rem;">
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;">
+            <span class="st-label">회전 (°)</span>
+            <input type="number" id="cart-step-rot" value="1" min="0.1" max="10" step="0.1" class="num-in" style="width:5rem;">
           </div>
         </div>
         <div class="feedback" id="cart-feedback"></div>
+      </div>
+
+      <!-- Motion Sequence Control -->
+      <div class="card" id="motion-sequence-card" style="border-left:3px solid var(--green);">
+        <div class="card-title">Motion Sequence Control</div>
+        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
+          <label class="st-label">Drawer Number (1~6)</label>
+          <input type="number" id="seq-marker-id" min="1" max="6" value="4" class="num-in" style="width:5rem;">
+          <button id="btn-seq-start" class="btn btn-green" onclick="startMotionSeq()">시퀀스 시작</button>
+          <button id="btn-seq-stop"  class="btn btn-red" onclick="stopMotionSeq()" disabled>시퀀스 중지</button>
+          <button id="btn-seq-reset" class="btn btn-yellow" onclick="resetMotionSeq()">초기화</button>
+          <button id="btn-seq-next"  class="btn btn-blue" onclick="nextMotionStep()" disabled>▶ 다음 단계 (Next)</button>
+          <div style="flex:1;min-width:220px;background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:.75rem;display:flex;align-items:center;gap:1rem;">
+            <span class="st-label">현재 단계:</span>
+            <span id="st-seq-step" class="st-val" style="color:var(--yellow);">IDLE</span>
+          </div>
+        </div>
+        <div class="feedback" id="seq-feedback"></div>
+      </div>
+
+      <!-- Temp Sequence Control -->
+      <div class="card" id="temp-sequence-card" style="border-left:3px solid var(--blue);">
+        <div class="card-title">Temp Sequence Control</div>
+        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
+          <label class="st-label">Drawer Number (1~6)</label>
+          <input type="number" id="tmp-marker-id" min="1" max="6" value="4" class="num-in" style="width:5rem;">
+          <button id="btn-tmp-start" class="btn btn-green" onclick="startTempSeq()">시퀀스 시작</button>
+          <button id="btn-tmp-stop"  class="btn btn-red" onclick="stopTempSeq()" disabled>시퀀스 중지</button>
+          <button id="btn-tmp-next"  class="btn btn-blue" onclick="nextTempStep()" disabled>▶ 다음 단계 (Next)</button>
+          <div style="flex:1;min-width:220px;background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:.75rem;display:flex;align-items:center;gap:1rem;">
+            <span class="st-label">현재 단계:</span>
+            <span id="st-tmp-step" class="st-val" style="color:var(--yellow);">IDLE</span>
+          </div>
+        </div>
+        <div class="feedback" id="tmp-feedback"></div>
       </div>
 
     </div><!-- /tab-robot -->
@@ -842,27 +861,100 @@ body{
     <!-- ═══════════════════════════ PLC ═══════════════════════════ -->
     <div class="tab-panel" id="tab-plc">
       <div class="card">
-        <div class="card-title">컨베이어 / PLC</div>
-        <div class="placeholder">
-          <div class="ph-icon"></div>
-          <div class="ph-title">PLC 연동 대기 중</div>
-          <div class="ph-sub">팀원이 PLC 노드 개발 완료 후 연결됩니다.<br>현재 상태: <span style="color:var(--red);">DISCONNECTED</span></div>
+        <div class="card-title">컨베이어 인버터 제어
+          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.85rem;">
+            LS M100 · plc_controller_node 필요
+          </span>
         </div>
-        <div style="background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:1rem;font-size:.92rem;color:var(--muted);">
-          <div style="font-weight:600;color:var(--text);margin-bottom:.5rem;">구현 예정 기능</div>
-          <ul style="padding-left:1.2rem;display:flex;flex-direction:column;gap:.3rem;">
-            <li>컨베이어 구간별 On/Off</li>
-            <li>속도 슬라이더 (실시간)</li>
-            <li>PLC I/O 센서 상태 모니터링</li>
-            <li>하드웨어 E-Stop 상태 표시</li>
-            <li>자동/수동 모드 전환</li>
-          </ul>
-          <div style="margin-top:.75rem;font-size:.92rem;">
-            예상 ROS2 토픽: <code style="color:var(--blue)">/plc/status</code>, <code style="color:var(--blue)">/plc/conveyor_cmd</code>
+        <div style="display:flex;gap:1.25rem;align-items:center;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;">
+            <span class="st-label">주파수</span>
+            <input type="number" id="inv-freq" min="0" max="6000" step="100" value="3000" class="num-in" style="width:6rem;">
+            <span style="font-size:.85rem;color:var(--muted);">× 0.01 Hz</span>
+            <span id="inv-freq-hz" class="st-val" style="color:var(--blue);min-width:5rem;">30.00 Hz</span>
+            <button class="btn btn-blue" onclick="invSetFreq()">주파수 적용</button>
           </div>
+          <div style="height:2.5rem;width:1px;background:var(--border);"></div>
+          <div class="btn-group" style="align-items:center;">
+            <button id="btn-inv-run"  class="btn btn-green" onclick="invRun(true)">▶ RUN</button>
+            <button id="btn-inv-stop" class="btn btn-red"   onclick="invRun(false)">■ STOP</button>
+            <div id="inv-state-badge" style="padding:.35rem .9rem;border-radius:9999px;font-size:.82rem;font-weight:700;font-family:var(--mono);background:var(--surf2);border:1px solid var(--border);color:var(--muted);">STOP</div>
+          </div>
+        </div>
+        <div class="feedback" id="inv-feedback"></div>
+        <div style="margin-top:.85rem;background:var(--surf2);border:1px solid var(--border);border-radius:.5rem;padding:.8rem;font-size:.85rem;color:var(--muted);">
+          RUN/STOP은 인버터 register와 PLC coil 명령으로 전달됩니다. 연결이 안 되어 있으면 Robot ROS bridge 또는 plc_controller_node 상태를 확인하세요.
         </div>
       </div>
     </div><!-- /tab-plc -->
+
+
+    <!-- ═══════════════════════════ 캘리브레이션 ═══════════════════════════ -->
+    <div class="tab-panel" id="tab-calib">
+      <div class="card">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Manual Point Calibration
+            <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.85rem;">
+              web_interface 방식: TCP 입력/자동입력 → 마커 캡처 → SVD 계산 → 저장
+            </span>
+          </span>
+          <div style="display:flex;gap:.5rem;align-items:center;">
+            <span id="calib-count-badge" style="font-size:.85rem;color:var(--muted);font-family:var(--mono);">0 포인트</span>
+            <button class="btn btn-red" onclick="resetCalib()" style="padding:.35rem .7rem;font-size:.8rem;">초기화</button>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <div style="font-size:.82rem;color:var(--blue);font-weight:700;margin-bottom:.5rem;">TCP 위치 (mm)</div>
+            <div class="pose-grid">
+              <div><div class="pose-axis">X</div><input id="cb-x" type="number" step="0.1" class="num-in"></div>
+              <div><div class="pose-axis">Y</div><input id="cb-y" type="number" step="0.1" class="num-in"></div>
+              <div><div class="pose-axis">Z</div><input id="cb-z" type="number" step="0.1" class="num-in"></div>
+            </div>
+            <div class="btn-group" style="margin-top:.75rem;">
+              <button class="btn btn-ghost" onclick="calibFillTcp()">웹 TCP 자동 입력</button>
+              <button class="btn btn-green" onclick="calibCapture()">캡처</button>
+              <button class="btn btn-blue" onclick="calibCaptureAuto()">Auto 캡처</button>
+            </div>
+            <div class="feedback" id="calib-feedback"></div>
+          </div>
+
+          <div>
+            <div style="font-size:.82rem;color:var(--muted);font-weight:700;margin-bottom:.5rem;">ID 0 마커 감지 상태</div>
+            <div id="calib-cam-info" style="font-family:var(--mono);font-size:.85rem;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:.5rem;padding:.8rem;min-height:5rem;line-height:1.7;">
+              <span style="color:var(--muted);">마커 미감지</span>
+            </div>
+            <div style="margin-top:.75rem;position:relative;width:100%;aspect-ratio:4/3;background:var(--bg);border:1px solid var(--border);border-radius:.5rem;overflow:hidden;">
+              <img src="/camera/stream" alt="캘리브레이션 카메라" style="width:100%;height:100%;object-fit:cover;">
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:1rem;">
+          <div class="st-label" style="margin-bottom:.4rem;">수집된 포인트</div>
+          <div id="calib-points-list" style="font-family:var(--mono);font-size:.82rem;max-height:160px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:.5rem;padding:.6rem;color:var(--muted);">
+            포인트 없음
+          </div>
+        </div>
+
+        <div style="margin-top:1rem;background:var(--bg);border:1px solid var(--border);border-radius:.5rem;padding:.8rem;">
+          <div style="font-size:.78rem;color:var(--yellow);font-weight:700;margin-bottom:.5rem;">TCP → 마커 오프셋 (tool 좌표계, mm)</div>
+          <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+            <span class="pose-axis">x</span><input id="cb-gm-x" type="number" value="50" step="0.1" class="num-in" style="width:5rem;">
+            <span class="pose-axis">y</span><input id="cb-gm-y" type="number" value="0" step="0.1" class="num-in" style="width:5rem;">
+            <span class="pose-axis">z</span><input id="cb-gm-z" type="number" value="-55" step="0.1" class="num-in" style="width:5rem;">
+            <span style="font-size:.82rem;color:var(--muted);">TCP 방향은 캡처 시 자동 저장됩니다.</span>
+          </div>
+        </div>
+
+        <div class="btn-group" style="margin-top:1rem;">
+          <button class="btn btn-green" onclick="computeCalib()">계산 (SVD)</button>
+          <button class="btn btn-blue" onclick="saveCalib()" id="btn-calib-save" disabled>저장</button>
+          <div id="calib-result" style="flex:1;font-family:var(--mono);font-size:.85rem;color:var(--muted);align-self:center;"></div>
+        </div>
+      </div>
+    </div><!-- /tab-calib -->
 
 
     <!-- ═══════════════════════════ 온습도 센서 ═══════════════════════════ -->
@@ -1057,6 +1149,8 @@ function showTab(name) {
   if (name === 'audit')     loadAudit();
   if (name === 'dashboard') loadTodayDeliveries();
   if (name === 'arduino')   updateSensorHistory();
+  if (name === 'calib')     { calibRefreshList(); updateCalibMarkerInfo(); }
+  if (name === 'plc')       refreshInverterStatus();
 }
 
 // ═══════════════════════════════════════════════
@@ -1091,6 +1185,7 @@ function applyState(s) {
   if (s.nodes)  applyNodes(s.nodes);
   applyRoToSYOnline(s.robot_online);
   applySequence(s);
+  applyInverterState(s.robot || {});
   if (typeof updateSensorValues === 'function') updateSensorValues(s);
 }
 
@@ -1106,18 +1201,24 @@ function applySequence(s) {
   setText('seq-current-marker', q.current !== null && q.current !== undefined ? q.current : '—');
   setText('seq-current-label',  (q.labels && q.labels[idx]) || '—');
   const stepEl = document.getElementById('seq-motion-step');
-  stepEl.textContent = step;
-  if (step.startsWith('OCR_WARN')) {
-    stepEl.style.color = 'var(--yellow)';
-    stepEl.style.fontWeight = '700';
+  if (stepEl) {
+    stepEl.textContent = step;
+    if (step.startsWith('OCR_WARN')) {
+      stepEl.style.color = 'var(--yellow)';
+      stepEl.style.fontWeight = '700';
+      showOcrModal(step);
+    } else if (step.startsWith('ROLLBACK')) {
+      stepEl.style.color = 'var(--red)';
+      stepEl.style.fontWeight = '700';
+      hideOcrModal();
+    } else {
+      stepEl.style.color = 'inherit';
+      stepEl.style.fontWeight = 'normal';
+      hideOcrModal();
+    }
+  } else if (step.startsWith('OCR_WARN')) {
     showOcrModal(step);
-  } else if (step.startsWith('ROLLBACK')) {
-    stepEl.style.color = 'var(--red)';
-    stepEl.style.fontWeight = '700';
-    hideOcrModal();
   } else {
-    stepEl.style.color = 'inherit';
-    stepEl.style.fontWeight = 'normal';
     hideOcrModal();
   }
 
@@ -1140,13 +1241,16 @@ function applySequence(s) {
 
   // 인터락: 자동 시퀀스 활성 시 수동 버튼 disabled
   const autoActive = total > 0 && idx < total;
-  el('btn-seq-start').disabled    = !total || autoActive;
-  el('btn-seq-step').disabled     = !autoActive;
-  el('btn-seq-marker').disabled   = !autoActive;
-  el('btn-seq-stop').disabled     = !autoActive;
-  el('btn-manual-go').disabled    = autoActive;
-  el('btn-manual-next').disabled  = autoActive;
-  el('btn-manual-stop').disabled  = autoActive;
+  const legacyAutoStart = el('btn-seq-step');
+  if (legacyAutoStart) {
+    el('btn-seq-start').disabled    = !total || autoActive;
+    el('btn-seq-step').disabled     = !autoActive;
+    el('btn-seq-marker').disabled   = !autoActive;
+    el('btn-seq-stop').disabled     = !autoActive;
+    el('btn-manual-go').disabled    = autoActive;
+    el('btn-manual-next').disabled  = autoActive;
+    el('btn-manual-stop').disabled  = autoActive;
+  }
 }
 
 // ── OCR 미일치 결정 모달 ──
@@ -1187,7 +1291,11 @@ function applyRobot(r) {
   setValColor('r-ready',  r.arm_ready ? 'READY' : 'NOT READY', r.arm_ready ? 'good' : 'bad');
 
   const tcp = (r.current_tcp_rt && r.current_tcp_rt.some(v=>v!==0)) ? r.current_tcp_rt : (r.current_tcp ?? []);
-  ['tcp-x','tcp-y','tcp-z','tcp-rx','tcp-ry','tcp-rz'].forEach((id,i) => setText(id, fmt(tcp[i])));
+  ['tcp-x','tcp-y','tcp-z','tcp-rx','tcp-ry','tcp-rz'].forEach((id,i) => setText(id, fmtTcp(tcp[i], i)));
+  CART_AXES.forEach((_, i) => {
+    const ce = document.getElementById(`cart-val-${i}`);
+    if (ce) ce.textContent = fmtTcp(tcp[i], i, i < 3 ? 1 : 2);
+  });
 
   const j = r.current_joints_deg ?? [];
   ['j1','j2','j3','j4','j5','j6'].forEach((id,i) => {
@@ -1206,11 +1314,41 @@ function applyRobot(r) {
   el('btn-teach').textContent  = teach ? '교시 종료' : '직접 교시';
   el('btn-teach').className    = teach ? 'btn btn-blue active' : 'btn btn-blue';
   el('btn-recover').disabled   = !recovering;
-  document.querySelectorAll('.jog-btn').forEach(b => b.disabled = !servoOn || teach);
+  const jogEnabled = servoOn && !teach;
+  document.querySelectorAll('.jog-btn').forEach(b => b.disabled = !jogEnabled);
+  document.querySelectorAll('.cart-jog-btn').forEach(b => b.disabled = !jogEnabled);
   document.querySelectorAll('.move-btn').forEach(b => b.disabled = !servoOn || teach);
   document.querySelectorAll('.sync-btn').forEach(b => b.disabled = false);
-  el('jog-badge').style.display = (!servoOn || teach) ? 'inline' : 'none';
-  el('jog-badge').textContent   = teach ? '[DISABLED: 교시 모드]' : '[DISABLED: SERVO OFF]';
+  const jogBadge = el('jog-status-badge');
+  if (jogBadge) {
+    jogBadge.style.display = jogEnabled ? 'none' : 'inline';
+    jogBadge.textContent   = teach ? '[DISABLED: 직접 교시 모드]' : '[DISABLED: SERVO OFF]';
+  }
+  const cartBadge = el('cart-jog-badge');
+  if (cartBadge) {
+    cartBadge.style.display = jogEnabled ? 'none' : 'inline';
+    cartBadge.textContent   = teach ? '[DISABLED: 직접 교시 모드]' : '[DISABLED: SERVO OFF]';
+  }
+  const speedRange = el('jog-speed-range');
+  if (speedRange) speedRange.disabled = !jogEnabled;
+  applyManualSequenceControls(r);
+}
+
+function applyManualSequenceControls(r) {
+  const setStep = (stepId, startId, stopId, nextId, raw) => {
+    const stepEl = el(stepId);
+    if (!stepEl) return;
+    const val = raw || 'IDLE';
+    const isWaiting = val.startsWith('WAIT:');
+    const isRunning = val !== 'IDLE' && val !== '시퀀스 완료';
+    stepEl.textContent = isWaiting ? val.slice(5) : val.startsWith('RUN:') ? val.slice(4) : val;
+    const start = el(startId), stop = el(stopId), next = el(nextId);
+    if (start) start.disabled = isRunning;
+    if (stop)  stop.disabled  = !isRunning;
+    if (next)  next.disabled  = !isWaiting;
+  };
+  setStep('st-seq-step', 'btn-seq-start', 'btn-seq-stop', 'btn-seq-next', r.seq_step);
+  setStep('st-tmp-step', 'btn-tmp-start', 'btn-tmp-stop', 'btn-tmp-next', r.tmp_step);
 }
 
 // ── AMR ──
@@ -1525,35 +1663,248 @@ async function _postFB(path, body, fbId) {
   return r;
 }
 
-// 자동 (옵션 Y)
-async function seqAutoStart()      { await _postFB('/api/robot/auto/start',   null, 'seq-feedback'); }
-async function seqAutoStep()       { await _postFB('/api/robot/motion/next', null, 'seq-feedback'); }  // 현재 마커 내 step 진행
-async function seqAutoNextMarker() {
-  if (!confirm('현재 마커를 끝내고 다음 마커로 넘어갑니다.\n현재 시퀀스가 진행 중이면 abort 됩니다. 계속?')) return;
-  await _postFB('/api/robot/auto/next', null, 'seq-feedback');
-}
-async function seqAutoStop()       {
-  if (!confirm('자동 시퀀스를 중단합니다.\n진행 중인 픽업도 멈춥니다. 계속?')) return;
-  await _postFB('/api/robot/auto/stop',  null, 'seq-feedback');
+async function startMotionSeq() {
+  const markerId = parseInt(el('seq-marker-id').value, 10);
+  if (!Number.isInteger(markerId) || markerId < 1 || markerId > 6) {
+    _fb('seq-feedback', false, '서랍 번호(1~6)를 입력하세요.');
+    return;
+  }
+  await _postFB('/api/motion/start', { marker_id: markerId }, 'seq-feedback');
 }
 
-// 수동 (옵션 X)
-async function seqManualGo() {
-  const mid = parseInt(el('manual-marker').value, 10);
-  if (Number.isNaN(mid)) { _fb('manual-feedback', false, '마커 ID를 입력하세요.'); return; }
-  await _postFB('/api/robot/motion/start', { marker_id: mid }, 'manual-feedback');
+async function nextMotionStep() {
+  await _postFB('/api/motion/next', null, 'seq-feedback');
 }
-async function motionNext() { await _postFB('/api/robot/motion/next', null, 'manual-feedback'); }
-async function motionStop() { await _postFB('/api/robot/motion/stop', null, 'manual-feedback'); }
+
+async function stopMotionSeq() {
+  await _postFB('/api/motion/stop', null, 'seq-feedback');
+}
+
+async function resetMotionSeq() {
+  await _postFB('/api/motion/reset', null, 'seq-feedback');
+}
+
+async function startTempSeq() {
+  const markerId = parseInt(el('tmp-marker-id').value, 10);
+  if (!Number.isInteger(markerId) || markerId < 1 || markerId > 6) {
+    _fb('tmp-feedback', false, '서랍 번호(1~6)를 입력하세요.');
+    return;
+  }
+  await _postFB('/api/temp_motion/start', { marker_id: markerId }, 'tmp-feedback');
+}
+
+async function nextTempStep() {
+  await _postFB('/api/temp_motion/next', null, 'tmp-feedback');
+}
+
+async function stopTempSeq() {
+  await _postFB('/api/temp_motion/stop', null, 'tmp-feedback');
+}
 
 // 마그넷
 async function magnetOn()  { await _postFB('/api/robot/gripper/on',  null, 'magnet-feedback'); }
 async function magnetOff() { await _postFB('/api/robot/gripper/off', null, 'magnet-feedback'); }
 
-// 카테시안 조그
-async function jogCart(axis, direction) {
-  const dist = parseFloat(el('cart-dist').value) || 5;
-  await _postFB('/api/robot/jog_cart', { axis, direction, distance: dist }, 'cart-feedback');
+// ── Conveyor / PLC inverter ──
+function _invFeedback(msg, color = 'var(--muted)') {
+  const fb = el('inv-feedback');
+  if (fb) { fb.style.color = color; fb.textContent = msg; }
+}
+
+function _invSetStateBadge(running) {
+  const b = el('inv-state-badge');
+  if (!b) return;
+  b.textContent = running ? 'RUN' : 'STOP';
+  b.style.color = running ? 'var(--green)' : 'var(--muted)';
+  b.style.borderColor = running ? 'var(--green)' : 'var(--border)';
+  b.style.background = running ? '#14532d22' : 'var(--surf2)';
+}
+
+function applyInverterState(robot) {
+  _invSetStateBadge(!!robot.inverter_running);
+  const freq = Number(robot.inverter_freq || 0);
+  if (freq > 0) {
+    const input = el('inv-freq');
+    const hz = el('inv-freq-hz');
+    if (input && document.activeElement !== input) input.value = freq;
+    if (hz) hz.textContent = (freq / 100).toFixed(2) + ' Hz';
+  }
+}
+
+async function invSetFreq() {
+  const freq = parseInt(el('inv-freq')?.value || '0', 10);
+  if (Number.isNaN(freq) || freq < 0 || freq > 6000) {
+    _invFeedback('주파수 범위는 0~6000입니다.', 'var(--red)');
+    return;
+  }
+  const hz = el('inv-freq-hz');
+  if (hz) hz.textContent = (freq / 100).toFixed(2) + ' Hz';
+  const r = await apiPost('/api/robot/inverter/freq', {freq}, null);
+  _invFeedback(r ? '주파수 적용 완료' : '주파수 적용 실패', r ? 'var(--green)' : 'var(--red)');
+}
+
+async function invRun(run) {
+  const r = await apiPost('/api/robot/inverter/run', {run}, null);
+  if (r) {
+    _invSetStateBadge(run);
+    _invFeedback(run ? '컨베이어 RUN' : '컨베이어 STOP', run ? 'var(--green)' : 'var(--yellow)');
+  } else {
+    _invFeedback('컨베이어 명령 실패', 'var(--red)');
+  }
+}
+
+async function refreshInverterStatus() {
+  try {
+    const r = await fetch('/api/robot/inverter/status');
+    const d = await r.json();
+    applyInverterState(d);
+  } catch (_) {}
+}
+
+// ── Robot tab camera ──
+async function updateRobotCameraDetections() {
+  const box = el('robot-camera-detections');
+  if (!box) return;
+  try {
+    const r = await fetch('/camera/detections');
+    const d = await r.json();
+    const dets = Array.isArray(d.detections) ? d.detections : [];
+    if (!dets.length) {
+      box.textContent = d.error || '감지된 객체 없음';
+      return;
+    }
+    box.innerHTML = dets.slice(0, 8).map((det, i) => {
+      const name = det.class_name || det.name || `객체 ${i + 1}`;
+      const conf = det.confidence !== undefined ? ` ${(Number(det.confidence) * 100).toFixed(0)}%` : '';
+      const base = Array.isArray(det.base_position_m) ? ` · base ${det.base_position_m.map(v => Number(v).toFixed(2)).join(', ')}` : '';
+      return `<div style="margin-bottom:.35rem;color:var(--text);">${name}<span style="color:var(--muted);">${conf}${base}</span></div>`;
+    }).join('');
+  } catch (e) {
+    box.textContent = '감지 정보 조회 실패';
+  }
+}
+
+// ── Manual calibration, web_interface-compatible workflow ──
+function calibFillTcp() {
+  const t = latestRobot?.current_tcp || [];
+  ['x','y','z'].forEach((k, i) => {
+    const input = el('cb-' + k);
+    if (input) input.value = Number(t[i] || 0).toFixed(2);
+  });
+}
+
+async function updateCalibMarkerInfo() {
+  const info = el('calib-cam-info');
+  if (!info) return;
+  try {
+    const d = await (await fetch('/camera/markers')).json();
+    const markers = d.markers || [];
+    const m = markers.find(x => Number(x.id) === 0) || markers[0];
+    if (!m) {
+      info.innerHTML = '<span style="color:var(--red)">● 미감지</span><br><span style="color:var(--muted)">마커가 카메라에 보이도록 위치를 조정하세요.</span>';
+      return;
+    }
+    const cam = [m.x_cam_m, m.y_cam_m, m.z_cam_m].map(v => v === undefined || v === null ? '—' : (Number(v) * 1000).toFixed(1));
+    const base = [m.x_mm, m.y_mm, m.z_mm].map(v => v === undefined || v === null ? '—' : Number(v).toFixed(1));
+    info.innerHTML = `
+      <span style="color:var(--green)">● ID ${m.id} 감지</span><br>
+      cam(mm): ${cam.join(', ')}<br>
+      base(mm): ${base.join(', ')}
+    `;
+  } catch (e) {
+    info.innerHTML = '<span style="color:var(--red)">마커 조회 실패</span>';
+  }
+}
+
+async function calibCapture() {
+  const fb = el('calib-feedback');
+  const body = {
+    x_tcp_mm: parseFloat(el('cb-x')?.value || '0'),
+    y_tcp_mm: parseFloat(el('cb-y')?.value || '0'),
+    z_tcp_mm: parseFloat(el('cb-z')?.value || '0'),
+    marker_id: 0,
+  };
+  const r = await apiPost('/api/manual_calib/capture', body, null);
+  if (fb) {
+    fb.style.color = r ? 'var(--green)' : 'var(--red)';
+    fb.textContent = r ? '캡처 완료' : '캡처 실패';
+  }
+  await calibRefreshList();
+}
+
+async function calibCaptureAuto() {
+  const fb = el('calib-feedback');
+  const r = await apiPost('/api/manual_calib/capture_auto?marker_id=0', null, null);
+  if (fb) {
+    fb.style.color = r ? 'var(--green)' : 'var(--red)';
+    fb.textContent = r ? 'Auto 캡처 완료' : 'Auto 캡처 실패';
+  }
+  await calibRefreshList();
+}
+
+async function calibRefreshList() {
+  try {
+    const d = await (await fetch('/api/manual_calib/status')).json();
+    const badge = el('calib-count-badge');
+    const list = el('calib-points-list');
+    if (badge) badge.textContent = `${d.count} 포인트`;
+    if (!list) return;
+    const pts = d.points || [];
+    if (!pts.length) {
+      list.textContent = '포인트 없음';
+      return;
+    }
+    list.innerHTML = pts.map((p, i) => `
+      <div style="display:flex;gap:.5rem;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding:.3rem 0;">
+        <span>#${i + 1} ${p.label || ''} TCP=[${(p.p_tcp_mm || []).map(v => Number(v).toFixed(1)).join(', ')}] CAM=[${(p.p_cam_m || []).map(v => Number(v * 1000).toFixed(1)).join(', ')}]</span>
+        <button class="btn btn-red" onclick="calibDeletePoint(${i})" style="padding:.15rem .45rem;font-size:.75rem;">삭제</button>
+      </div>
+    `).join('');
+  } catch (_) {}
+}
+
+async function calibDeletePoint(i) {
+  await fetch(`/api/manual_calib/point/${i}`, {method: 'DELETE'});
+  await calibRefreshList();
+}
+
+async function resetCalib() {
+  await fetch('/api/manual_calib/reset', {method: 'DELETE'});
+  const result = el('calib-result');
+  if (result) result.textContent = '';
+  const save = el('btn-calib-save');
+  if (save) save.disabled = true;
+  await calibRefreshList();
+}
+
+async function computeCalib() {
+  const result = el('calib-result');
+  const body = {
+    gm_x_mm: parseFloat(el('cb-gm-x')?.value || '0'),
+    gm_y_mm: parseFloat(el('cb-gm-y')?.value || '0'),
+    gm_z_mm: parseFloat(el('cb-gm-z')?.value || '0'),
+  };
+  const r = await apiPost('/api/manual_calib/compute', body, null);
+  if (result) {
+    if (r) {
+      result.style.color = 'var(--green)';
+      result.textContent = `mean=${Number(r.mean_residual_mm).toFixed(2)}mm max=${Number(r.max_residual_mm).toFixed(2)}mm samples=${r.samples}`;
+      const save = el('btn-calib-save');
+      if (save) save.disabled = false;
+    } else {
+      result.style.color = 'var(--red)';
+      result.textContent = '계산 실패';
+    }
+  }
+}
+
+async function saveCalib() {
+  const r = await apiPost('/api/manual_calib/save', null, null);
+  const result = el('calib-result');
+  if (result) {
+    result.style.color = r ? 'var(--green)' : 'var(--red)';
+    result.textContent = r ? `저장 완료: ${r.saved_to}` : '저장 실패';
+  }
 }
 
 async function confirmLoading() {
@@ -1747,46 +2098,109 @@ function addAlert(type, msg) {
 // ═══════════════════════════════════════════════
 // Jog controls
 // ═══════════════════════════════════════════════
-const jogSpeed = el => el.id === 'jog-speed' ? parseInt(el.value) : 5;
+const CART_AXES = [
+  { label: 'X',  unit: ' mm' },
+  { label: 'Y',  unit: ' mm' },
+  { label: 'Z',  unit: ' mm' },
+  { label: 'Rx', unit: '°' },
+  { label: 'Ry', unit: '°' },
+  { label: 'Rz', unit: '°' },
+];
 
 function buildJog() {
   const container = el('jog-container');
-  const speedEl   = el('jog-speed');
+  const template  = el('jog-row-template');
+  const speedEl   = el('jog-speed-range');
   const speedVal  = el('jog-speed-val');
+  if (!container || !template || !speedEl) return;
   speedEl.oninput = () => { speedVal.textContent = speedEl.value; };
 
   for (let i = 0; i < 6; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'jog-cell';
-    cell.innerHTML = `
-      <div class="jog-axis">
-        <span>J${i+1}</span>
-        <span id="jog-val-${i}" style="color:var(--text);font-family:var(--mono)">0.00°</span>
-      </div>
-      <div class="jog-btns">
-        <button class="btn btn-red jog-btn" data-joint="${i}" data-dir="-1">−</button>
-        <button class="btn btn-green jog-btn" data-joint="${i}" data-dir="1">+</button>
-      </div>`;
-    container.appendChild(cell);
+    const clone = template.content.cloneNode(true);
+    clone.querySelector('.j-idx').textContent = i + 1;
+    clone.querySelector('.j-val').id = `jog-val-${i}`;
+    clone.querySelectorAll('.jog-btn').forEach(btn => {
+      const dir = parseInt(btn.dataset.dir, 10);
+      let pressing = false;
+
+      btn.onpointerdown = async () => {
+        if (btn.disabled) return;
+        pressing = true;
+        try {
+          await fetch('/api/jog', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ joint_index: i, speed: parseFloat(speedEl.value) * dir }),
+          });
+        } catch (_) {}
+      };
+
+      const stopJog = async () => {
+        if (!pressing) return;
+        pressing = false;
+        try {
+          await fetch('/api/jog', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ joint_index: i, speed: 0 }),
+          });
+        } catch (_) {}
+      };
+
+      btn.onpointerup = stopJog;
+      btn.onpointerleave = stopJog;
+      btn.onpointercancel = stopJog;
+    });
+    container.appendChild(clone);
   }
+}
 
-  container.addEventListener('pointerdown', async e => {
-    const btn = e.target.closest('.jog-btn');
-    if (!btn || btn.disabled) return;
-    const ji  = parseInt(btn.dataset.joint);
-    const dir = parseInt(btn.dataset.dir);
-    const spd = parseInt(el('jog-speed').value) * dir;
-    try { await fetch('/api/robot/jog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({joint_index:ji,speed:spd})}); } catch(_){}
+function buildCartJog() {
+  const container = el('cart-jog-container');
+  const template = el('cart-jog-template');
+  if (!container || !template) return;
+
+  CART_AXES.forEach((axis, axisIdx) => {
+    const clone = template.content.cloneNode(true);
+    clone.querySelector('[data-label]').textContent = axis.label;
+    clone.querySelector('[data-unit]').textContent = axis.unit;
+    clone.querySelector('[data-val]').id = `cart-val-${axisIdx}`;
+    clone.querySelectorAll('.cart-jog-btn').forEach(btn => {
+      const dir = parseInt(btn.dataset.dir, 10);
+      let pressing = false;
+
+      btn.onpointerdown = async () => {
+        if (btn.disabled) return;
+        pressing = true;
+        const stepEl = axisIdx < 3 ? el('cart-step-trans') : el('cart-step-rot');
+        const step = parseFloat(stepEl?.value) || (axisIdx < 3 ? 50 : 1);
+        try {
+          await fetch('/api/jog_cart', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ axis: axisIdx, speed: step * dir }),
+          });
+        } catch (_) {}
+      };
+
+      const stopCart = async () => {
+        if (!pressing) return;
+        pressing = false;
+        try {
+          await fetch('/api/jog_cart', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ axis: axisIdx, speed: 0 }),
+          });
+        } catch (_) {}
+      };
+
+      btn.onpointerup = stopCart;
+      btn.onpointerleave = stopCart;
+      btn.onpointercancel = stopCart;
+    });
+    container.appendChild(clone);
   });
-
-  const stopJog = async e => {
-    const btn = e.target.closest('.jog-btn');
-    if (!btn) return;
-    const ji = parseInt(btn.dataset.joint);
-    try { await fetch('/api/robot/jog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({joint_index:ji,speed:0})}); } catch(_){}
-  };
-  container.addEventListener('pointerup',    stopJog);
-  container.addEventListener('pointerleave', stopJog);
 }
 
 // ═══════════════════════════════════════════════
@@ -1810,10 +2224,19 @@ function fmt(v, d=2) {
   return typeof v === 'number' ? v.toFixed(d) : '—';
 }
 
+function fmtTcp(v, axisIndex, decimals = 2) {
+  if (typeof v !== 'number') return '—';
+  if (axisIndex >= 3 && Math.abs(Math.abs(v) - 180) < 0.05) {
+    return (180).toFixed(decimals);
+  }
+  return v.toFixed(decimals);
+}
+
 // ═══════════════════════════════════════════════
 // Init
 // ═══════════════════════════════════════════════
 buildJog();
+buildCartJog();
 connect();
 loadTodayDeliveries();
 setInterval(loadTodayDeliveries, 15000);
@@ -2020,6 +2443,9 @@ function initCameraStream() {
 renderDrawerMap();
 initCameraStream();
 setInterval(updateVisionResults, 2000);
+setInterval(updateRobotCameraDetections, 2000);
+setInterval(updateCalibMarkerInfo, 1500);
+setInterval(refreshInverterStatus, 3000);
 
 // ── 로봇 약품 검수 (실시간 OCR, /api/ocr/current) ──────────────────────────────
 async function updateRobotScans() {
