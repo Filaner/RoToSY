@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'aruco_camera_calibrator   = rotosy_calibration.aruco_camera_calibrator:main',
             'calibration_motion_runner = rotosy_calibration.calibration_motion_runner:main',
+            'realsense_topic_publisher = rotosy_calibration.realsense_topic_publisher:main',
             'touch_calibration         = rotosy_calibration.touch_calibration:main',
         ],
     },

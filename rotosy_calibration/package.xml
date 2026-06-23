@@ -12,6 +12,7 @@
   <depend>rclpy</depend>
   <depend>ament_index_python</depend>
   <depend>std_srvs</depend>
+  <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>tf2_ros</depend>
