@@ -8,11 +8,11 @@ Usage:
      ros2 run doosan_controller motion_sequence <drawer_number 1~6> [--step]
 """
 
-import base64
 import fcntl
 import json
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -22,12 +22,6 @@ from pathlib import Path
 
 import yaml
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
-
-try:
-    from groq import Groq as _Groq
-    _GROQ_AVAILABLE = True
-except ImportError:
-    _GROQ_AVAILABLE = False
 
 import rclpy
 from rclpy.action import ActionClient
@@ -52,7 +46,10 @@ OCR_VERIFY_API      = f'{HOSPITAL_WEB_BASE_URL}/api/ocr/verify'
 PALLET_PLAN_API     = f'{HOSPITAL_WEB_BASE_URL}/api/pallet/plan'
 PALLET_PLACED_API   = f'{HOSPITAL_WEB_BASE_URL}/api/pallet/placed'
 ROBOT_NS            = 'dsr01'
-GROQ_API_KEY        = os.environ.get('GROQ_API_KEY', '')
+GOOGLE_CREDENTIALS_PATH = str(
+    Path(__file__).resolve().parents[2] / 'application_default_credentials.json'
+)
+GOOGLE_PROJECT_ID   = 'ocr1-496908'
 
 DEFAULT_MOTION_TOPIC_PREFIX = 'motion'
 DEFAULT_INSTANCE_LOCK_PATH = '/tmp/rotosy_motion_sequence.lock'
@@ -79,6 +76,47 @@ JOINT_LIMITS_DEG = (
 
 def _within_joint_limits(joints: list) -> bool:
     return all(lo <= j <= hi for j, (lo, hi) in zip(joints, JOINT_LIMITS_DEG))
+
+
+_ARUCO_LINE_RE = re.compile(r'^ID\s*\d+\s*\([-\d,\s]+\)mm', re.IGNORECASE)
+
+
+def _parse_medicine_label(raw_text: str) -> dict:
+    """Google Cloud Vision OCR 텍스트 → 약품 라벨 구조화 파싱."""
+    # ArUco 마커 좌표 오버레이 줄 제거 후 유효 줄만 추출
+    lines = [
+        l.strip() for l in raw_text.splitlines()
+        if l.strip() and not _ARUCO_LINE_RE.match(l.strip())
+    ]
+    medicine_name = lines[0] if lines else ''
+
+    # 모든 용량 후보를 찾아 mg > ml > 나머지 순으로 우선순위 선택
+    dosage_candidates = re.findall(
+        r'\d+(?:\.\d+)?\s*(?:mg|ml|mcg|µg|g|IU|정|캡슐|Tab|Cap)',
+        raw_text, re.IGNORECASE,
+    )
+    def _dosage_priority(d: str) -> int:
+        d_lower = d.lower()
+        if 'mg' in d_lower: return 0
+        if 'ml' in d_lower: return 1
+        return 2
+    dosage = min(dosage_candidates, key=_dosage_priority).strip() if dosage_candidates else ''
+
+    instr_match = re.search(
+        r'(?:1일\s*\d+\s*회|하루\s*\d+\s*번|식후|식전|취침\s*전|\d+\s*정씩)',
+        raw_text,
+    )
+    instructions = instr_match.group().strip() if instr_match else ''
+
+    return {
+        'medicine_name':     medicine_name,
+        'dosage':            dosage,
+        'instructions':      instructions,
+        'patient_name':      None,
+        'prescription_date': None,
+        'ward':              None,
+        'raw_text':          raw_text,
+    }
 
 
 @dataclass(frozen=True)
@@ -324,8 +362,6 @@ class MotionSequenceNode(Node):
         self.declare_parameter('carry_rx', 90.0)
         self.declare_parameter('carry_ry', -180.0)
         self.declare_parameter('enable_orientation_correction', True)
-        # 테스트용 — OCR/Groq 호출 없이 13.5단계를 항상 MATCHED로 처리(팔레타이징 단독 검증용).
-        self.declare_parameter('force_ocr_match', True)
         # Clients
         self._home_cli   = self.create_client(Home, '/arm/home', callback_group=self._cb_group)
         self._movel      = ActionClient(self, MoveL, '/arm/move_l', callback_group=self._cb_group)
@@ -1031,59 +1067,39 @@ class MotionSequenceNode(Node):
             return None
 
     def _ocr_and_parse(self) -> dict | None:
-        """카메라 스냅샷 → Groq llama-4-scout (이미지 직접 전달) → JSON 파싱 → ROS 토픽 발행."""
-        if not _GROQ_AVAILABLE:
-            self.get_logger().error('[OCR] groq 패키지 미설치: pip install groq')
-            return None
+        """카메라 스냅샷 → Google Cloud Vision OCR → 구조화 파싱 → ROS 토픽 발행.
 
+        인증: GOOGLE_APPLICATION_CREDENTIALS 미설정 시 GOOGLE_CREDENTIALS_PATH를 자동 사용.
+        """
         self.get_logger().info('[OCR] 카메라 스냅샷 취득...')
         img = self._capture_image()
         if img is None:
             return None
 
-        self.get_logger().info('[OCR] Groq llama-4-scout 비전 분석 중...')
+        self.get_logger().info('[OCR] Google Cloud Vision OCR 분석 중...')
         try:
-            img_b64 = base64.b64encode(img).decode()
-            client = _Groq(api_key=GROQ_API_KEY)
-            chat = client.chat.completions.create(
-                model='meta-llama/llama-4-scout-17b-16e-instruct',
-                max_tokens=512,
-                messages=[{
-                    'role': 'user',
-                    'content': [
-                        {
-                            'type': 'image_url',
-                            'image_url': {'url': f'data:image/jpeg;base64,{img_b64}'},
-                        },
-                        {
-                            'type': 'text',
-                            'text': (
-                                '이 약품 라벨에서 텍스트를 읽어서 아래 JSON 형식으로만 반환하세요. '
-                                '다른 설명 없이 유효한 JSON만 출력하세요.\n'
-                                '{\n'
-                                '  "medicine_name": "약품명",\n'
-                                '  "dosage": "용량",\n'
-                                '  "instructions": "복용법",\n'
-                                '  "patient_name": "환자명 또는 null",\n'
-                                '  "prescription_date": "처방일 또는 null",\n'
-                                '  "ward": "병동 또는 null",\n'
-                                '  "raw_text": "이미지에서 읽은 텍스트 전체"\n'
-                                '}'
-                            ),
-                        },
-                    ],
-                }],
+            if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = GOOGLE_CREDENTIALS_PATH
+            import google.auth
+            from google.cloud import vision as _vision
+            credentials, _ = google.auth.default(
+                scopes=['https://www.googleapis.com/auth/cloud-platform'],
+                quota_project_id=GOOGLE_PROJECT_ID,
             )
-            text = chat.choices[0].message.content.strip()
-            if '```' in text:
-                text = text.split('```')[1]
-                if text.startswith('json'):
-                    text = text[4:]
-                text = text.strip()
-            result = json.loads(text)
+            client = _vision.ImageAnnotatorClient(credentials=credentials)
+            image = _vision.Image(content=img)
+            response = client.document_text_detection(
+                image=image,
+                image_context={'language_hints': ['ko', 'en']},
+            )
+            if response.error.message:
+                raise RuntimeError(response.error.message)
+            raw_text = response.full_text_annotation.text.strip()
         except Exception as e:
-            self.get_logger().error(f'[OCR] Groq 비전 호출 실패: {e}')
+            self.get_logger().error(f'[OCR] Google Cloud Vision 호출 실패: {e}')
             return None
+
+        result = _parse_medicine_label(raw_text)
 
         self.get_logger().info(f'[OCR] 파싱 결과: {result}')
         self._last_ocr_medicine_name = result.get('medicine_name') or None
@@ -1550,15 +1566,7 @@ class MotionSequenceNode(Node):
 
         # 13.5. OCR & JSON 파싱
         if not self._wait_for_step('13.5. OCR & JSON 파싱'): return False
-        if bool(self.get_parameter('force_ocr_match').value):
-            self.get_logger().info(
-                '[OCR] force_ocr_match=true — Groq/hospital_web 호출 생략, MATCHED로 강제 처리'
-            )
-            self._step_info_pub.publish(String(data='OCR:{"forced":"MATCHED"}'))
-            self._last_ocr_medicine_name = None   # next_slot()이 첫 미배치 슬롯을 쓰도록
-            ocr_status = 'MATCHED'
-        else:
-            ocr_status = self._ocr_and_parse()
+        ocr_status = self._ocr_and_parse()
 
         # [핵심] OCR 결과 분기 — 관리자 확인 없이 자동으로 판단한다.
         #   MATCHED      → 배송 박스로 이동 (14~18)
