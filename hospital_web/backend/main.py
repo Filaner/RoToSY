@@ -221,9 +221,38 @@ async def camera_detections() -> dict:
     """Compatibility YOLO detections endpoint previously owned by web_interface."""
     return {
         'detections': cam_module.camera.get_detections(),
+        'top_faces': cam_module.camera.get_top_faces(),
+        'active_drawer': cam_module.camera.get_active_drawer(),
         'model_loaded': cam_module.camera.detector_loaded,
         'error': cam_module.camera.detector_error,
     }
+
+
+@app.get('/camera/top_faces')
+async def camera_top_faces() -> dict:
+    """Detected medicine top-face polygons and base-frame centers."""
+    return {
+        'top_faces': cam_module.camera.get_top_faces(),
+        'active_drawer': cam_module.camera.get_active_drawer(),
+        'error': cam_module.camera.error,
+    }
+
+
+@app.post('/camera/active_drawer/{drawer_id}')
+async def camera_set_active_drawer(drawer_id: int) -> dict:
+    """Set drawer context for size-prior top-face detection."""
+    try:
+        cam_module.camera.set_active_drawer(drawer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {'success': True, 'active_drawer': cam_module.camera.get_active_drawer()}
+
+
+@app.delete('/camera/active_drawer')
+async def camera_clear_active_drawer() -> dict:
+    """Clear drawer context for size-prior top-face detection."""
+    cam_module.camera.set_active_drawer(None)
+    return {'success': True, 'active_drawer': None}
 
 
 @app.get('/camera/snapshot')
