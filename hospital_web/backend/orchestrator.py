@@ -371,6 +371,7 @@ async def _wait_for_pick_result(timeout_sec: float = 300.0) -> None:
                 raise MissionConflictError('사용자 취소')
         robot = robot_proxy.get_robot_state()
         step = str(robot.get('seq_step') or '')
+        previous_step = last_step
         if step and step != last_step:
             last_step = step
             _set(message=f'로봇 단계: {step}')
@@ -379,7 +380,7 @@ async def _wait_for_pick_result(timeout_sec: float = 300.0) -> None:
             raise CameraUnavailableError(step)
         if step.startswith('ROLLBACK:'):
             raise OcrMismatchError(step)
-        if step == 'IDLE' and last_step and last_step != 'IDLE':
+        if step == 'IDLE' and previous_step and previous_step != 'IDLE':
             return
         await asyncio.sleep(0.5)
     raise TimeoutError('로봇팔 피킹 타임아웃')

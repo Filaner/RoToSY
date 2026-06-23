@@ -86,8 +86,9 @@
 
 <div class="statusbar">
   <div class="item"><span class="dot on"></span> hospital_web (8080)</div>
-  <div class="item"><span class="dot" id="dotRobot"></span> web_interface / RoToSY (8000): <b id="robotOnline">확인 중</b></div>
+  <div class="item"><span class="dot" id="dotRobot"></span> Robot bridge (hospital_web): <b id="robotOnline">확인 중</b></div>
   <div class="item">모션 단계: <b id="motionStep">-</b></div>
+  <div class="item">오케스트레이션: <b id="orchPhase">-</b></div>
   <div class="item">전자석: <b id="magnetOn">-</b></div>
   <div class="item">AMR: <b id="amrStatus">-</b></div>
   <div class="item">마커 큐: <b id="markerQueue">-</b></div>
@@ -108,7 +109,7 @@
     </div>
 
     <div class="card">
-      <h2>② 로봇 피킹 진행 <span class="role">(web_interface :8000 마커 큐)</span></h2>
+      <h2>② 로봇 피킹 진행 <span class="role">(hospital_web ROS bridge 마커 큐)</span></h2>
       <div class="toolbar">
         <button class="btn-robot" id="btnAutoNext">다음 약품 집기 (auto/next)</button>
         <button class="btn-danger" id="btnAutoStop">피킹 중단 (auto/stop)</button>
@@ -182,7 +183,7 @@ async function api(method, path, body) {
   return data;
 }
 
-// ── 실시간 연결 상태 (web_interface :8000 데이터를 hospital_web의 /ws에서 그대로 가져옴) ──
+// ── 실시간 연결 상태 (hospital_web /ws 통합 상태) ──
 let lastMarkerQueue = { markers: [], labels: [], index: 0 };
 
 function connectWs() {
@@ -190,8 +191,12 @@ function connectWs() {
   ws.onmessage = (ev) => {
     const d = JSON.parse(ev.data);
     $('#dotRobot').className = 'dot ' + (d.robot_online ? 'on' : 'off');
-    $('#robotOnline').textContent = d.robot_online ? '온라인' : '오프라인 (8000 미연결)';
+    $('#robotOnline').textContent = d.robot_online ? '온라인' : '오프라인 (Robot bridge 미연결)';
     $('#motionStep').textContent = d.motion_step || '-';
+    const orch = d.orchestrator || {};
+    $('#orchPhase').textContent = orch.running
+      ? `진행 중 (${orch.phase || '-'})`
+      : (orch.error ? `${orch.phase || 'FAILED'}: ${orch.error}` : (orch.phase || '-'));
     $('#magnetOn').textContent = d.magnet_on ? 'ON' : 'OFF';
     $('#amrStatus').textContent = (d.amr && d.amr.status) || '-';
     const q = d.marker_queue || lastMarkerQueue;
@@ -279,18 +284,10 @@ async function requestDelivery(pid) {
 
 async function startPicking(pid) {
   try {
+    // /start_picking은 오케스트레이터를 비동기로 시작만 시키고 즉시 응답한다.
+    // 실제 성공/실패(FAILED_CAMERA 등)는 상단 '오케스트레이션' 상태바에 /ws로 뒤따라온다.
     const r = await api('POST', `/api/prescription/${pid}/start_picking`);
-    const arm = r.arm_trigger || {};
-    const plan = r.pallet_plan || {};
-    if (arm.success) {
-      toast(`로봇 피킹 트리거 성공 — 미션 ${r.mission.mission_id}` +
-            (plan.ok ? ` / 적재계획 ${plan.placed_count}슬롯` : ' / 적재계획 실패: ' + plan.error));
-    } else {
-      toast(`로봇 피킹 트리거 실패: ${arm.detail || '알 수 없는 오류'} — web_interface(:8000)가 실행 중인지 확인하세요.`, true);
-    }
-    if (r.missing && r.missing.length) {
-      toast(`서랍 미매핑 약품: ${r.missing.join(', ')}`, true);
-    }
+    toast(`피킹 시작 요청됨 — 미션 ${r.mission_id || '-'} (상단 '오케스트레이션' 상태 확인)`);
   } catch (e) {
     toast(`조제시작 실패: ${e.message}`, true);
   }

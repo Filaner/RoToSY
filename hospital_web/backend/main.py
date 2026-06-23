@@ -7,6 +7,8 @@ WebSocket /ws broadcasts combined state at 10 Hz:
 """
 
 import asyncio
+import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Set
@@ -25,12 +27,44 @@ from .routers import (robot, amr, system as sys_router, prescription as presc_ro
                       sensor as sensor_router, vision as vision_router, demo as demo_router,
                       patient as patient_router, medicine as medicine_router, ocr as ocr_router,
                       manual_calib as manual_calib_router, orchestrator as orchestrator_router,
-                      pallet as pallet_router)
+                      pallet as pallet_router, web_compat as web_compat_router)
 from . import sensor_db
 from . import db_schema
 
 STATIC_DIR   = Path(__file__).parent / 'static'
 BROADCAST_HZ = 10
+
+
+# ── 프론트엔드가 주기적으로 폴링하는 조회성 GET은 access log에서 제외 (에러는 그대로 노출) ──
+
+_QUIET_GET_PATHS = {
+    '/camera/markers',
+    '/camera/stream',
+    '/camera/detections',
+    '/camera/snapshot',
+    '/api/ocr/current',
+    '/api/vision/detections',
+    '/api/robot/inverter/status',
+    '/api/system/mission',
+    '/api/system/audit',
+    '/api/prescription',
+}
+
+_ACCESS_LOG_RE = re.compile(r'"(GET|POST|PUT|DELETE|PATCH) (\S+) HTTP/\S+" (\d{3})')
+
+
+class _QuietPollingFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        match = _ACCESS_LOG_RE.search(record.getMessage())
+        if not match:
+            return True
+        method, path, status = match.groups()
+        if method != 'GET' or not status.startswith('2'):
+            return True
+        return path.split('?', 1)[0] not in _QUIET_GET_PATHS
+
+
+logging.getLogger('uvicorn.access').addFilter(_QuietPollingFilter())
 
 
 # ── WebSocket manager ─────────────────────────────────────────────────────────
@@ -133,6 +167,7 @@ app.include_router(ocr_router.router)
 app.include_router(manual_calib_router.router)
 app.include_router(orchestrator_router.router)
 app.include_router(pallet_router.router)
+app.include_router(web_compat_router.router)
 
 if STATIC_DIR.exists():
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')

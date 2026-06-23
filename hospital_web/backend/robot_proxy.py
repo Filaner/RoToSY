@@ -99,6 +99,13 @@ async def post(path: str, body: Optional[dict] = None) -> dict:
         if path == '/api/gripper/off':
             return await node.call_magnet(False)
 
+        if path == '/api/inverter/freq':
+            node.publish_inverter_freq(int(body.get('freq', 0)))
+            return {'success': True}
+        if path == '/api/inverter/run':
+            node.publish_inverter_run(bool(body.get('run')))
+            return {'success': True}
+
         if path == '/api/jog_cart':
             axis = body.get('axis', 0)
             if isinstance(axis, str):
