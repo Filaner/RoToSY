@@ -95,6 +95,8 @@ async def get_detections():
     return {
         'timestamp': datetime.datetime.now().isoformat(),
         'detections': cam_module.camera.get_detections(),
+        'top_faces': cam_module.camera.get_top_faces(),
+        'active_drawer': cam_module.camera.get_active_drawer(),
         'model_loaded': cam_module.camera.detector_loaded,
         'status': 'ONLINE' if cam_module.camera.detector_loaded and not error else 'OFFLINE',
         'error': error,
@@ -108,3 +110,28 @@ async def get_markers():
         'markers': cam_module.camera.get_aruco_markers(),
         'error': cam_module.camera.error,
     }
+
+
+@router.get('/top_faces')
+async def get_top_faces():
+    return {
+        'timestamp': datetime.datetime.now().isoformat(),
+        'top_faces': cam_module.camera.get_top_faces(),
+        'active_drawer': cam_module.camera.get_active_drawer(),
+        'error': cam_module.camera.error,
+    }
+
+
+@router.post('/active_drawer/{drawer_id}')
+async def set_active_drawer(drawer_id: int):
+    try:
+        cam_module.camera.set_active_drawer(drawer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {'success': True, 'active_drawer': cam_module.camera.get_active_drawer()}
+
+
+@router.delete('/active_drawer')
+async def clear_active_drawer():
+    cam_module.camera.set_active_drawer(None)
+    return {'success': True, 'active_drawer': None}

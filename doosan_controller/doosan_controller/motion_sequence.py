@@ -42,6 +42,7 @@ HOSPITAL_WEB_BASE_URL = os.environ.get('HOSPITAL_WEB_BASE_URL', 'http://localhos
 CAMERA_API          = f'{HOSPITAL_WEB_BASE_URL}/camera/markers'
 MEDICINE_DETECTION_API = f'{HOSPITAL_WEB_BASE_URL}/camera/detections'
 CAMERA_SNAPSHOT_API = f'{HOSPITAL_WEB_BASE_URL}/camera/snapshot_raw'
+CAMERA_ACTIVE_DRAWER_API = f'{HOSPITAL_WEB_BASE_URL}/camera/active_drawer'
 OCR_VERIFY_API      = f'{HOSPITAL_WEB_BASE_URL}/api/ocr/verify'
 PALLET_PLAN_API     = f'{HOSPITAL_WEB_BASE_URL}/api/pallet/plan'
 PALLET_PLACED_API   = f'{HOSPITAL_WEB_BASE_URL}/api/pallet/placed'
@@ -1160,7 +1161,11 @@ class MotionSequenceNode(Node):
         return None
 
     def _get_medicine_target(self, retries: int = 5) -> tuple | None:
-        """hospital_web에서 YOLO로 검출된 약품(medicine, medicine_box) 또는 수액(water_pack)의 베이스 좌표를 취득."""
+        """hospital_web에서 약품 베이스 좌표를 취득.
+
+        보정된 top-face 중심이 있으면 우선 사용하고, 없으면 기존 YOLO bbox 중심
+        좌표로 폴백한다.
+        """
         for attempt in range(retries):
             try:
                 with urllib.request.urlopen(MEDICINE_DETECTION_API, timeout=3) as resp:
@@ -1170,20 +1175,60 @@ class MotionSequenceNode(Node):
                 targets = [
                     d for d in data.get('detections', [])
                     if d['class_name'].lower() in ['medicine', 'medicine_box', 'water_pack']
-                    and d.get('base_position_m') is not None
+                    and (
+                        d.get('base_position_m') is not None
+                        or (d.get('top_face') or {}).get('base_position_m') is not None
+                    )
                 ]
 
                 if targets:
                     # 신뢰도 내림차순 정렬하여 가장 확실한 대상을 선택
                     targets.sort(key=lambda x: x['confidence'], reverse=True)
-                    best = targets[0]['base_position_m']
-                    self.get_logger().info(f"Target found: {targets[0]['class_name']} (conf: {targets[0]['confidence']:.2f})")
+                    target = targets[0]
+                    top_face = target.get('top_face') or {}
+                    best = top_face.get('base_position_m') or target['base_position_m']
+                    source = 'top_face' if top_face.get('base_position_m') else 'bbox_center'
+                    self.get_logger().info(
+                        f"Target found: {target['class_name']} "
+                        f"(conf: {target['confidence']:.2f}, source={source})"
+                    )
                     # m -> mm 변환
                     return best[0] * 1000.0, best[1] * 1000.0, best[2] * 1000.0
             except Exception as e:
                 self.get_logger().warning(f'목표 좌표 취득 시도 {attempt+1}: {e}')
             time.sleep(0.5)
         return None
+
+    def _set_camera_active_drawer(self, drawer_number: int) -> None:
+        """Tell hospital_web which drawer's medicine size prior should be used."""
+        try:
+            req = urllib.request.Request(
+                f'{CAMERA_ACTIVE_DRAWER_API}/{drawer_number}',
+                data=b'',
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                json.loads(resp.read())
+            self.get_logger().info(f'[Vision] active drawer context set: {drawer_number}')
+        except Exception as exc:
+            self.get_logger().warning(
+                f'[Vision] active drawer context update failed: {exc}'
+            )
+
+    def _clear_camera_active_drawer(self) -> None:
+        try:
+            req = urllib.request.Request(
+                CAMERA_ACTIVE_DRAWER_API,
+                data=b'',
+                method='DELETE',
+            )
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                json.loads(resp.read())
+            self.get_logger().info('[Vision] active drawer context cleared')
+        except Exception as exc:
+            self.get_logger().warning(
+                f'[Vision] active drawer context clear failed: {exc}'
+            )
 
     def _on_missing_medicine(
         self,
@@ -1680,6 +1725,8 @@ class MotionSequenceNode(Node):
     def run_sequence(self, drawer_index: int, radius_mm: float):
         self._is_running = True
         try:
+            self._set_camera_active_drawer(drawer_index + 1)
+
             # 1. 홈
             self._set_plc_coil(0x20, True)   # M20 ON — 시퀀스 시작
             if not self._wait_for_step('1. 홈 이동'): return
@@ -1757,6 +1804,7 @@ class MotionSequenceNode(Node):
         except Exception as e:
             self.get_logger().error(f'Sequence error: {e}')
         finally:
+            self._clear_camera_active_drawer()
             self._set_plc_coil(0x20, False)  # M20 OFF — 정상/중단/예외 모든 경로에서 종료 보장
             self._is_running = False
             self._step_info_pub.publish(String(data='IDLE'))
