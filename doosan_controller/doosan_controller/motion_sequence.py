@@ -223,6 +223,7 @@ MOTION_PROFILES: dict[str, MotionProfile] = {
 
 BLEND_PROFILES: dict[str, float] = {
     'NONE': 0.0,
+    'TINY' : 5.0,
     'SMALL': 10.0,
     'ARC': 20.0,
 }
@@ -359,9 +360,8 @@ class MotionSequenceNode(Node):
         self._cb_group = ReentrantCallbackGroup()
         self._topic_prefix = topic_prefix.strip('/') or DEFAULT_MOTION_TOPIC_PREFIX
 
-        # 팔레타이징 (PALLETIZING.md) 파라미터 — enable_palletizing 켜면 14~18단계가
-        # 고정좌표 대신 _deliver_palletizing()(DB 연계 병동 박스 배치)로 동작한다.
-        self.declare_parameter('enable_palletizing', True)
+        # 팔레타이징 (PALLETIZING.md) 파라미터 — OCR 일치 시 14~18단계는 항상 DB 연계
+        # plan에 따라 병동 박스의 계산된 슬롯에 배치한다(고정좌표 경로 없음).
         self.declare_parameter('box_staging_joints',
                                 [31.04, 48.6, 38.63, 0.0, 92.77, -58.96])
         self.declare_parameter('approach_clearance_mm', 150.0)
@@ -1257,110 +1257,6 @@ class MotionSequenceNode(Node):
             self.get_logger().warning(f'[팔레타이징] 배치 완료 보고 실패: {e}')
             return False
 
-    def _deliver_palletizing(self, pre_movec_pos: tuple) -> bool:
-        """14~18단계 대체: DB 연계 적재 plan에 따라 병동 박스의 계산된 슬롯에 배치한다.
-
-        흐름(PALLETIZING.md P1~P7): 그리퍼 yaw 측정 → 박스 staging 자세 →
-        plan에서 다음 슬롯 조회 → 박스 마커로 theta_box/center 측정(캐시) →
-        슬롯 좌표 계산 → XY+회전 정렬 → Z 하강 → 전자석 OFF → 상승 → 배치 보고 →
-        MoveC 전 위치로 복귀.
-        """
-        from .palletizing_planner import compute_placement, next_slot
-
-        theta_item = self._get_grasped_yaw()   # P1
-
-        staging = list(self.get_parameter('box_staging_joints').value)
-        if not self._wait_for_step('14. 병동 박스 staging 자세로 이동'): return False
-        if not self._move_j(staging, profile='TRANSIT'): return False   # P2
-
-        plan = self._fetch_pallet_plan()
-        if plan is None:
-            self._step_info_pub.publish(String(data='팔레타이징 실패 — plan 조회 불가'))
-            return False
-        box = plan['box']
-        slot = next_slot(plan['layout'], self._last_ocr_medicine_name)
-        if slot is None:
-            self.get_logger().error('[팔레타이징] 배치할 슬롯 없음 (전부 배치됨 또는 plan 비어있음)')
-            self._step_info_pub.publish(String(data='팔레타이징 실패 — 빈 슬롯 없음'))
-            return False
-
-        marker_id = box.get('aruco_marker_id')
-        box_pose = self._get_box_pose(int(marker_id)) if marker_id is not None else None
-        if box_pose is not None:
-            theta_box, center = box_pose
-        else:
-            self.get_logger().warning(
-                f'[팔레타이징] 박스 마커 {marker_id} 미검출 — DB origin fallback 사용'
-            )
-            theta_box, center = 0.0, tuple(box['origin'])
-
-        enable_orientation = bool(self.get_parameter('enable_orientation_correction').value)
-        bx, by, _unused_z, rz = compute_placement(
-            slot, box, theta_box, center, theta_item,
-            enable_orientation=enable_orientation,
-        )
-        # Z는 마커 측정값(노이즈가 큼)이 아니라 박스별 calibration 상수(place_floor_z_mm)를 쓴다.
-        # place_floor_z_mm = '높이 0인 품목'이 바닥에 닿는 TCP Z (실측 calibration).
-        # 거기서 이 품목의 적재높이(stack_h_mm, DB에서 받아온 medicine 치수 기반)만큼 덜 내려가고,
-        # 이미 쌓인 다른 품목 위라면 z_offset_mm만큼 추가로 덜 내려간다.
-        place_floor_z = float(self.get_parameter('place_floor_z_mm').value)
-        stack_h_mm = float(slot.get('stack_h_mm', 0.0) or 0.0)
-        z_offset_mm = float(slot.get('z_offset_mm', 0.0) or 0.0)
-        place_z = place_floor_z - stack_h_mm - z_offset_mm
-        clearance = float(self.get_parameter('approach_clearance_mm').value)
-        carry_rx = float(self.get_parameter('carry_rx').value)
-        carry_ry = float(self.get_parameter('carry_ry').value)
-        approach_z = place_z + clearance
-
-        self.get_logger().info(
-            '[팔레타이징 좌표] '
-            f"slot=#{slot['slot_idx']}({slot['medicine_name']}) "
-            f"local=({slot['local_x']:.1f},{slot['local_y']:.1f}) "
-            f"size={slot['w']:.1f}x{slot['h']:.1f} rot_deg={slot.get('rot_deg', 0.0):.1f} "
-            f"stack_h_mm={stack_h_mm:.1f} z_offset_mm={z_offset_mm:.1f} | "
-            f"box_marker={marker_id}({'측정' if box_pose is not None else 'DB origin fallback'}) "
-            f"theta_box={theta_box:.1f} center=({center[0]:.1f},{center[1]:.1f},{center[2]:.1f}) "
-            f"theta_item={theta_item:.1f} | "
-            f"place_floor_z_mm={place_floor_z:.1f} clearance={clearance:.1f} "
-            f"carry_rx={carry_rx:.1f} carry_ry={carry_ry:.1f} | "
-            f"=> approach=({bx:.1f},{by:.1f},{approach_z:.1f}) "
-            f"place=({bx:.1f},{by:.1f},{place_z:.1f}) rz={rz:.1f}"
-        )
-
-        # P3. 슬롯 상공 XY+회전 정렬
-        if not self._wait_for_step(
-            f"14.5 슬롯 #{slot['slot_idx']} 정렬 (X:{bx:.0f}, Y:{by:.0f}, rz:{rz:.0f})"
-        ): return False
-        if not self._move_l(bx, by, approach_z, carry_rx, carry_ry, rz, profile='VISION_ALIGN'):
-            return False
-
-        # P4. Z 하강
-        if not self._wait_for_step(f'15. Z 하강 (목표 Z={place_z:.1f})'): return False
-        if not self._move_l(bx, by, place_z, carry_rx, carry_ry, rz, profile='CONTACT'):
-            return False
-
-        # P5. 전자석 OFF (배치)
-        if not self._wait_for_step('16. 전자석 OFF'): return False
-        if not self._set_magnet(False): return False
-
-        # P6. 상승 + 배치 완료 보고
-        if not self._wait_for_step('17. Z 상승'): return False
-        if not self._move_l(
-            0, 0, clearance, relative=True, profile='LIFT', blend_radius='SMALL',
-        ): return False
-        if self._mark_pallet_placed(slot['slot_idx']):
-            self._step_info_pub.publish(
-                String(data=f"WAIT:슬롯 #{slot['slot_idx']} ({slot['medicine_name']}) 배치 완료")
-            )
-
-        # P7. MoveC 전 위치로 복귀
-        if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return False
-        if not self._move_l(pre_movec_pos[0], pre_movec_pos[1], pre_movec_pos[2],
-                            pre_movec_pos[3], pre_movec_pos[4], pre_movec_pos[5],
-                            profile='TRANSIT',
-                            blend_radius='SMALL'): return False
-        return True
-
     # ── 시퀀스 ───────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -1508,6 +1404,8 @@ class MotionSequenceNode(Node):
         # 그리퍼 길이 97mm + 안전거리 5mm 에, 추가로 12mm 더 깊게 하강 (-12mm 보정)
         gripper_z_offset = 97.0
         target_z = bz + 5.0 + gripper_z_offset - 13.87
+        if drawer_index in (4, 5):   # 캐비닛 5~6번 — 바닥/서랍 구조물 충돌 방지용 Z 하한
+            target_z = max(target_z, 278.0)
         if not self._wait_for_step(f'9. Z 하강 (목표 Z={target_z:.1f})'): return False
         if not self._move_l(
             cx, cy, target_z, 90.0, -180.0, 0.0,
@@ -1591,20 +1489,20 @@ class MotionSequenceNode(Node):
             if not self._move_j(
                 [1.14, 13.16, 122.67, 6.37, -107.20, -180.00],
                 profile='OCR_ROLLBACK',
-                blend_radius='SMALL',
+                blend_radius='TINY',
             ): return False
             if not self._move_j(
                 [-1.49, -15.16, 83.61, 0.0, 21.20, -180.0],
                 profile='OCR_ROLLBACK',
-                blend_radius='SMALL',
+                blend_radius='TINY',
             ): return False
             if not self._move_j(
-                [-66.80, -19.25, 57.07, 0.0, 91.48, -180.0],
+                [-80.0, -19.25, 57.07, 0.0, 90.0, -180.0],
                 profile='OCR_ROLLBACK',
-                blend_radius='SMALL',
+                blend_radius='TINY',
             ): return False
             if not self._move_j(
-                [-84.58, 17.75, 82.87, 0.0, 79.38, -174.58],
+                [-90.0, 17.75, 82.87, 0.0, 80.0, -180.0],
                 profile='OCR_ROLLBACK',
             ): return False
             time.sleep(1.0)
@@ -1613,19 +1511,19 @@ class MotionSequenceNode(Node):
             self._set_inverter_freq(freq=3000)  # 컨베이어 주파수 30Hz
             self._set_inverter_run(True)  # 컨베이어 ON
             if not self._move_j(
-                [-80.0, -19.25, 57.07, 0.0, 91.48, -180.0],
+                [-80.0, -19.25, 57.07, 0.0, 90.0, -180.0],
                 profile='OCR_ROLLBACK',
-                blend_radius='SMALL',
+                blend_radius='TINY',
             ): return False
             if not self._move_j(
-                [-1.49, -15.16, 83.61, 0.0, 21.20, -180.0],
+                [0.0, -15.16, 83.61, 0.0, 21.20, -180.0],
                 profile='OCR_ROLLBACK',
-                blend_radius='SMALL',
+                blend_radius='TINY',
             ): return False
             if not self._move_j(
                 [34.69, 0.76, 77.49, -57.51, 92.50, -180.00],
                 profile='OCR_ROLLBACK',
-                blend_radius='SMALL',
+                blend_radius='TINY',
             ): return False
             if not self._move_j(
                 [32.18, 37.57, 77.48, -75.09, 118.85, -61.10],
@@ -1637,34 +1535,99 @@ class MotionSequenceNode(Node):
 
         if self._stop_requested: return False
 
-        # 14~18: 배송 박스 전달 (롤백 시 건너뜀)
+        # 14~18: 배송 박스 전달 (롤백 시 건너뜀) — 팔레타이징 좌표(DB 연계 plan)로 배치한다.
+        # 흐름(PALLETIZING.md P1~P7): 그리퍼 yaw 측정 → 박스 staging 자세 →
+        # plan에서 다음 슬롯 조회 → 박스 마커로 theta_box/center 측정(캐시) →
+        # 슬롯 좌표 계산 → XY+회전 정렬 → Z 하강 → 전자석 OFF → 상승 → 배치 보고 →
+        # MoveC 전 위치로 복귀.
         if not ocr_rollback:
-            if bool(self.get_parameter('enable_palletizing').value):
-                return self._deliver_palletizing(pre_movec_pos)
+            from .palletizing_planner import compute_placement, next_slot
 
-            # 14. MoveJ 병동 박스 정렬 (고정좌표)
-            if not self._wait_for_step('14. MoveJ 병동 박스 정렬'): return False
-            if not self._move_j(
-                [31.04, 48.6, 38.63, 0.0, 92.77, -58.96],
-                profile='TRANSIT',
+            theta_item = self._get_grasped_yaw()   # P1
+
+            staging = list(self.get_parameter('box_staging_joints').value)
+            if not self._wait_for_step('14. 병동 박스 staging 자세로 이동'): return False
+            if not self._move_j(staging, profile='TRANSIT'): return False   # P2
+
+            plan = self._fetch_pallet_plan()
+            if plan is None:
+                self._step_info_pub.publish(String(data='팔레타이징 실패 — plan 조회 불가'))
+                return False
+            box = plan['box']
+            slot = next_slot(plan['layout'], self._last_ocr_medicine_name)
+            if slot is None:
+                self.get_logger().error('[팔레타이징] 배치할 슬롯 없음 (전부 배치됨 또는 plan 비어있음)')
+                self._step_info_pub.publish(String(data='팔레타이징 실패 — 빈 슬롯 없음'))
+                return False
+
+            marker_id = box.get('aruco_marker_id')
+            box_pose = self._get_box_pose(int(marker_id)) if marker_id is not None else None
+            if box_pose is not None:
+                theta_box, center = box_pose
+            else:
+                self.get_logger().warning(
+                    f'[팔레타이징] 박스 마커 {marker_id} 미검출 — DB origin fallback 사용'
+                )
+                theta_box, center = 0.0, tuple(box['origin'])
+
+            enable_orientation = bool(self.get_parameter('enable_orientation_correction').value)
+            bx, by, _unused_z, rz = compute_placement(
+                slot, box, theta_box, center, theta_item,
+                enable_orientation=enable_orientation,
+            )
+            # Z는 마커 측정값(노이즈가 큼)이 아니라 박스별 calibration 상수(place_floor_z_mm)를 쓴다.
+            # place_floor_z_mm = '높이 0인 품목'이 바닥에 닿는 TCP Z (실측 calibration).
+            # 거기서 이 품목의 적재높이(stack_h_mm, DB에서 받아온 medicine 치수 기반)만큼 덜 내려가고,
+            # 이미 쌓인 다른 품목 위라면 z_offset_mm만큼 추가로 덜 내려간다.
+            place_floor_z = float(self.get_parameter('place_floor_z_mm').value)
+            stack_h_mm = float(slot.get('stack_h_mm', 0.0) or 0.0)
+            z_offset_mm = float(slot.get('z_offset_mm', 0.0) or 0.0)
+            place_z = place_floor_z - stack_h_mm - z_offset_mm
+            clearance = float(self.get_parameter('approach_clearance_mm').value)
+            carry_rx = float(self.get_parameter('carry_rx').value)
+            carry_ry = float(self.get_parameter('carry_ry').value)
+            approach_z = place_z + clearance
+
+            self.get_logger().info(
+                '[팔레타이징 좌표] '
+                f"slot=#{slot['slot_idx']}({slot['medicine_name']}) "
+                f"local=({slot['local_x']:.1f},{slot['local_y']:.1f}) "
+                f"size={slot['w']:.1f}x{slot['h']:.1f} rot_deg={slot.get('rot_deg', 0.0):.1f} "
+                f"stack_h_mm={stack_h_mm:.1f} z_offset_mm={z_offset_mm:.1f} | "
+                f"box_marker={marker_id}({'측정' if box_pose is not None else 'DB origin fallback'}) "
+                f"theta_box={theta_box:.1f} center=({center[0]:.1f},{center[1]:.1f},{center[2]:.1f}) "
+                f"theta_item={theta_item:.1f} | "
+                f"place_floor_z_mm={place_floor_z:.1f} clearance={clearance:.1f} "
+                f"carry_rx={carry_rx:.1f} carry_ry={carry_ry:.1f} | "
+                f"=> approach=({bx:.1f},{by:.1f},{approach_z:.1f}) "
+                f"place=({bx:.1f},{by:.1f},{place_z:.1f}) rz={rz:.1f}"
+            )
+
+            # 14.5. 슬롯 상공 XY+회전 정렬
+            if not self._wait_for_step(
+                f"14.5 슬롯 #{slot['slot_idx']} 정렬 (X:{bx:.0f}, Y:{by:.0f}, rz:{rz:.0f})"
             ): return False
+            if not self._move_l(bx, by, approach_z, carry_rx, carry_ry, rz, profile='VISION_ALIGN'):
+                return False
 
-            # 15. Z -150mm 하강
-            if not self._wait_for_step('15. Z -150mm 하강'): return False
-            if not self._move_l(0, 0, -150, relative=True, profile='CONTACT'): return False
+            # 15. Z 하강
+            if not self._wait_for_step(f'15. Z 하강 (목표 Z={place_z:.1f})'): return False
+            if not self._move_l(bx, by, place_z, carry_rx, carry_ry, rz, profile='CONTACT'):
+                return False
 
             # 16. 전자석 OFF (배치)
             if not self._wait_for_step('16. 전자석 OFF'): return False
             if not self._set_magnet(False): return False
 
-            # 17. Z +150mm 상승
-            if not self._wait_for_step('17. Z +150mm 상승'): return False
+            # 17. Z 상승
+            if not self._wait_for_step('17. Z 상승'): return False
             if not self._move_l(
-                0, 0, 150,
-                relative=True,
-                profile='LIFT',
-                blend_radius='SMALL',
+                0, 0, clearance, relative=True, profile='LIFT', blend_radius='SMALL',
             ): return False
+            if self._mark_pallet_placed(slot['slot_idx']):
+                self._step_info_pub.publish(
+                    String(data=f"WAIT:슬롯 #{slot['slot_idx']} ({slot['medicine_name']}) 배치 완료")
+                )
 
             # 18. MoveC 전 위치로 복귀
             if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return False

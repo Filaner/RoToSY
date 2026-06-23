@@ -1,11 +1,10 @@
 """
 Palletizing Sequence Node — 팔레타이징 전용 진입점(얇은 래퍼).
 
-MotionSequenceNode 를 그대로 쓰되 `enable_palletizing` 파라미터만 켜는 전용 노드.
-실제 동작(픽업→OCR→14~15 사이 슬롯 계산·정렬·배치)은 MotionSequenceNode 안에 있고,
-적재 좌표 알고리즘은 self-contained 모듈 `palletizing_planner` 가 담당한다.
-별도 노드로 둬 독립 실행/관리가 쉽도록 유지한다. (motion_sequence 를
-`-p enable_palletizing:=true` 로 켜도 완전히 동일하게 동작한다.)
+MotionSequenceNode 를 별도 노드 이름/인스턴스 락으로 그대로 실행한다. 팔레타이징
+배치(픽업→OCR→슬롯 계산·정렬→배치)는 MotionSequenceNode 안에서 OCR 일치 시 항상
+동작하고, 적재 좌표 알고리즘은 self-contained 모듈 `palletizing_planner` 가 담당한다.
+별도 노드로 둬 독립 실행/관리가 쉽도록 유지한다.
 
 실행:
   ros2 run doosan_controller palletizing_sequence
@@ -17,7 +16,6 @@ import threading
 
 import rclpy
 from rclpy.executors import MultiThreadedExecutor, ExternalShutdownException
-from rclpy.parameter import Parameter
 
 from .motion_sequence import (
     MotionSequenceNode,
@@ -27,13 +25,11 @@ from .motion_sequence import (
 
 
 class PalletizingSequenceNode(MotionSequenceNode):
-    """`enable_palletizing` 를 켠 MotionSequenceNode (팔레타이징 전용 진입점)."""
+    """팔레타이징 전용 진입점(별도 노드 이름/인스턴스 락의 MotionSequenceNode)."""
 
     def __init__(self, **kwargs):
         super().__init__(node_name='palletizing_sequence_node', **kwargs)
-        # 전용 노드이므로 팔레타이징을 기본으로 켠다.
-        self.set_parameters([Parameter('enable_palletizing', Parameter.Type.BOOL, True)])
-        self.get_logger().info('PalletizingSequenceNode ready (palletizing ON).')
+        self.get_logger().info('PalletizingSequenceNode ready.')
 
 
 def main(args=None):
