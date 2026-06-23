@@ -44,3 +44,8 @@ doosan-robot2/
 
 # Local
 hopital_web/.venv/
+
+# Credentials — never commit
+application_default_credentials.json
+*credentials*.json
+*.token

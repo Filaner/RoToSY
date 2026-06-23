@@ -94,6 +94,7 @@ class CameraManager:
 
         self._lock  = threading.Lock()
         self._jpeg: Optional[bytes] = None
+        self._jpeg_raw: Optional[bytes] = None   # ArUco/YOLO 오버레이 없는 원본 (OCR용)
 
         self._aruco_lock = threading.Lock()
         self._aruco_markers: list = []
@@ -145,6 +146,15 @@ class CameraManager:
     def get_jpeg(self) -> Optional[bytes]:
         with self._lock:
             return self._jpeg
+
+    def get_jpeg_raw(self) -> Optional[bytes]:
+        """ArUco/YOLO 오버레이가 그려지지 않은 원본 프레임 (OCR 입력용).
+
+        OCR(Google Vision)이 디버그 오버레이 텍스트(ID/좌표/신뢰도)를 약품
+        라벨 텍스트와 함께 읽어 줄 순서를 뒤섞는 문제가 있어 별도로 둔다.
+        """
+        with self._lock:
+            return self._jpeg_raw
 
     def get_aruco_markers(self) -> list:
         with self._aruco_lock:
@@ -475,6 +485,11 @@ class CameraManager:
                     depth_data = np.asanyarray(depth_filtered.get_data()).copy()
                     raw_frame  = np.asanyarray(color_frame.get_data()).copy()
                     frame      = raw_frame.copy()
+
+                    ok_raw, jpeg_raw = cv2.imencode('.jpg', raw_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                    if ok_raw:
+                        with self._lock:
+                            self._jpeg_raw = jpeg_raw.tobytes()
 
                     markers_out: list = []
 

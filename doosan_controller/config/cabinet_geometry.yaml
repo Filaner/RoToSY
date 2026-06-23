@@ -25,6 +25,7 @@ cabinet_geometry:
   column_pitch_mm: 230.0
   row_pitch_mm: 110.0
   approach_mm: 30.0
+  release_retreat_mm: 40.0
   pull_mm: 200.0
   gripper_length_mm: 97.0
 

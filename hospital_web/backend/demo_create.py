@@ -143,6 +143,83 @@ PRESCRIPTIONS = [
             {'name': '벤포벨S', 'confidence': 97, 'qty_detected': 1, 'match': True},
         ],
     },
+    # Single-drug test prescriptions (one of each target medicine)
+    {
+        'code':          'P-TEST01',
+        'patient_chart': 'PT-2026-0042',
+        'doctor':        '김철수',
+        'priority':      'general',
+        'drugs': [
+            {'name': '벤포벨S', 'quantity': 1, 'frequency': '1회'}
+        ],
+        'ocr': {
+            'raw': '벤포벨S 1정',
+            'parsed': [
+                {'name': '벤포벨S', 'qty': 1, 'match': True},
+            ],
+            'confidence': 100,
+        },
+        'vision': [
+            {'name': '벤포벨S', 'confidence': 95, 'qty_detected': 1, 'match': True},
+        ],
+    },
+    {
+        'code':          'P-TEST02',
+        'patient_chart': 'PT-2026-0039',
+        'doctor':        '박민준',
+        'priority':      'general',
+        'drugs': [
+            {'name': '新ビオフェルミンS錠', 'quantity': 1, 'frequency': '1회'}
+        ],
+        'ocr': {
+            'raw': '新ビオフェルミンS錠 1정',
+            'parsed': [
+                {'name': '新ビオフェルミンS錠', 'qty': 1, 'match': True},
+            ],
+            'confidence': 98,
+        },
+        'vision': [
+            {'name': '新ビオフェルミンS錠', 'confidence': 92, 'qty_detected': 1, 'match': True},
+        ],
+    },
+    {
+        'code':          'P-TEST03',
+        'patient_chart': 'PT-2026-0051',
+        'doctor':        '정수진',
+        'priority':      'general',
+        'drugs': [
+            {'name': '유한 비타민C', 'quantity': 1, 'frequency': '1회'}
+        ],
+        'ocr': {
+            'raw': '유한 비타민C 1정',
+            'parsed': [
+                {'name': '유한 비타민C', 'qty': 1, 'match': True},
+            ],
+            'confidence': 99,
+        },
+        'vision': [
+            {'name': '유한 비타민C', 'confidence': 90, 'qty_detected': 1, 'match': True},
+        ],
+    },
+    {
+        'code':          'P-TEST04',
+        'patient_chart': 'PT-2026-0033',
+        'doctor':        '이동훈',
+        'priority':      'general',
+        'drugs': [
+            {'name': 'MEDIPHARMAPLAN', 'quantity': 1, 'frequency': '1회'}
+        ],
+        'ocr': {
+            'raw': 'MEDIPHARMAPLAN 1개',
+            'parsed': [
+                {'name': 'MEDIPHARMAPLAN', 'qty': 1, 'match': True},
+            ],
+            'confidence': 85,
+        },
+        'vision': [
+            {'name': 'MEDIPHARMAPLAN', 'confidence': 70, 'qty_detected': 1, 'match': True},
+        ],
+    },
 ]
 
 CABINETS = [

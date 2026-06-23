@@ -41,7 +41,7 @@ from rotosy_gripper_control.keyboard_electromagnet_gripper import KeyboardElectr
 HOSPITAL_WEB_BASE_URL = os.environ.get('HOSPITAL_WEB_BASE_URL', 'http://localhost:8080')
 CAMERA_API          = f'{HOSPITAL_WEB_BASE_URL}/camera/markers'
 MEDICINE_DETECTION_API = f'{HOSPITAL_WEB_BASE_URL}/camera/detections'
-CAMERA_SNAPSHOT_API = f'{HOSPITAL_WEB_BASE_URL}/camera/snapshot'
+CAMERA_SNAPSHOT_API = f'{HOSPITAL_WEB_BASE_URL}/camera/snapshot_raw'
 OCR_VERIFY_API      = f'{HOSPITAL_WEB_BASE_URL}/api/ocr/verify'
 PALLET_PLAN_API     = f'{HOSPITAL_WEB_BASE_URL}/api/pallet/plan'
 PALLET_PLACED_API   = f'{HOSPITAL_WEB_BASE_URL}/api/pallet/placed'
@@ -78,7 +78,16 @@ def _within_joint_limits(joints: list) -> bool:
     return all(lo <= j <= hi for j, (lo, hi) in zip(joints, JOINT_LIMITS_DEG))
 
 
-_ARUCO_LINE_RE = re.compile(r'^ID\s*\d+\s*\([-\d,\s]+\)mm', re.IGNORECASE)
+# 카메라 디버그 오버레이 텍스트 줄 (ArUco/YOLO/TOP face 라벨). 정상적으로는 OCR이
+# /camera/snapshot_raw(오버레이 없는 원본)를 사용하므로 나타나지 않아야 하지만,
+# 폴백 시에도 약품명으로 잘못 채택되지 않도록 안전망으로 남겨둔다. OCR이 숫자/공백
+# 순서를 뒤섞는 경우(예: "ID (80,-218,467)mm")까지 포함해 매칭한다.
+_ARUCO_LINE_RE = re.compile(
+    r'^(?:id\s*[=:]?\s*\d*\s*\(?[-\d,\s]*\)?\s*(?:mm)?'  # ID 1 (x,y,z)mm / id=1 / ID (x,y,z)mm
+    r'|top\s*\d+\s*\([-\d,\s]+\)mm'                       # TOP 1 (x,y,z)mm
+    r'|\d+(?:\.\d+)?\s*\([-\d,\s]+\)mm)$',                 # YOLO "0.86 (x,y,z)mm"
+    re.IGNORECASE,
+)
 
 
 def _parse_medicine_label(raw_text: str) -> dict:
@@ -235,6 +244,7 @@ DEFAULT_CABINET_GEOMETRY = {
     'column_pitch_mm': 227.0,
     'row_pitch_mm': 112.0,
     'approach_mm': 30.0,
+    'release_retreat_mm': 40.0,
     'pull_mm': 200.0,
     'gripper_length_mm': 97.0,
 }
@@ -1090,7 +1100,7 @@ class MotionSequenceNode(Node):
             image = _vision.Image(content=img)
             response = client.document_text_detection(
                 image=image,
-                image_context={'language_hints': ['ko', 'en']},
+                image_context={'language_hints': ['ko', 'ja', 'en']},
             )
             if response.error.message:
                 raise RuntimeError(response.error.message)
@@ -1748,12 +1758,13 @@ class MotionSequenceNode(Node):
             if not self._wait_for_step('6. 전자석 OFF'): return
             if not self._set_magnet(False): return
 
-            # 7. 열린 서랍 손잡이에서 30mm 후퇴
+            # 7. 열린 서랍 손잡이에서 후퇴
+            retreat_mm = float(self._cabinet_geometry['release_retreat_mm'])
             released_target = tuple(
-                pull_target[i] + pull_dir[i] * float(self._cabinet_geometry['approach_mm'])
+                pull_target[i] + pull_dir[i] * retreat_mm
                 for i in range(3)
             )
-            if not self._wait_for_step('7. 손잡이에서 30mm 후퇴'): return
+            if not self._wait_for_step(f'7. 손잡이에서 {retreat_mm:.0f}mm 후퇴'): return
             if not self._move_l(
                 *released_target, 90.0, -90.0, 0.0,
                 blend_radius='SMALL',

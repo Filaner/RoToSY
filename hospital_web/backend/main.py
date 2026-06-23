@@ -42,6 +42,7 @@ _QUIET_GET_PATHS = {
     '/camera/stream',
     '/camera/detections',
     '/camera/snapshot',
+    '/camera/snapshot_raw',
     '/api/ocr/current',
     '/api/vision/detections',
     '/api/robot/inverter/status',
@@ -229,6 +230,15 @@ async def camera_detections() -> dict:
 async def camera_snapshot():
     """Compatibility latest JPEG snapshot endpoint previously owned by web_interface."""
     frame = cam_module.camera.get_jpeg()
+    if frame is None:
+        raise HTTPException(status_code=503, detail='카메라 프레임 없음')
+    return Response(content=frame, media_type='image/jpeg')
+
+
+@app.get('/camera/snapshot_raw')
+async def camera_snapshot_raw():
+    """ArUco/YOLO 오버레이 없는 원본 프레임 (OCR 전용)."""
+    frame = cam_module.camera.get_jpeg_raw()
     if frame is None:
         raise HTTPException(status_code=503, detail='카메라 프레임 없음')
     return Response(content=frame, media_type='image/jpeg')
