@@ -54,7 +54,7 @@ def _match_name(detected: str, expected: str) -> bool:
 
 def verify_and_save(ocr_result: dict) -> dict:
     """
-    ocr_result: Groq llama-4-scout가 반환한 dict
+    ocr_result: Google Cloud Vision OCR 파싱 결과 dict
       { medicine_name, dosage, instructions, patient_name,
         prescription_date, ward, raw_text }
 
@@ -107,12 +107,11 @@ def verify_and_save(ocr_result: dict) -> dict:
         if not items:
             mismatch_reason = '처방 품목 없음 (미션 또는 처방 미연결)'
             match_status = 'UNKNOWN'
-        elif not detected_name:
-            mismatch_reason = 'OCR에서 약품명 미감지'
-            match_status = 'UNKNOWN'
         else:
+            # 처방 품목명이 OCR 텍스트(파싱명 또는 raw_text 전체)에 포함되는지 확인
             for item in items:
-                if _match_name(detected_name, item['medicine_name']):
+                if (_match_name(detected_name, item['medicine_name'])
+                        or _match_name(raw_text, item['medicine_name'])):
                     matched_item_id = item['id']
                     matched_item = {
                         'id':            item['id'],
@@ -127,10 +126,10 @@ def verify_and_save(ocr_result: dict) -> dict:
             if match_status != 'MATCHED':
                 expected_names = [i['medicine_name'] for i in items]
                 mismatch_reason = (
-                    f'감지된 약품 "{detected_name}"이 '
+                    f'감지된 약품 "{detected_name or "(미감지)"}"이 '
                     f'처방 목록 {expected_names}에 없음'
                 )
-                match_status = 'MISMATCH'
+                match_status = 'MISMATCH' if (detected_name or raw_text) else 'UNKNOWN'
 
         # ocr_scan 저장
         c.execute(

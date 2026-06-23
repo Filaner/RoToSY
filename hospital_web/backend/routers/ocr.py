@@ -9,7 +9,7 @@ router = APIRouter(prefix='/api/ocr', tags=['ocr'])
 
 
 class VerifyReq(BaseModel):
-    """Groq llama-4-scout가 반환한 OCR 파싱 결과."""
+    """Google Cloud Vision OCR 파싱 결과."""
     medicine_name:     str | None = ''
     dosage:            str | None = ''
     instructions:      str | None = ''
