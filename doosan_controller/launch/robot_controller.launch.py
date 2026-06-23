@@ -252,7 +252,7 @@ def generate_launch_description() -> LaunchDescription:
         actions=[
             ExecuteProcess(
                 cmd=[
-                    'python3', '-m', 'uvicorn',
+                    '/usr/bin/python3', '-m', 'uvicorn',
                     'backend.main:app',
                     '--host', '0.0.0.0',
                     '--port', LaunchConfiguration('hospital_web_port'),

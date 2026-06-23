@@ -362,7 +362,11 @@ class ArmControllerNode(Node):
 
     def _do_servo_on(self):
         """
-        SAFE_OFF → STANDBY 전환 (서보 ON).
+        서보 ON 진입점. 로봇 현재 상태에 따라 적절한 복구 시퀀스를 선택한다.
+
+          NOT_READY / INITIALIZING → CONTROL_ENABLE_OPERATION(1) → STANDBY
+          SAFE_OFF                 → SetRobotMode(AUTO) + CONTROL_SERVO_ON(3) → STANDBY
+          SAFE_STOP 계열           → /arm/safety_recovery 서비스로 유도
 
         안전 정지(SAFE_STOP / SAFE_STOP2 / SAFE_OFF2 / RECOVERY) 상태에서는
         서보 ON을 거부하고 /arm/safety_recovery 서비스를 사용하도록 안내.
@@ -386,12 +390,16 @@ class ArmControllerNode(Node):
             log.warn(msg)
             return False, msg
 
-        if state not in (STATE_SAFE_OFF, STATE_NOT_READY, STATE_INITIALIZING):
-            msg = f'서보 ON 불가 상태: {STATE_STR.get(state, state)}'
-            log.warn(msg)
-            return False, msg
+        # 부팅 직후 NOT_READY / INITIALIZING → ENABLE_OPERATION(1) 으로 STANDBY 직행
+        if state in (STATE_NOT_READY, STATE_INITIALIZING):
+            return self._recover_not_ready()
 
-        return self._recover_safe_off()
+        if state == STATE_SAFE_OFF:
+            return self._recover_safe_off()
+
+        msg = f'서보 ON 불가 상태: {STATE_STR.get(state, state)}'
+        log.warn(msg)
+        return False, msg
 
     def _set_robot_control(self, control_val: int, label: str) -> bool:
         """SetRobotControl 서비스 호출 헬퍼."""
@@ -416,6 +424,26 @@ class ArmControllerNode(Node):
                 return s
             time.sleep(0.5)
         return self._get_robot_state_now()
+
+    def _recover_not_ready(self):
+        """NOT_READY / INITIALIZING → CONTROL_ENABLE_OPERATION(1) → STANDBY."""
+        log = self.get_logger()
+        log.info('[ServoON] NOT_READY/INITIALIZING → ENABLE_OPERATION 전송')
+
+        self._set_robot_control(CONTROL_ENABLE_OPERATION, 'ENABLE_OPERATION')
+
+        final = self._wait_for_state(STATE_STANDBY, timeout_sec=20.0)
+        if final == STATE_STANDBY:
+            self._robot_state = STATE_STANDBY
+            log.info('[ServoON] NOT_READY 복구 성공 → STANDBY')
+            return True, 'Servo ON successful (via ENABLE_OPERATION)'
+
+        # ENABLE_OPERATION 이후 SAFE_OFF에 머무는 경우 → 추가로 SERVO_ON 시도
+        if final == STATE_SAFE_OFF:
+            log.info('[ServoON] ENABLE_OPERATION 후 SAFE_OFF — SERVO_ON 추가 전송')
+            return self._recover_safe_off()
+
+        return False, f'NOT_READY 복구 실패 — 최종 상태: {STATE_STR.get(final, final)}'
 
     def _recover_safe_off(self):
         """SAFE_OFF → AUTONOMOUS 모드 + SERVO_ON → STANDBY."""

@@ -249,6 +249,18 @@ DEFAULT_CABINET_GEOMETRY = {
     'pull_mm': 200.0,
     'gripper_length_mm': 97.0,
 }
+# 박스 theta_box 고정값. 측면 마커를 카메라가 79° 각도에서 바라봐 회전행렬 노이즈가 심함.
+# None → 회전행렬 기반 계산(+_MARKER_YAW_OFFSET_DEG 보정) 사용.
+# 숫자 → 카메라 회전행렬 무시하고 이 값을 theta_box로 고정 사용.
+_MARKER_THETA_FIXED: dict[int, float | None] = {
+    4: None,    # BOX-A: 별도 캘리브레이션 필요
+    3: 82.0,    # BOX-B: 두 슬롯 독립 역산으로 확인 (2026-06-23)
+}
+_MARKER_YAW_OFFSET_DEG: dict[int, float] = {
+    4: 0.0,    # BOX-A: 회전행렬 기반 보정값 (별도 테스트로 결정)
+    3: 0.0,    # BOX-B: _MARKER_THETA_FIXED 사용 시 미적용
+}
+
 _INSTANCE_LOCK_FD = None
 
 
@@ -1209,12 +1221,20 @@ class MotionSequenceNode(Node):
             return None
 
         R = marker['rotation_matrix_base']
-        theta_box = math.degrees(math.atan2(R[1][0], R[0][0]))
+        theta_detected = math.degrees(math.atan2(R[1][0], R[0][0]))
+        fixed_theta = _MARKER_THETA_FIXED.get(marker_id)
+        if fixed_theta is not None:
+            theta_box = fixed_theta
+        else:
+            yaw_offset = _MARKER_YAW_OFFSET_DEG.get(marker_id, 0.0)
+            theta_box = theta_detected + yaw_offset
         center = (float(marker['x_mm']), float(marker['y_mm']), float(marker['z_mm']))
         self._box_pose_cache[marker_id] = (theta_box, center)
         self.get_logger().info(
             f'[팔레타이징] 박스 마커 {marker_id} 측정·캐시: '
-            f'theta_box={theta_box:.1f}° center=({center[0]:.1f},{center[1]:.1f},{center[2]:.1f})'
+            f'theta_detected={theta_detected:.1f}° '
+            f'theta_box={theta_box:.1f}°{"(고정)" if fixed_theta is not None else ""} '
+            f'center=({center[0]:.1f},{center[1]:.1f},{center[2]:.1f})'
         )
         return self._box_pose_cache[marker_id]
 
@@ -1541,7 +1561,7 @@ class MotionSequenceNode(Node):
         # 슬롯 좌표 계산 → XY+회전 정렬 → Z 하강 → 전자석 OFF → 상승 → 배치 보고 →
         # MoveC 전 위치로 복귀.
         if not ocr_rollback:
-            from .palletizing_planner import compute_placement, next_slot
+            from .palletizing_planner import compute_placement, next_slot, wrap_deg as _wrap_deg
 
             theta_item = self._get_grasped_yaw()   # P1
 
@@ -1561,6 +1581,9 @@ class MotionSequenceNode(Node):
                 return False
 
             marker_id = box.get('aruco_marker_id')
+            # 미션마다 카메라로 신선 측정 (이전 캐시·잘못된 위치 재사용 방지)
+            if marker_id is not None:
+                self._box_pose_cache.pop(int(marker_id), None)
             box_pose = self._get_box_pose(int(marker_id)) if marker_id is not None else None
             if box_pose is not None:
                 theta_box, center = box_pose
@@ -1602,6 +1625,21 @@ class MotionSequenceNode(Node):
                 f"=> approach=({bx:.1f},{by:.1f},{approach_z:.1f}) "
                 f"place=({bx:.1f},{by:.1f},{place_z:.1f}) rz={rz:.1f}"
             )
+
+            # P2.5: staging 자세에서 target rz로 선 회전 — XY 이동 중 IK flip(관절 6 180°) 방지
+            _stg_tcp = self._tcp
+            if _stg_tcp is not None and len(_stg_tcp) >= 6:
+                _delta_rz = _wrap_deg(rz - _stg_tcp[5])
+                if abs(_delta_rz) > 90.0:
+                    self.get_logger().info(
+                        f'[팔레타이징] staging rz={_stg_tcp[5]:.1f}° → place rz={rz:.1f}°'
+                        f' ({_delta_rz:+.1f}°) 제자리 pre-rotate'
+                    )
+                    if not self._move_l(
+                        _stg_tcp[0], _stg_tcp[1], _stg_tcp[2],
+                        _stg_tcp[3], _stg_tcp[4], rz,
+                        profile='VISION_ALIGN',
+                    ): return False
 
             # 14.5. 슬롯 상공 XY+회전 정렬
             if not self._wait_for_step(
