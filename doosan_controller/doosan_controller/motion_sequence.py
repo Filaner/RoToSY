@@ -210,12 +210,12 @@ MOTION_PROFILES: dict[str, MotionProfile] = {
     # OCR 촬영을 위해 카메라 앞으로 이동하는 전용 프로파일 (step 13).
     'OCR_APPROACH': MotionProfile(
         'OCR_APPROACH',
-        joint_vel_deg_s=50.0,
-        joint_acc_deg_s2=100.0,
-        linear_vel_mm_s=72.0,
-        linear_acc_mm_s2=144.0,
-        angular_vel_deg_s=50.0,
-        angular_acc_deg_s2=100.0,
+        joint_vel_deg_s=35.0,
+        joint_acc_deg_s2=70.0,
+        linear_vel_mm_s=42.0,
+        linear_acc_mm_s2=84.0,
+        angular_vel_deg_s=35.0,
+        angular_acc_deg_s2=70.0,
     ),
 
     # OCR 불일치 시 컨베이어로 내려놓는 rollback 블록의 MoveJ 8개 전용.
@@ -224,11 +224,11 @@ MOTION_PROFILES: dict[str, MotionProfile] = {
     'OCR_ROLLBACK': MotionProfile(
         'OCR_ROLLBACK',
         joint_vel_deg_s=40.0,
-        joint_acc_deg_s2=79.0,
-        linear_vel_mm_s=57.0,
-        linear_acc_mm_s2=114.0,
-        angular_vel_deg_s=40.0,
-        angular_acc_deg_s2=79.0,
+        joint_acc_deg_s2=60.0,
+        linear_vel_mm_s=42.0,
+        linear_acc_mm_s2=84.0,
+        angular_vel_deg_s=35.0,
+        angular_acc_deg_s2=70.0,
     ),
 }
 
@@ -1615,20 +1615,25 @@ class MotionSequenceNode(Node):
             if not self._move_j(
                 [1.14, 13.16, 122.67, 6.37, -107.20, -180.00],
                 profile='OCR_ROLLBACK',
-                blend_radius=2.0,
+                blend_radius=0.5,
             ): return False
             if not self._move_j(
                 [-1.49, -15.16, 83.61, 0.0, 21.20, -180.0],
                 profile='OCR_ROLLBACK',
-                blend_radius=2.0 ,
+                blend_radius=0.5 ,
             ): return False
             if not self._move_j(
-                [-80.0, -19.25, 57.07, 0.0, 90.0, -180.0],
+                [-43.83, -23.53, 75.60, 0.53, 27.73, -135.0],
                 profile='OCR_ROLLBACK',
-                blend_radius=2.0,
+                blend_radius=0.5,
             ): return False
             if not self._move_j(
-                [-90.0, 17.75, 82.87, 0.0, 80.0, -180.0],
+                [-80.0, -19.25, 57.07, 0.0, 90.0, -90.0],
+                profile='OCR_ROLLBACK',
+                blend_radius=0.5,
+            ): return False
+            if not self._move_j(
+                [-85.24, 18.0, 82.55, 0.05, 80.07, -85.25],
                 profile='OCR_ROLLBACK',
             ): return False
             time.sleep(1.0)
@@ -1637,19 +1642,24 @@ class MotionSequenceNode(Node):
             self._set_inverter_freq(freq=3000)  # 컨베이어 주파수 30Hz
             self._set_inverter_run(True)  # 컨베이어 ON
             if not self._move_j(
-                [-80.0, -19.25, 57.07, 0.0, 90.0, -180.0],
+                [-80.0, -19.25, 57.07, 0.0, 90.0, -85.25],
                 profile='OCR_ROLLBACK',
-                blend_radius=2.0,
+                blend_radius=0.5,
             ): return False
             if not self._move_j(
-                [0.0, -15.16, 83.61, 0.0, 21.20, -180.0],
+                [-43.83, -23.53, 75.60, 0.53, 27.73, -85.0],
                 profile='OCR_ROLLBACK',
-                blend_radius=2.0,
+                blend_radius=0.5,
             ): return False
             if not self._move_j(
-                [34.69, 0.76, 77.49, -57.51, 92.50, -180.00],
+                [0.0, -15.16, 83.61, 0.0, 21.20, -70.0],
                 profile='OCR_ROLLBACK',
-                blend_radius=2.0,
+                blend_radius=0.5,
+            ): return False
+            if not self._move_j(
+                [34.69, 0.76, 77.49, -57.51, 92.50, -65.0],
+                profile='OCR_ROLLBACK',
+                blend_radius=0.5,
             ): return False
             if not self._move_j(
                 [32.18, 37.57, 77.48, -75.09, 118.85, -61.10],

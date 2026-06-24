@@ -8,6 +8,7 @@
 #
 # 2026-06-23: 서랍 열기 시 Y축 -5mm 과도 이동 확인 → correction_mm[1] +5mm 추가 (7.85 → 12.85).
 # 핸들 목표 Y가 5mm 더 양방향으로 이동해 -Y 과진입이 해소됨.
+# 2026-06-24: 전체 Y 보정 2.85mm로 통일 (2번 실측 기반).
 drawer_tcp_calibration:
   frame: base_link
   step: 3
@@ -17,29 +18,29 @@ drawer_tcp_calibration:
       slot_index: 0
       measured_tcp_mm: [709.03, -202.64, 413.24]
       target_tcp_mm: [697.16, -189.79, 404.25]
-      correction_mm: [-11.87, 12.85, -8.99]
+      correction_mm: [-11.87, 2.85, -8.99]
     drawer_2:
       slot_index: 1
       measured_tcp_mm: [486.11, -188.69, 402.42]
       target_tcp_mm: [486.11, -188.69, 402.42]
-      correction_mm: [-11.87, 12.85, -8.99]
+      correction_mm: [-11.87, 2.85, -8.99]
     drawer_3:
       slot_index: 2
       measured_tcp_mm: [0.0, 0.0, 0.0]
       target_tcp_mm: [0.0, 0.0, 0.0]
-      correction_mm: [-11.87, 12.85, -8.99]
+      correction_mm: [-11.87, 2.85, -8.99]
     drawer_4:
       slot_index: 3
       measured_tcp_mm: [0.0, 0.0, 0.0]
       target_tcp_mm: [0.0, 0.0, 0.0]
-      correction_mm: [-11.87, 12.85, -8.99]
+      correction_mm: [-11.87, 2.85, -8.99]
     drawer_5:
       slot_index: 4
       measured_tcp_mm: [0.0, 0.0, 0.0]
       target_tcp_mm: [0.0, 0.0, 0.0]
-      correction_mm: [-11.87, 12.85, -8.99]
+      correction_mm: [-11.87, 2.85, -8.99]
     drawer_6:
       slot_index: 5
       measured_tcp_mm: [0.0, 0.0, 0.0]
       target_tcp_mm: [0.0, 0.0, 0.0]
-      correction_mm: [-11.87, 12.85, -8.99]
+      correction_mm: [-11.87, 2.85, -8.99]
