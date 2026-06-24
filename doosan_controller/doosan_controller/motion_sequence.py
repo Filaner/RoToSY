@@ -266,7 +266,7 @@ DEFAULT_CABINET_GEOMETRY = {
 # None → 회전행렬 기반 계산(+_MARKER_YAW_OFFSET_DEG 보정) 사용.
 # 숫자 → 카메라 회전행렬 무시하고 이 값을 theta_box로 고정 사용.
 _MARKER_THETA_FIXED: dict[int, float | None] = {
-    4: None,    # BOX-A: 별도 캘리브레이션 필요
+    4: 82.0,    # BOX-A: BOX-B와 동일값 임시 적용 (실측 캘리브레이션 필요)
     3: 82.0,    # BOX-B: 두 슬롯 독립 역산으로 확인 (2026-06-23)
 }
 _MARKER_YAW_OFFSET_DEG: dict[int, float] = {
@@ -1482,7 +1482,7 @@ class MotionSequenceNode(Node):
 
         # 8.5에서 쓸 약품 X,Y 목표 계산.
         # TCP 스윙으로 인한 그리퍼 끝단 Y 오차 수동 보정 (기존 -97mm + 추가 -23mm = -120mm)
-        gripper_x_offset = -8.12
+        gripper_x_offset = 0.0
         gripper_y_offset = -104.0
         target_x = bx + gripper_x_offset
         target_y = by + gripper_y_offset
