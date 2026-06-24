@@ -31,6 +31,7 @@ class PlcControllerNode(Node):
         bytesize = self.get_parameter('bytesize').value
         self._do_start_addr = self.get_parameter('do_start_addr').value
         self._slave_id      = self.get_parameter('slave_id').value
+        self._port          = port
 
         self._client = ModbusSerialClient(
             port=port,
@@ -43,18 +44,36 @@ class PlcControllerNode(Node):
 
         if self._client.connect():
             self.get_logger().info(
-                f'Modbus RTU 연결 성공: {port} '
+                f'[PLC] Modbus RTU 연결 성공: {port} '
                 f'[{baudrate}-{bytesize}{parity}{stopbits}]'
             )
         else:
             self.get_logger().error(
-                f'Modbus RTU 연결 실패: {port} — 배선/포트 상태를 확인하세요'
+                f'[PLC] ★ Modbus RTU 연결 실패: {port} ★ — '
+                f'배선/포트 상태를 확인하세요. 5초마다 재연결 시도합니다.'
             )
 
         self.create_subscription(PlcCommand, '/plc_command', self._cmd_callback, 10)
         self.create_service(PlcSetOutput, '/plc/set_output', self._set_output_cb)
 
+        # 5초마다 미연결 시 자동 재연결 + 상태 출력
+        self.create_timer(5.0, self._connection_check)
+        self.get_logger().info('[PLC] 노드 초기화 완료 — /plc_command 구독 대기 중')
+
     # ── 내부 유틸 ─────────────────────────────────────────────────────────────
+
+    def _connection_check(self):
+        """5초마다 연결 상태를 확인하고, 끊겼으면 재연결을 시도한다."""
+        if self._client.connected:
+            self.get_logger().debug(f'[PLC] 연결 정상: {self._port}')
+            return
+        self.get_logger().warning(f'[PLC] 미연결 ({self._port}) — 재연결 시도...')
+        if self._client.connect():
+            self.get_logger().info(f'[PLC] 재연결 성공: {self._port}')
+        else:
+            self.get_logger().warning(
+                f'[PLC] 재연결 실패: {self._port} — 포트/배선 상태를 확인하세요'
+            )
 
     def _enforce_delay(self):
         elapsed = time.time() - self._last_cmd_time
@@ -104,8 +123,15 @@ class PlcControllerNode(Node):
     # ── 콜백 ─────────────────────────────────────────────────────────────────
 
     def _cmd_callback(self, msg: PlcCommand):
+        self.get_logger().info(
+            f'[PLC 수신] target={msg.target} cmd={msg.command} '
+            f'addr=0x{msg.address:02X} val={msg.value} slave={msg.slave_id}'
+        )
         if not self._ensure_connected():
-            self.get_logger().error('연결 불가 — 명령 무시')
+            self.get_logger().error(
+                f'[PLC] ★ 연결 불가({self._port}) — 명령 무시: '
+                f'{msg.command} addr=0x{msg.address:02X} ★'
+            )
             return
 
         self._enforce_delay()

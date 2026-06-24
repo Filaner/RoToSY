@@ -105,10 +105,17 @@ class KeyboardElectromagnetGripper:
         msg.address  = _M23_COIL_ADDR
         msg.value    = int(enabled)
         msg.slave_id = 1
+        sub_count = self._plc_pub.get_subscription_count()
         self._plc_pub.publish(msg)
         self._node.get_logger().info(
-            f'[PLC] M23(0x{_M23_COIL_ADDR:02X}) → {"ON" if enabled else "OFF"}'
+            f'[PLC→발행] M23(0x{_M23_COIL_ADDR:02X}) → '
+            f'{"ON" if enabled else "OFF"} [구독자: {sub_count}]'
         )
+        if sub_count == 0:
+            self._node.get_logger().warning(
+                '[PLC] ★ /plc_command 구독자 없음 — '
+                'plc_controller_node가 실행 중인지 확인하세요 ★'
+            )
 
         return True
 

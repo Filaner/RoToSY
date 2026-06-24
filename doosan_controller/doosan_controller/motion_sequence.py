@@ -207,6 +207,17 @@ MOTION_PROFILES: dict[str, MotionProfile] = {
         angular_acc_deg_s2=78.0,
     ),
 
+    # OCR 촬영을 위해 카메라 앞으로 이동하는 전용 프로파일 (step 13).
+    'OCR_APPROACH': MotionProfile(
+        'OCR_APPROACH',
+        joint_vel_deg_s=50.0,
+        joint_acc_deg_s2=100.0,
+        linear_vel_mm_s=72.0,
+        linear_acc_mm_s2=144.0,
+        angular_vel_deg_s=50.0,
+        angular_acc_deg_s2=100.0,
+    ),
+
     # OCR 불일치 시 컨베이어로 내려놓는 rollback 블록의 MoveJ 8개 전용.
     # 원래 TRANSIT보다 살짝 더 느리게 (다른 동작들은 전부 조금씩 빨라졌으므로
     # 상대적으로도 가장 느린 동작이 됨).
@@ -234,6 +245,7 @@ BLEND_ALLOWED_MOTION_PROFILES = {
     'APPROACH',
     'LIFT',
     'VISION_ALIGN',
+    'OCR_APPROACH',
     'OCR_ROLLBACK',
 }
 
@@ -260,6 +272,16 @@ _MARKER_THETA_FIXED: dict[int, float | None] = {
 _MARKER_YAW_OFFSET_DEG: dict[int, float] = {
     4: 0.0,    # BOX-A: 회전행렬 기반 보정값 (별도 테스트로 결정)
     3: 0.0,    # BOX-B: _MARKER_THETA_FIXED 사용 시 미적용
+}
+# 카메라 base frame 변환 오차 보정값 (mm).
+# 카메라 검출 center에 더해 로봇 base frame 실측값에 맞춘다.
+# 실측 방법: 로봇 TCP를 마커 정중앙에 위치시켜 읽은 좌표 − 카메라 검출 좌표
+# 카메라 base frame 변환 오차 보정값 (mm).
+# Y: 카메라가 항상 +110mm 과대 측정 (extrinsic 오차, 위치 무관하게 일정함 확인)
+# X: +20mm 보정 (2026-06-24 실측)
+_MARKER_XYZ_CORRECTION_MM: dict[int, tuple[float, float, float]] = {
+    4: (0.0, -110.0, 0.0),   # BOX-A
+    3: (0.0, -110.0, 0.0),   # BOX-B
 }
 
 _INSTANCE_LOCK_FD = None
@@ -855,8 +877,20 @@ class MotionSequenceNode(Node):
 
     def _plc_safety_off(self):
         """서보 OFF 또는 노드 종료 시 PLC 안전 코일 일괄 차단."""
+        self.get_logger().warning('[PLC] 안전 차단 — M20/M21/M23 OFF')
         for addr in (0x20, 0x21, 0x23):
             self._set_plc_coil(addr, False)
+
+    def _publish_plc(self, msg: PlcCommand, label: str) -> None:
+        """PlcCommand를 발행하고, 구독자 수를 포함한 진단 로그를 출력한다."""
+        sub_count = self._plc_pub.get_subscription_count()
+        self._plc_pub.publish(msg)
+        self.get_logger().info(f'[PLC→발행] {label} [구독자: {sub_count}]')
+        if sub_count == 0:
+            self.get_logger().warning(
+                '[PLC] ★ /plc_command 구독자 없음 — '
+                'plc_controller_node가 실행 중인지 확인하세요 ★'
+            )
 
     def _set_plc_coil(self, address: int, value: bool, slave_id: int = 1, target: str = 'PLC'):
         """PLC 코일(M 릴레이) ON/OFF. 주소는 hex 기준 (M20 → 0x20)."""
@@ -866,9 +900,9 @@ class MotionSequenceNode(Node):
         msg.address  = address
         msg.value    = int(value)
         msg.slave_id = slave_id
-        self._plc_pub.publish(msg)
-        self.get_logger().info(
-            f'[PLC] {target} 코일 0x{address:02X} → {"ON" if value else "OFF"}'
+        self._publish_plc(
+            msg,
+            f'{target} coil 0x{address:02X} → {"ON" if value else "OFF"} (slave={slave_id})',
         )
 
     def _set_inverter_freq(self, freq: int):
@@ -876,22 +910,23 @@ class MotionSequenceNode(Node):
         msg = PlcCommand()
         msg.target   = 'INVERTER'
         msg.command  = 'REGISTER'
-        msg.address  = 4          # M100 인버터 주파수 설정 레지스터
+        msg.address  = 4
         msg.value    = freq
-        msg.slave_id = 2          # 인버터 Modbus 국번
-        self._plc_pub.publish(msg)
-        self.get_logger().info(f'[INV] 주파수 설정 → {freq / 100:.2f} Hz')
+        msg.slave_id = 2
+        self._publish_plc(msg, f'인버터 주파수 → {freq / 100:.2f} Hz (reg=4 slave=2)')
 
     def _set_inverter_run(self, run: bool):
         """인버터 RUN(run=True) / STOP(run=False) + PLC M21 연동."""
         msg = PlcCommand()
         msg.target   = 'INVERTER'
         msg.command  = 'REGISTER'
-        msg.address  = 5          # M100 인버터 운전 명령 레지스터
-        msg.value    = 2 if run else 1   # 2=RUN, 1=STOP
+        msg.address  = 5
+        msg.value    = 2 if run else 1
         msg.slave_id = 2
-        self._plc_pub.publish(msg)
-        self.get_logger().info(f'[INV] {"RUN" if run else "STOP"}')
+        self._publish_plc(
+            msg,
+            f'인버터 {"RUN" if run else "STOP"} (reg=5 val={2 if run else 1} slave=2)',
+        )
 
         # M21 연동 (인버터 운전 상태 표시 릴레이)
         time.sleep(0.1)
@@ -1176,7 +1211,9 @@ class MotionSequenceNode(Node):
         """hospital_web에서 약품 베이스 좌표를 취득.
 
         보정된 top-face 중심이 있으면 우선 사용하고, 없으면 기존 YOLO bbox 중심
-        좌표로 폴백한다.
+        좌표로 폴백한다. 여러 약품이 검출되면 표준 ROS camera optical frame의
+        +X(화면 우측) 방향에
+        가장 있는 약품을 선택한다.
         """
         for attempt in range(retries):
             try:
@@ -1194,15 +1231,30 @@ class MotionSequenceNode(Node):
                 ]
 
                 if targets:
-                    # 신뢰도 내림차순 정렬하여 가장 확실한 대상을 선택
-                    targets.sort(key=lambda x: x['confidence'], reverse=True)
+                    # base_position_m의 Y 좌표가 가장 큰 약품을 먼저 집는다.
+                    # Y 좌표가 없는 검출은 신뢰도로만 보조 선택한다.
+                    def target_priority(detection):
+                        top_face = detection.get('top_face') or {}
+                        base_pos = top_face.get('base_position_m') or detection.get('base_position_m')
+                        try:
+                            base_y = float(base_pos[1])
+                        except (TypeError, ValueError, IndexError):
+                            return (0, float('-inf'), detection.get('confidence', 0.0))
+                        if not math.isfinite(base_y):
+                            return (0, float('-inf'), detection.get('confidence', 0.0))
+                        return (1, base_y, detection.get('confidence', 0.0))
+
+                    targets.sort(key=target_priority, reverse=True)
                     target = targets[0]
                     top_face = target.get('top_face') or {}
                     best = top_face.get('base_position_m') or target['base_position_m']
                     source = 'top_face' if top_face.get('base_position_m') else 'bbox_center'
+                    priority = target_priority(target)
+                    base_y = priority[1] if priority[0] else None
                     self.get_logger().info(
                         f"Target found: {target['class_name']} "
-                        f"(conf: {target['confidence']:.2f}, source={source})"
+                        f"(base_y: {base_y}, conf: {target['confidence']:.2f}, "
+                        f"source={source})"
                     )
                     # m -> mm 변환
                     return best[0] * 1000.0, best[1] * 1000.0, best[2] * 1000.0
@@ -1253,35 +1305,44 @@ class MotionSequenceNode(Node):
     # ── 팔레타이징 (PALLETIZING.md) ──────────────────────────────────────────
 
     def _get_box_pose(self, marker_id: int) -> tuple | None:
-        """배송 박스 ArUco 마커에서 (theta_box_deg, center_xyz) 취득, 1회 측정 후 캐시.
+        """배송 박스 ArUco 마커에서 (theta_box_deg, center_xyz) 취득.
 
-        적재가 쌓이면 중앙 마커가 가려질 수 있으므로, 같은 마커를 한 번 측정에
-        성공하면 이후로는 재측정하지 않고 캐시를 재사용한다.
+        매번 신선 탐색을 시도한다.
+        - 탐색 성공: 측정값으로 캐시를 갱신하고 반환.
+        - 탐색 실패: 이전 적재 시 캐시된 값이 있으면 그 값을 재사용.
+        - 캐시도 없음: None 반환 → 호출 측이 DB origin fallback 처리.
         """
-        if marker_id in self._box_pose_cache:
+        marker = self._get_marker(marker_id)
+        if marker is not None:
+            R = marker['rotation_matrix_base']
+            theta_detected = math.degrees(math.atan2(R[1][0], R[0][0]))
+            fixed_theta = _MARKER_THETA_FIXED.get(marker_id)
+            if fixed_theta is not None:
+                theta_box = fixed_theta
+            else:
+                yaw_offset = _MARKER_YAW_OFFSET_DEG.get(marker_id, 0.0)
+                theta_box = theta_detected + yaw_offset
+            raw = (float(marker['x_mm']), float(marker['y_mm']), float(marker['z_mm']))
+            dx, dy, dz = _MARKER_XYZ_CORRECTION_MM.get(marker_id, (0.0, 0.0, 0.0))
+            center = (raw[0] + dx, raw[1] + dy, raw[2] + dz)
+            self._box_pose_cache[marker_id] = (theta_box, center)
+            self.get_logger().info(
+                f'[팔레타이징] 박스 마커 {marker_id} 측정·캐시 갱신: '
+                f'theta_detected={theta_detected:.1f}° '
+                f'theta_box={theta_box:.1f}°{"(고정)" if fixed_theta is not None else ""} '
+                f'raw=({raw[0]:.1f},{raw[1]:.1f},{raw[2]:.1f}) '
+                f'correction=({dx:+.1f},{dy:+.1f},{dz:+.1f}) '
+                f'center=({center[0]:.1f},{center[1]:.1f},{center[2]:.1f})'
+            )
             return self._box_pose_cache[marker_id]
 
-        marker = self._get_marker(marker_id)
-        if marker is None:
-            return None
+        if marker_id in self._box_pose_cache:
+            self.get_logger().warning(
+                f'[팔레타이징] 박스 마커 {marker_id} 미검출 — 이전 측정값 재사용'
+            )
+            return self._box_pose_cache[marker_id]
 
-        R = marker['rotation_matrix_base']
-        theta_detected = math.degrees(math.atan2(R[1][0], R[0][0]))
-        fixed_theta = _MARKER_THETA_FIXED.get(marker_id)
-        if fixed_theta is not None:
-            theta_box = fixed_theta
-        else:
-            yaw_offset = _MARKER_YAW_OFFSET_DEG.get(marker_id, 0.0)
-            theta_box = theta_detected + yaw_offset
-        center = (float(marker['x_mm']), float(marker['y_mm']), float(marker['z_mm']))
-        self._box_pose_cache[marker_id] = (theta_box, center)
-        self.get_logger().info(
-            f'[팔레타이징] 박스 마커 {marker_id} 측정·캐시: '
-            f'theta_detected={theta_detected:.1f}° '
-            f'theta_box={theta_box:.1f}°{"(고정)" if fixed_theta is not None else ""} '
-            f'center=({center[0]:.1f},{center[1]:.1f},{center[2]:.1f})'
-        )
-        return self._box_pose_cache[marker_id]
+        return None
 
     def _get_grasped_yaw(self) -> float:
         """그리퍼로 잡은 약품의 yaw 오차(theta_item).
@@ -1521,20 +1582,20 @@ class MotionSequenceNode(Node):
         if drawer_index in (0, 1):   # 캐비닛 1~2번 — 짧은 경로
             if not self._move_j(
                 [1.67, 8.24, 82.41, 0.0, 0.0, -90.00],
-                profile='TRANSIT', blend_radius='SMALL',
+                profile='OCR_APPROACH', blend_radius='SMALL',
             ): return False
         else:   # 캐비닛 3~6번 — 기존 경로
             if not self._move_j(
                 [-12.78, -20.47, 78.55, 12.02, 67.58, -113.36],
-                profile='TRANSIT', blend_radius='SMALL',
+                profile='OCR_APPROACH', blend_radius='SMALL',
             ): return False
             if not self._move_j(
                 [3.74, 22.84, 111.01, 8.49, -78.55, -90.00],
-                profile='TRANSIT',
+                profile='OCR_APPROACH',
             ): return False
         if not self._move_j(
             [-2.21, 44.37, 61.78, -0.00, -107.20, -90.00],
-            profile='TRANSIT',
+            profile='OCR_APPROACH',
         ): return False
 
         # 13.5. OCR & JSON 파싱
@@ -1554,17 +1615,17 @@ class MotionSequenceNode(Node):
             if not self._move_j(
                 [1.14, 13.16, 122.67, 6.37, -107.20, -180.00],
                 profile='OCR_ROLLBACK',
-                blend_radius='TINY',
+                blend_radius=2.0,
             ): return False
             if not self._move_j(
                 [-1.49, -15.16, 83.61, 0.0, 21.20, -180.0],
                 profile='OCR_ROLLBACK',
-                blend_radius='TINY',
+                blend_radius=2.0 ,
             ): return False
             if not self._move_j(
                 [-80.0, -19.25, 57.07, 0.0, 90.0, -180.0],
                 profile='OCR_ROLLBACK',
-                blend_radius='TINY',
+                blend_radius=2.0,
             ): return False
             if not self._move_j(
                 [-90.0, 17.75, 82.87, 0.0, 80.0, -180.0],
@@ -1578,17 +1639,17 @@ class MotionSequenceNode(Node):
             if not self._move_j(
                 [-80.0, -19.25, 57.07, 0.0, 90.0, -180.0],
                 profile='OCR_ROLLBACK',
-                blend_radius='TINY',
+                blend_radius=2.0,
             ): return False
             if not self._move_j(
                 [0.0, -15.16, 83.61, 0.0, 21.20, -180.0],
                 profile='OCR_ROLLBACK',
-                blend_radius='TINY',
+                blend_radius=2.0,
             ): return False
             if not self._move_j(
                 [34.69, 0.76, 77.49, -57.51, 92.50, -180.00],
                 profile='OCR_ROLLBACK',
-                blend_radius='TINY',
+                blend_radius=2.0,
             ): return False
             if not self._move_j(
                 [32.18, 37.57, 77.48, -75.09, 118.85, -61.10],
@@ -1605,14 +1666,16 @@ class MotionSequenceNode(Node):
         # plan에서 다음 슬롯 조회 → 박스 마커로 theta_box/center 측정(캐시) →
         # 슬롯 좌표 계산 → XY+회전 정렬 → Z 하강 → 전자석 OFF → 상승 → 배치 보고 →
         # MoveC 전 위치로 복귀.
+
+
         if not ocr_rollback:
             from .palletizing_planner import compute_placement, next_slot, wrap_deg as _wrap_deg
 
             theta_item = self._get_grasped_yaw()   # P1
-
-            staging = list(self.get_parameter('box_staging_joints').value)
             if not self._wait_for_step('14. 병동 박스 staging 자세로 이동'): return False
-            if not self._move_j(staging, profile='TRANSIT'): return False   # P2
+            if not self._move_j(
+                [31.04, 48.6, 38.63, 0.0, 92.77, -58.96], profile='TRANSIT',
+            ): return False   # P2
 
             plan = self._fetch_pallet_plan()
             if plan is None:
@@ -1624,17 +1687,17 @@ class MotionSequenceNode(Node):
                 self.get_logger().error('[팔레타이징] 배치할 슬롯 없음 (전부 배치됨 또는 plan 비어있음)')
                 self._step_info_pub.publish(String(data='팔레타이징 실패 — 빈 슬롯 없음'))
                 return False
+            # 패킹 알고리즘이 이 슬롯에 90° 회전을 지정했는지 여부.
+            # 현재는 그리퍼 물리 회전을 수행하지 않으므로 참고/로깅용 flag로만 사용한다.
+            needs_rotation: bool = not bool(slot.get('rot_deg', 0.0))
 
             marker_id = box.get('aruco_marker_id')
-            # 미션마다 카메라로 신선 측정 (이전 캐시·잘못된 위치 재사용 방지)
-            if marker_id is not None:
-                self._box_pose_cache.pop(int(marker_id), None)
             box_pose = self._get_box_pose(int(marker_id)) if marker_id is not None else None
             if box_pose is not None:
                 theta_box, center = box_pose
             else:
                 self.get_logger().warning(
-                    f'[팔레타이징] 박스 마커 {marker_id} 미검출 — DB origin fallback 사용'
+                    f'[팔레타이징] 박스 마커 {marker_id} 미검출·캐시 없음 — DB origin fallback 사용'
                 )
                 theta_box, center = 0.0, tuple(box['origin'])
 
@@ -1652,50 +1715,55 @@ class MotionSequenceNode(Node):
             z_offset_mm = float(slot.get('z_offset_mm', 0.0) or 0.0)
             place_z = place_floor_z - stack_h_mm - z_offset_mm
             clearance = float(self.get_parameter('approach_clearance_mm').value)
-            carry_rx = float(self.get_parameter('carry_rx').value)
-            carry_ry = float(self.get_parameter('carry_ry').value)
             approach_z = place_z + clearance
 
             self.get_logger().info(
                 '[팔레타이징 좌표] '
                 f"slot=#{slot['slot_idx']}({slot['medicine_name']}) "
                 f"local=({slot['local_x']:.1f},{slot['local_y']:.1f}) "
-                f"size={slot['w']:.1f}x{slot['h']:.1f} rot_deg={slot.get('rot_deg', 0.0):.1f} "
+                f"size={slot['w']:.1f}x{slot['h']:.1f} "
+                f"rot_deg={slot.get('rot_deg', 0.0):.1f} needs_rotation={needs_rotation} "
                 f"stack_h_mm={stack_h_mm:.1f} z_offset_mm={z_offset_mm:.1f} | "
                 f"box_marker={marker_id}({'측정' if box_pose is not None else 'DB origin fallback'}) "
                 f"theta_box={theta_box:.1f} center=({center[0]:.1f},{center[1]:.1f},{center[2]:.1f}) "
                 f"theta_item={theta_item:.1f} | "
-                f"place_floor_z_mm={place_floor_z:.1f} clearance={clearance:.1f} "
-                f"carry_rx={carry_rx:.1f} carry_ry={carry_ry:.1f} | "
+                f"place_floor_z_mm={place_floor_z:.1f} clearance={clearance:.1f} | "
                 f"=> approach=({bx:.1f},{by:.1f},{approach_z:.1f}) "
-                f"place=({bx:.1f},{by:.1f},{place_z:.1f}) rz={rz:.1f}"
+                f"place=({bx:.1f},{by:.1f},{place_z:.1f}) rz={rz:.1f} (rot_deg 미적용)"
             )
 
-            # P2.5: staging 자세에서 target rz로 선 회전 — XY 이동 중 IK flip(관절 6 180°) 방지
-            _stg_tcp = self._tcp
-            if _stg_tcp is not None and len(_stg_tcp) >= 6:
-                _delta_rz = _wrap_deg(rz - _stg_tcp[5])
-                if abs(_delta_rz) > 90.0:
-                    self.get_logger().info(
-                        f'[팔레타이징] staging rz={_stg_tcp[5]:.1f}° → place rz={rz:.1f}°'
-                        f' ({_delta_rz:+.1f}°) 제자리 pre-rotate'
-                    )
-                    if not self._move_l(
-                        _stg_tcp[0], _stg_tcp[1], _stg_tcp[2],
-                        _stg_tcp[3], _stg_tcp[4], rz,
-                        profile='VISION_ALIGN',
-                    ): return False
+            # staging 자세([31.04, 48.6, 38.63, 0.0, 92.77, -58.96])의 실측 TCP 위치를
+            # 기준으로 슬롯까지 상대 이동량을 계산한다. self._tcp 읽기 타이밍 오차를
+            # 피하기 위해 실측값을 고정 사용한다.
+            _STG_X, _STG_Y, _STG_Z = 558.94, 336.38, 296.69
+            dx = bx - _STG_X
+            dy = by - _STG_Y
+            dz = approach_z - _STG_Z
 
-            # 14.5. 슬롯 상공 XY+회전 정렬
+            # 14.5. 슬롯 상공 XY+Z 상대 이동 — 현재 자세(아래 바라보기) 유지
             if not self._wait_for_step(
-                f"14.5 슬롯 #{slot['slot_idx']} 정렬 (X:{bx:.0f}, Y:{by:.0f}, rz:{rz:.0f})"
+                f"14.5 슬롯 #{slot['slot_idx']} 정렬 (X:{bx:.0f}, Y:{by:.0f})"
             ): return False
-            if not self._move_l(bx, by, approach_z, carry_rx, carry_ry, rz, profile='VISION_ALIGN'):
+            if not self._move_l(dx, dy, dz, relative=True, profile='VISION_ALIGN'):
                 return False
 
-            # 15. Z 하강
-            if not self._wait_for_step(f'15. Z 하강 (목표 Z={place_z:.1f})'): return False
-            if not self._move_l(bx, by, place_z, carry_rx, carry_ry, rz, profile='CONTACT'):
+            # 14.6. needs_rotation 플래그가 True이면 Joint 6을 -90° 상대 회전
+            if needs_rotation:
+                if not self._wait_joints():
+                    self.get_logger().error('[팔레타이징] 14.6 관절 위치 미수신 — 회전 생략')
+                    return False
+                rot_joints = list(self._joints[:6])
+                rot_joints[5] -= 90.0
+                if not self._wait_for_step(
+                    f"14.6 J6 -90° 회전 ({self._joints[5]:.1f}° → {rot_joints[5]:.1f}°)"
+                ): return False
+                if not self._move_j(rot_joints, profile='VISION_ALIGN'):
+                    return False
+
+            # 15. Z 하강 — 현재 자세 그대로 Z만 내린다 (회전 여부와 무관하게 자세 유지)
+            descent_mm = approach_z - place_z
+            if not self._wait_for_step(f'15. Z 하강 ({descent_mm:.1f}mm)'): return False
+            if not self._move_l(0, 0, -descent_mm, relative=True, profile='CONTACT'):
                 return False
 
             # 16. 전자석 OFF (배치)
@@ -1707,10 +1775,25 @@ class MotionSequenceNode(Node):
             if not self._move_l(
                 0, 0, clearance, relative=True, profile='LIFT', blend_radius='SMALL',
             ): return False
-            if self._mark_pallet_placed(slot['slot_idx']):
-                self._step_info_pub.publish(
-                    String(data=f"WAIT:슬롯 #{slot['slot_idx']} ({slot['medicine_name']}) 배치 완료")
+            # 배치 완료 보고: 실패 시 최대 3회 재시도, 전부 실패하면 중단
+            # (실패 무시 시 배치 배열의 두 번째 픽업이 같은 슬롯을 재선택하는 버그 방지)
+            _mark_ok = False
+            for _mark_try in range(3):
+                if self._mark_pallet_placed(slot['slot_idx']):
+                    _mark_ok = True
+                    break
+                self.get_logger().warning(
+                    f'[팔레타이징] 슬롯 {slot["slot_idx"]} 배치 보고 실패 ({_mark_try + 1}/3회)'
                 )
+                time.sleep(0.3)
+            if not _mark_ok:
+                self.get_logger().error(
+                    f'[팔레타이징] 슬롯 {slot["slot_idx"]} 배치 보고 3회 모두 실패 — 시퀀스 중단'
+                )
+                return False
+            self._step_info_pub.publish(
+                String(data=f"WAIT:슬롯 #{slot['slot_idx']} ({slot['medicine_name']}) 배치 완료")
+            )
 
             # 18. MoveC 전 위치로 복귀
             if not self._wait_for_step('18. MoveC 전 위치로 복귀'): return False
@@ -1781,7 +1864,6 @@ class MotionSequenceNode(Node):
             approach, contact, pull_dir = result
             if not self._move_l_hybrid(
                 *approach, 90.0, -90.0, 0.0,
-                blend_radius='SMALL',
                 profile='APPROACH',
             ): return
             cx, cy, cz = approach
@@ -1806,30 +1888,25 @@ class MotionSequenceNode(Node):
             if not self._wait_for_step('6. 전자석 OFF'): return
             if not self._set_magnet(False): return
 
-            # 7. 열린 서랍 손잡이에서 후퇴
-            retreat_mm = float(self._cabinet_geometry['release_retreat_mm'])
-            released_target = tuple(
-                pull_target[i] + pull_dir[i] * retreat_mm
-                for i in range(3)
-            )
-            if not self._wait_for_step(f'7. 손잡이에서 {retreat_mm:.0f}mm 후퇴'): return
+            # 7. 열린 서랍 손잡이에서 후퇴 — Y 방향으로 50mm 상대 이동
+            if not self._wait_for_step('7. 손잡이에서 Y+50mm 후퇴'): return
             if not self._move_l(
-                *released_target, 90.0, -90.0, 0.0,
-                blend_radius='SMALL',
+                0, 50, 0,
+                relative=True,
                 profile='APPROACH',
             ): return
-            cx, cy, cz = released_target
 
             # ── 8~18: 약품 픽업 → OCR 검수 → 배송(또는 롤백) ──
             # 이 시점부터는 서랍이 열려 있으므로, 실패(예외 포함)하더라도 반드시
             # 서랍을 닫고 홈으로 복귀시킨다(아래 _close_drawer_and_home은 결과와 무관하게 항상 실행).
-            pick_ok = False
+            pick_ok = True
             try:
                 pick_ok = self._pick_verify_and_deliver(
                     drawer_index, radius_mm, contact, pull_dir, pull_target,
                 )
             except Exception as exc:
                 self.get_logger().error(f'픽업/배송 중 예외 발생: {exc}')
+                pick_ok = False
 
             # 19~24: 서랍 닫기 + 홈 복귀 — 픽업/배송 성공 여부와 무관하게 항상 시도
             close_ok = self._close_drawer_and_home(pull_target, contact, pull_dir)
