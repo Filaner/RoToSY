@@ -46,7 +46,12 @@ class InitialPosePublisher(Node):
 
         msg = PoseWithCovarianceStamped()
         msg.header.frame_id = self.map_frame
-        msg.header.stamp    = self.get_clock().now().to_msg()
+        # AMCL은 stamp=0을 내부적으로 now()로 치환해서 TF lookup을 수행한다.
+        # TF가 수십ms 뒤처지면 "extrapolation into future" 오류가 발생하므로
+        # 100ms 과거 시각을 명시해 TF 버퍼에 반드시 존재하는 시점을 사용한다.
+        from rclpy.duration import Duration
+        past = self.get_clock().now() - Duration(nanoseconds=100_000_000)
+        msg.header.stamp = past.to_msg()
         msg.pose.pose.position.x = float(self.get_parameter('initial_x').value)
         msg.pose.pose.position.y = float(self.get_parameter('initial_y').value)
         qx, qy, qz, qw = yaw_to_quaternion(float(self.get_parameter('initial_yaw').value))

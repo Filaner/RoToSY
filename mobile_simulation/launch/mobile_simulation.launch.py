@@ -132,12 +132,9 @@ def generate_launch_description():
 
     nav_params = os.path.join(package_share, 'config', 'nav2_params.yaml')
 
-    # [TF 레이스 방지] 최초 colcon build 후 첫 실행 시 gazebo/플러그인 로드가 느려
-    # diff_drive(odom→base_footprint)가 늦게 떠서, nav2 local_costmap이 base_link→odom
-    # TF를 못 찾고 "two unconnected trees"로 죽는다. nav2와 initial_pose를 '함께' 지연시켜
-    # (따로 늦추면 AMCL 활성화 후 위치추정 없음으로 타임아웃됨 — 둘의 상대 타이밍 유지)
-    # gazebo TF가 흐른 뒤에 nav2가 뜨도록 한다. 매우 콜드한 첫 빌드 실행에서 여전히 레이스가
-    # 나면 이 값을 키우면 된다.
+    # [TF 레이스 방지]
+    # diff_drive(odom→base_footprint) TF가 흐른 뒤 nav2가 뜨도록 nav2_start_delay 적용.
+    # AMCL 초기 위치는 nav2_params.yaml의 set_initial_pose:true 로 부팅 시 자동 설정됨.
     nav2_start_delay = 8.0
 
     return LaunchDescription([
@@ -184,10 +181,7 @@ def generate_launch_description():
                        '-Y', initial_yaw],
             output='screen'
         ),
-        # nav2 bringup + initial_pose 를 nav2_start_delay 초 뒤에 '함께' 시작.
-        # gazebo/diff_drive TF(odom→base_footprint)가 흐른 뒤 nav2가 떠서 costmap이
-        # TF를 정상적으로 찾고, initial_pose가 동시에 발행되어 AMCL이 즉시 위치추정한다.
-        # (둘을 한 TimerAction에 넣어 상대 타이밍을 유지 — 이게 핵심.)
+        # Nav2 bringup: nav2_start_delay 후 시작 (Gazebo/diff_drive TF 안정화 대기)
         TimerAction(
             period=nav2_start_delay,
             actions=[
@@ -197,19 +191,6 @@ def generate_launch_description():
                                       'map': map_yaml,
                                       'params_file': nav_params,
                                       'autostart': 'True'}.items()
-                ),
-                # Localization bootstrap: 약실(spawn) 위치를 initialpose 로 1초마다 반복
-                # 발행해 AMCL 위치추정을 확정한다. 골 전송은 웹(ros_bridge)이 담당.
-                Node(
-                    package='mobile_simulation',
-                    executable='initial_pose_publisher',
-                    name='mobile_initial_pose_publisher',
-                    output='screen',
-                    parameters=[{'initial_x': initial_x,
-                                 'initial_y': initial_y,
-                                 'initial_yaw': initial_yaw,
-                                 'repetitions': 3},
-                                {'use_sim_time': use_sim_time}]
                 ),
             ]
         ),

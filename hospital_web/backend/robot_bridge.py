@@ -12,7 +12,7 @@ from typing import Optional
 from rclpy.action import ActionClient
 from rclpy.node import Node
 
-from std_msgs.msg import Bool, Empty, Float64MultiArray, Int32, String
+from std_msgs.msg import Bool, Empty, Float64MultiArray, Int32, Int32MultiArray, String
 
 from robot_arm_interfaces.action import MoveJ, MoveL
 from robot_arm_interfaces.msg import RobotStatus
@@ -81,6 +81,9 @@ class RobotBridgeNode(Node):
             if PlcCommand is not None else None
         )
         self.pub_seq_start = self.create_publisher(Int32, '/motion/start', 10)
+        self.pub_seq_start_batch = self.create_publisher(
+            Int32MultiArray, '/motion/start_batch', 10
+        )
         self.pub_seq_next = self.create_publisher(Empty, '/motion/next_step', 10)
         self.pub_seq_stop = self.create_publisher(Empty, '/motion/stop', 10)
         self.pub_seq_reset = self.create_publisher(Empty, '/motion/reset', 10)
@@ -231,6 +234,12 @@ class RobotBridgeNode(Node):
 
     def start_sequence(self, marker_id: int) -> None:
         self.pub_seq_start.publish(Int32(data=int(marker_id)))
+
+    def start_sequence_batch(self, marker_id: int, count: int) -> None:
+        """Pick consecutive units from one open drawer before closing it."""
+        self.pub_seq_start_batch.publish(
+            Int32MultiArray(data=[int(marker_id), int(count)])
+        )
 
     def next_step(self) -> None:
         self.pub_seq_next.publish(Empty())

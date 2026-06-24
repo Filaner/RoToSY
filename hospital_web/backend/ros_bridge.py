@@ -334,25 +334,33 @@ class _AMRBridgeNode:
         import math
         from nav2_msgs.action import NavigateToPose
 
-        if not self._nav_client.wait_for_server(timeout_sec=3.0):
+        if not self._nav_client.wait_for_server(timeout_sec=5.0):
             return {'success': False,
                     'message': 'Nav2 navigate_to_pose 액션 서버 없음 — 시뮬레이션이 실행 중인지 확인'}
 
         goal = NavigateToPose.Goal()
         goal.pose.header.frame_id = 'map'
-        goal.pose.header.stamp    = self.node.get_clock().now().to_msg()
         goal.pose.pose.position.x = float(x)
         goal.pose.pose.position.y = float(y)
         half = float(theta) * 0.5
         goal.pose.pose.orientation.z = math.sin(half)
         goal.pose.pose.orientation.w = math.cos(half)
 
-        send_future = self._nav_client.send_goal_async(goal)
-        while not send_future.done():
-            await asyncio.sleep(0.02)
-        handle = send_future.result()
-        if handle is None or not handle.accepted:
-            return {'success': False, 'message': 'Nav2가 골을 거부했습니다'}
+        # AMCL 수렴 전에 bt_navigator가 골을 거부하는 경우가 있어 최대 3회 재시도
+        for attempt in range(3):
+            goal.pose.header.stamp = self.node.get_clock().now().to_msg()
+            send_future = self._nav_client.send_goal_async(goal)
+            while not send_future.done():
+                await asyncio.sleep(0.02)
+            handle = send_future.result()
+            if handle is not None and handle.accepted:
+                break
+            if attempt < 2:
+                print(f'[ros_bridge] Nav2 골 거부됨 (시도 {attempt+1}/3), 2초 후 재시도')
+                await asyncio.sleep(2.0)
+        else:
+            return {'success': False,
+                    'message': 'Nav2가 골을 거부했습니다 (3회 재시도 실패 — AMCL 초기화 확인)'}
 
         self._nav_goal_handle = handle
         with _lock:
@@ -382,18 +390,23 @@ class _AMRBridgeNode:
             try:
                 from . import mission_state as ms
                 curr_mission = ms.get_mission()
-                if curr_mission.get('status') == 'DISPATCHED':
+                mission_status = curr_mission.get('status', '')
+                with _lock:
+                    dest = _state['amr'].get('destination', '')
+
+                if mission_status == 'DISPATCHED':
+                    # 1번 레그: 병동 도착
+                    ms.update_status('ARRIVED', actor='amr',
+                                     detail=f'{dest} 도착 (수령 대기)')
+                elif mission_status == 'ARRIVED':
+                    # 복귀 레그: 약재실 도착 → 배송 완료
+                    ms.update_status('COMPLETED', actor='amr',
+                                     detail='약재실 복귀 완료, 배송 완료')
                     with _lock:
-                        dest = _state['amr'].get('destination', '')
-                    # 1차 목적지(간호스테이션) 도착 시
-                    if dest == '간호스테이션':
-                        ms.update_status('ARRIVED', actor='amr', detail='간호스테이션 도착 (수령 대기)')
-                    # 2차 목적지(병동) 도착 시
-                    else:
-                        ms.update_status('ARRIVED', actor='amr', detail=f'최종 목적지({dest}) 도착 (투약 대기)')
-                        # 0616_todo 4-3: 병동 도착 시 COMPLETED 자동 처리하지 않음 (간호사가 투약 후 수동 처리하도록 둠)
+                        _state['amr']['status'] = 'IDLE'
+                        _state['amr']['destination'] = ''
             except Exception as e:
-                print(f'[ros_bridge] mission ARRIVED 갱신 실패: {e}')
+                print(f'[ros_bridge] mission 상태 갱신 실패: {e}')
 
     async def navigate_cancel(self) -> dict:
         import asyncio
@@ -448,6 +461,9 @@ class _AMRBridgeNode:
             return
         self._odom_last_t = now
         update_node_seen('amr_controller')
+        with _lock:
+            _state['amr']['online']    = True
+            _state['amr']['last_seen'] = datetime.now().isoformat()
 
     def _status_cb(self, msg) -> None:
         with _lock:

@@ -150,9 +150,13 @@ tr:hover td { background: #f8faff; }
     <button class="btn-blue"  onclick="loadPlan()">계획 조회</button>
     <button class="btn-green" onclick="createPlan()">계획 (재)생성</button>
     <button class="btn-gray"  onclick="clearView('mission')">초기화</button>
-    <span style="margin-left:auto;font-size:.76rem;color:#888">
-      base XY: θ_box=0 fallback (실배치 시 마커 측정값으로 자동 보정)
+    <span style="margin-left:8px;font-size:.82rem;color:#555;white-space:nowrap">
+      θ_box
     </span>
+    <input type="number" id="inp-theta-mission" value="0" step="1"
+           style="width:70px" title="박스 회전각 (deg). 0=θ없음(개략), 실측값 입력 시 정확한 base XY 표시"
+           oninput="onThetaChange('mission')">
+    <span style="font-size:.76rem;color:#888">° (0=θ없음 fallback · 실측값 입력 시 정확한 base XY)</span>
   </div>
   <div class="status-bar" id="status-mission">준비 중…</div>
   <div class="main">
@@ -167,7 +171,7 @@ tr:hover td { background: #f8faff; }
     <div class="table-panel">
       <h3>슬롯 목록</h3>
       <p class="note" id="note-mission" style="display:none">
-        base XY: θ_box=0, 박스 origin 기준 (mm)
+        SVG = 박스 내부 좌표(로컬 프레임) · base XY = origin + Rz(θ_box)·[local-inner/2] — 로봇과 동일 알고리즘
       </p>
       <div id="table-mission"><div class="empty-msg">슬롯 없음</div></div>
     </div>
@@ -217,6 +221,11 @@ tr:hover td { background: #f8faff; }
       <div class="item-list" id="item-list" style="flex:1">
         <span style="color:#aaa; font-size:.8rem">품목을 추가하세요 (최대 4가지 약품, 수량 합계 제한 없음)</span>
       </div>
+      <label style="padding-top:4px;white-space:nowrap">θ_box</label>
+      <input type="number" id="inp-theta-test" value="0" step="1" style="width:70px"
+             title="박스 회전각(deg). BOX-B=82, BOX-A=미보정(0)"
+             oninput="onThetaChange('test')">
+      <span style="font-size:.76rem;color:#888;padding-top:4px">°</span>
       <button class="btn-green" onclick="runPreview()" style="align-self:flex-start">미리보기 실행</button>
       <button class="btn-gray btn-sm" onclick="clearItems()" style="align-self:flex-start">전체 삭제</button>
     </div>
@@ -234,7 +243,7 @@ tr:hover td { background: #f8faff; }
     <div class="table-panel">
       <h3>슬롯 목록</h3>
       <p class="note" id="note-test" style="display:none">
-        base XY: θ_box=0, 박스 origin 기준 (mm) · stack_h = 적재 높이
+        SVG = 박스 내부 좌표(로컬 프레임) · base XY = origin + Rz(θ_box)·[local-inner/2] — 로봇과 동일 알고리즘 · stack_h = 적재 높이
       </p>
       <div id="table-test"><div class="empty-msg">슬롯 없음</div></div>
     </div>
@@ -265,13 +274,16 @@ function setStatus(id, msg, type = '') {
   el.className = 'status-bar ' + type;
 }
 
-// ── base 좌표 계산 (θ_box=0) ─────────────────────────────────────────────────
-function toBase(slot, box) {
+// ── base 좌표 계산 (θ_box 적용) ──────────────────────────────────────────────
+// compute_placement 와 동일 알고리즘: base = origin + Rz(θ)·[lx, ly]
+function toBase(slot, box, thetaDeg) {
   const lx = slot.local_x - box.inner_w / 2;
   const ly = slot.local_y - box.inner_d / 2;
+  const t = (thetaDeg || 0) * Math.PI / 180;
+  const c = Math.cos(t), s = Math.sin(t);
   return {
-    bx: Math.round((box.origin[0] + lx) * 10) / 10,
-    by: Math.round((box.origin[1] + ly) * 10) / 10,
+    bx: Math.round((box.origin[0] + lx * c - ly * s) * 10) / 10,
+    by: Math.round((box.origin[1] + lx * s + ly * c) * 10) / 10,
     bz: Math.round((box.origin[2] + 20) * 10) / 10,  // place_drop_mm=20 기준
   };
 }
@@ -338,21 +350,25 @@ function renderLegend(legendId, layout) {
 }
 
 // ── 슬롯 테이블 ──────────────────────────────────────────────────────────────
-function renderTable(tableId, box, layout, unplaced, skipped, showStack) {
+function renderTable(tableId, box, layout, unplaced, skipped, showStack, thetaDeg) {
   if (!layout.length) {
     document.getElementById(tableId).innerHTML = '<div class="empty-msg">배치된 슬롯 없음</div>';
     return;
   }
+  const thetaLabel = (thetaDeg || 0) === 0
+    ? 'base X (θ=0 근사)' : `base X (θ=${thetaDeg}°)`;
+  const thetaLabelY = (thetaDeg || 0) === 0
+    ? 'base Y (θ=0 근사)' : `base Y (θ=${thetaDeg}°)`;
   let html = `<table><thead><tr>
     <th>#</th><th>약품명</th>
     <th>층</th>
     <th>local X</th><th>local Y</th>
     <th>W × H (mm)</th><th>회전</th>
-    <th>base X</th><th>base Y</th><th>base Z (θ=0)</th>
+    <th>${thetaLabel}</th><th>${thetaLabelY}</th><th>base Z</th>
     ${showStack ? '<th>적재높이</th>' : ''}
   </tr></thead><tbody>`;
   for (const s of layout) {
-    const b = toBase(s, box);
+    const b = toBase(s, box, thetaDeg);
     const sh = showStack && s.stack_h_mm != null ? s.stack_h_mm.toFixed(1) : '-';
     const zOff = s.z_offset_mm || 0;
     const layerLabel = zOff > 0
@@ -382,7 +398,33 @@ function renderTable(tableId, box, layout, unplaced, skipped, showStack) {
 }
 
 // ── 공통 뷰 적용 ─────────────────────────────────────────────────────────────
+function getTheta(suffix) {
+  const el = document.getElementById('inp-theta-' + suffix);
+  return el ? (parseFloat(el.value) || 0) : 0;
+}
+
+// 현재 로드된 데이터(재렌더용 캐시)
+const _lastData = {};
+
+function onThetaChange(suffix) {
+  const d = _lastData[suffix];
+  if (!d) return;
+  const theta = getTheta(suffix);
+  const box = d.box, layout = d.layout || [];
+  renderTable('table-'+suffix, box, layout, d.unplaced, d.skipped,
+              suffix === 'test', theta);
+  // boxinfo theta 표시 갱신
+  const info = document.getElementById('boxinfo-'+suffix);
+  const thetaNote = theta !== 0
+    ? `<b style="color:#2563eb"> θ_box=${theta}°</b>`
+    : ' θ_box=0 (fallback)';
+  info.innerHTML = `박스: <b>${d.box_code}</b> | inner ${box.inner_w}×${box.inner_d}×${box.inner_h} mm
+    | 벽여유 ${box.wall_margin} mm | 마커 #${box.aruco_marker_id} |${thetaNote}<br>
+    origin: (${box.origin.join(', ')}) mm | 슬롯 ${layout.length}개`;
+}
+
 function applyResult(suffix, data, showStack) {
+  _lastData[suffix] = data;
   const box = data.box, layout = data.layout || [];
   document.getElementById('box-title-'+suffix).textContent =
     `박스 뷰 — ${data.box_code}  (inner ${box.inner_w}×${box.inner_d} mm)`;
@@ -394,14 +436,18 @@ function applyResult(suffix, data, showStack) {
     renderLegend('legend-'+suffix, layout);
   }
 
+  const theta = getTheta(suffix);
   const info = document.getElementById('boxinfo-'+suffix);
   info.style.display = 'block';
+  const thetaNote = theta !== 0
+    ? `<b style="color:#2563eb"> θ_box=${theta}°</b>`
+    : ' θ_box=0 (fallback)';
   info.innerHTML = `박스: <b>${data.box_code}</b> | inner ${box.inner_w}×${box.inner_d}×${box.inner_h} mm
-    | 벽여유 ${box.wall_margin} mm | 마커 #${box.aruco_marker_id}<br>
-    origin(θ=0): (${box.origin.join(', ')}) mm | 슬롯 ${layout.length}개`;
+    | 벽여유 ${box.wall_margin} mm | 마커 #${box.aruco_marker_id} |${thetaNote}<br>
+    origin: (${box.origin.join(', ')}) mm | 슬롯 ${layout.length}개`;
 
   document.getElementById('note-'+suffix).style.display = 'block';
-  renderTable('table-'+suffix, box, layout, data.unplaced, data.skipped, showStack);
+  renderTable('table-'+suffix, box, layout, data.unplaced, data.skipped, showStack, theta);
 }
 
 // ── 탭1: 미션 조회 ───────────────────────────────────────────────────────────

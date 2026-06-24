@@ -74,6 +74,11 @@ async def post(path: str, body: Optional[dict] = None) -> dict:
         if path == '/api/motion/start':
             node.start_sequence(int(body.get('marker_id', 0)))
             return {'success': True}
+        if path == '/api/motion/start_batch':
+            node.start_sequence_batch(
+                int(body.get('marker_id', 0)), int(body.get('count', 1))
+            )
+            return {'success': True}
         if path == '/api/motion/next':
             node.next_step()
             return {'success': True}

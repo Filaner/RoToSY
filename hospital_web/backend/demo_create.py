@@ -238,9 +238,9 @@ CABINETS = [
 #            RealSense 실측값(2026-06-19 캡처) 기준. 마커 검출 시엔 실측 자동 사용.
 DELIVERY_BOXES = [
     {'code': 'BOX-A', 'ward': '병동A', 'inner_w': 250, 'inner_d': 190, 'inner_h': 120,
-     'wall_margin': 5, 'item_gap': 3, 'aruco': 4, 'origin': (586.0, 328.0, -15.0)},
+     'wall_margin': 10, 'item_gap': 8, 'aruco': 4, 'origin': (586.0, 328.0, -15.0)},
     {'code': 'BOX-B', 'ward': '병동B', 'inner_w': 250, 'inner_d': 190, 'inner_h': 120,
-     'wall_margin': 5, 'item_gap': 3, 'aruco': 3, 'origin': (368.0, 313.0, -23.0)},
+     'wall_margin': 10, 'item_gap': 8, 'aruco': 3, 'origin': (368.0, 313.0, -23.0)},
 ]
 
 # (row, col): 'drawer_xxx', aruco(=서랍 번호, 1-based), label, medicine, pixel_x, pixel_y, stock

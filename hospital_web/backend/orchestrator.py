@@ -142,7 +142,7 @@ def _build_drawer_queue(pid: str) -> tuple[list[int], list[str], list[str]]:
         if not pres:
             return [], [], []
         rows = c.execute(
-            '''SELECT pi.medicine_name, pi.medicine_id
+            '''SELECT pi.medicine_name, pi.medicine_id, pi.quantity
                FROM prescription_item pi
                WHERE pi.prescription_id = ?
                ORDER BY pi.sort_order, pi.id''',
@@ -150,18 +150,23 @@ def _build_drawer_queue(pid: str) -> tuple[list[int], list[str], list[str]]:
         ).fetchall()
         for row in rows:
             name = row['medicine_name']
+            # A prescription item represents one medicine type with a quantity.
+            # The arm must run one full pick/place cycle for every physical box,
+            # including repeated boxes from the same drawer.
+            quantity = max(1, int(row['quantity'] or 1))
             if row['medicine_id'] is None:
-                missing.append(name)
+                missing.extend([name] * quantity)
                 continue
             slot = c.execute(
                 'SELECT row_idx, col_idx FROM cabinet_slot WHERE medicine_id=?',
                 (row['medicine_id'],),
             ).fetchone()
             if slot is None:
-                missing.append(name)
+                missing.extend([name] * quantity)
                 continue
-            drawers.append(int(slot['row_idx']) * 2 + int(slot['col_idx']) + 1)
-            labels.append(name)
+            drawer = int(slot['row_idx']) * 2 + int(slot['col_idx']) + 1
+            drawers.extend([drawer] * quantity)
+            labels.extend([name] * quantity)
     return drawers, labels, missing
 
 
@@ -232,7 +237,10 @@ async def monitor_loop() -> None:
             continue
 
         mission = ms.get_mission()
-        if mission.get('can_dispatch') and mission.get('status') == 'CONFIRMED':
+        mission_status = mission.get('status', '')
+
+        # 1) 적재 확인 완료 → AMR 출발
+        if mission.get('can_dispatch') and mission_status == 'CONFIRMED':
             _set(
                 running=True,
                 phase='AMR_DISPATCHING',
@@ -252,6 +260,34 @@ async def monitor_loop() -> None:
                 )
             except Exception as exc:
                 _fail(exc)
+
+        # 2) 병동 도착 → 약재실 복귀 출발
+        elif mission_status == 'ARRIVED' and phase == 'AMR_DISPATCHED':
+            _set(
+                running=True,
+                phase='AMR_RETURNING',
+                status='AMR_RETURNING',
+                message='병동 도착 확인, AMR 약재실 복귀 시작',
+            )
+            try:
+                result = await ros_bridge.return_to_base()
+                if result.get('success'):
+                    _set(running=False, phase='AMR_RETURNING',
+                         message='AMR 약재실 복귀 중')
+                else:
+                    _set(running=False, phase='AMR_DISPATCHED',
+                         message=f"복귀 명령 실패: {result.get('message', '')}")
+            except Exception as exc:
+                _fail(exc)
+
+        # 3) 약재실 복귀 완료
+        elif mission_status == 'COMPLETED' and phase == 'AMR_RETURNING':
+            _set(
+                running=False,
+                phase='AMR_COMPLETED',
+                status='AMR_COMPLETED',
+                message='배송 완료, AMR 약재실 복귀 완료',
+            )
 
 
 async def _run(prescription_id: str, *, actor: str) -> None:
@@ -304,35 +340,29 @@ async def _run(prescription_id: str, *, actor: str) -> None:
         ms.add_audit(actor, 'ORCH_START',
                      f'{prescription_id} 큐={drawers} labels={labels}')
 
-        # Loop through all drawers in the queue
         for i, drawer in enumerate(drawers):
             with _lock:
                 if _state.get('cancel_requested'):
                     raise MissionConflictError('사용자 취소')
 
-            # Update marker queue index in mission_state as we progress
             ms.set_marker_queue_index(i)
-
             _set(
                 phase='PICKING',
                 status='PICKING',
                 current_drawer=drawer,
                 current_drawer_index=i,
-                message=f'서랍 {drawer} 피킹 시작 ({i+1}/{len(drawers)})'
+                message=f'서랍 {drawer} 피킹 시작 ({i+1}/{len(drawers)})',
             )
-            
-            # Post start motion command to the robot
+
             arm = await robot_proxy.post('/api/motion/start', {'marker_id': drawer})
             if not arm.get('success'):
                 raise RobotUnavailableError(arm.get('message', f'서랍 {drawer} 피킹 시작 실패'))
-            
+
             _set(message=f'로봇팔 서랍 {drawer} 피킹 진행 중 ({i+1}/{len(drawers)})')
 
-            # Wait for the robot arm to finish picking this drawer (transition from moving/picking to IDLE)
             await _wait_for_pick_result()
-            
+
             _set(message=f'서랍 {drawer} 피킹 완료 ({i+1}/{len(drawers)})')
-            # Small delay between drawers
             await asyncio.sleep(1.0)
 
         # Advance the index to the end so get_marker_queue shows complete

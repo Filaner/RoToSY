@@ -49,6 +49,9 @@ _QUIET_GET_PATHS = {
     '/api/system/mission',
     '/api/system/audit',
     '/api/prescription',
+    '/api/pallet/plan',
+    '/api/sensor/history',
+    '/api/sensor/alerts',
 }
 
 _ACCESS_LOG_RE = re.compile(r'"(GET|POST|PUT|DELETE|PATCH) (\S+) HTTP/\S+" (\d{3})')

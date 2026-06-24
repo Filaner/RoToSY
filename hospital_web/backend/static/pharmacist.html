@@ -566,15 +566,18 @@ async function confirmLoadingById(pid, btn) {
 }
 
 function applyMissionStateToLoadView(m) {
-  // update pharmacy confirm status in load view cards
   const pharmStatusEls = document.querySelectorAll('[id^="lc-pharm-status-"]');
   pharmStatusEls.forEach(el => {
+    const pid = el.id.replace('lc-pharm-status-', '');
+    const btn = document.getElementById(`lc-btn-${pid}`);
     if (m.pharmacist_confirmed) {
       el.textContent = '약사 확인: 완료';
       el.style.color = 'var(--green)';
-      const pid = el.id.replace('lc-pharm-status-', '');
-      const btn = document.getElementById(`lc-btn-${pid}`);
       if (btn) btn.style.display = 'none';
+    } else {
+      el.textContent = '약사 확인: 대기 중';
+      el.style.color = '';
+      if (btn) btn.style.display = '';
     }
   });
 }
@@ -920,11 +923,19 @@ function applyMissionState(m) {
     pharmBox.classList.add('confirmed');
     pharmIcon.textContent = '';
     if (pharmBtn) pharmBtn.style.display = 'none';
+  } else {
+    pharmBox.classList.remove('confirmed');
+    pharmIcon.textContent = '[ ]';
+    if (pharmBtn) pharmBtn.style.display = '';
   }
   if (m.admin_confirmed) {
     adminBox.classList.add('confirmed');
     adminIcon.textContent = '';
     if (adminLbl) adminLbl.textContent = '확인 완료';
+  } else {
+    adminBox.classList.remove('confirmed');
+    adminIcon.textContent = '[ ]';
+    if (adminLbl) adminLbl.textContent = '대기 중';
   }
 }
 

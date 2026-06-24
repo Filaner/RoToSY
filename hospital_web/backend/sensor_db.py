@@ -281,9 +281,11 @@ def _serial_loop() -> None:
         _log.warning('pyserial 미설치 — sensor reader 비활성')
         return
 
+    _error_logged = False
     while not _serial_stop.is_set():
         try:
             with serial.Serial(port, baud, timeout=2) as ser:
+                _error_logged = False
                 _log.info(f'sensor reader: connected {port} @ {baud}, Arduino 리셋 대기 ~3s')
                 # Arduino DTR 리셋 후 첫 측정까지 정적 구간
                 if _serial_stop.wait(3.0):
@@ -307,14 +309,18 @@ def _serial_loop() -> None:
                         _log.warning(f'insert_reading 실패: {e}')
 
         except PermissionError as e:
-            _log.warning(
-                f'sensor reader: permission denied on {port} '
-                f'(dialout 권한 또는 sudo 필요) — {e}; 5s 뒤 재시도'
-            )
+            if not _error_logged:
+                _log.warning(
+                    f'sensor reader: permission denied on {port} '
+                    f'(dialout 권한 또는 sudo 필요) — {e}; 연결될 때까지 재시도'
+                )
+                _error_logged = True
         except Exception as e:
-            _log.warning(
-                f'sensor reader: {type(e).__name__} on {port} — {e}; 5s 뒤 재시도'
-            )
+            if not _error_logged:
+                _log.warning(
+                    f'sensor reader: {type(e).__name__} on {port} — {e}; 연결될 때까지 재시도'
+                )
+                _error_logged = True
 
         # interruptible 5s backoff
         if _serial_stop.wait(5.0):
