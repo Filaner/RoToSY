@@ -383,7 +383,7 @@ def seed() -> None:
                    (code, patient_id, doctor_id, priority, status,
                     ocr_raw, ocr_confidence, ocr_parsed, vision_data,
                     created_at, updated_at)
-                   VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)''',
+                   VALUES (?, ?, ?, ?, 'awaiting_load_confirm', ?, ?, ?, ?, ?, ?)''',
                 (pres['code'], patient_id, doctor_id, pres['priority'],
                  pres['ocr']['raw'], pres['ocr']['confidence'],
                  json.dumps(pres['ocr']['parsed'], ensure_ascii=False),

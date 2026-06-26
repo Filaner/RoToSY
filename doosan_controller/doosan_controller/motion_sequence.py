@@ -177,10 +177,10 @@ MOTION_PROFILES: dict[str, MotionProfile] = {
     # Physical contact, drawer pull/push, pickup descent, and placement descent.
     'CONTACT': MotionProfile(
         'CONTACT',
-        joint_vel_deg_s=22.0,
+        joint_vel_deg_s=35.0,
         joint_acc_deg_s2=44.0,
-        linear_vel_mm_s=24.0,
-        linear_acc_mm_s2=48.0,
+        linear_vel_mm_s=35.0,
+        linear_acc_mm_s2=50.0,
         angular_vel_deg_s=22.0,
         angular_acc_deg_s2=44.0,
     ),
@@ -1529,7 +1529,7 @@ class MotionSequenceNode(Node):
         # 9. Z 하강 (비전 좌표 + 그리퍼 길이 보정 + 수동 보정)
         # 그리퍼 길이 97mm + 안전거리 5mm 에, 추가로 12mm 더 깊게 하강 (-12mm 보정)
         gripper_z_offset = 97.0
-        target_z = bz + 5.0 + gripper_z_offset - 13.87
+        target_z = bz + 5.0 + gripper_z_offset - 8.87
         if drawer_index in (4, 5):   # 캐비닛 5~6번 — 바닥/서랍 구조물 충돌 방지용 Z 하한
             target_z = max(target_z, 278.0)
         if not self._wait_for_step(f'9. Z 하강 (목표 Z={target_z:.1f})'): return False
@@ -1868,10 +1868,17 @@ class MotionSequenceNode(Node):
                 return
 
             # 2. 탑뷰 마커에서 선택한 서랍의 안전 접근점 계산 및 이동
+            # 이전 팔레타이징 직후 즉시 시작 시 카메라가 캐비닛 마커를 못 보는 경우 방지
+            time.sleep(2.0)
             if not self._wait_for_step(f'2. 서랍 {drawer_index + 1} 접근점으로 이동'): return
             result = self._get_drawer_target(drawer_index)
-            if result is None: return
+            if result is None:
+                self._step_info_pub.publish(String(data='실패 — 캐비닛 마커 미검출'))
+                return
             approach, contact, pull_dir = result
+            # 2·4번 캐비닛: 손잡이 접근점만 Y +10mm (contact/pull_target에는 영향 없음)
+            if drawer_index in (1, 3):
+                approach = (approach[0], approach[1] + 10.0, approach[2])
             if not self._move_l_hybrid(
                 *approach, 90.0, -90.0, 0.0,
                 profile='APPROACH',

@@ -461,6 +461,7 @@ let missionState  = null;
 let activeFilter  = 'all';
 let overrideQty   = {};   // drug index → override quantity
 let currentMode   = 'review';  // 'review' | 'load'
+let confirmedPrescriptionIds = new Set();  // 이 세션에서 약사 확인 완료한 처방전 ID
 
 // ═══════════════════════════════════════════════
 // Mode toggle (처방 검토 / 적재 확인)
@@ -549,6 +550,7 @@ async function confirmLoadingById(pid, btn) {
     const r = await fetch(`/api/prescription/${pid}/confirm_loading`, {method: 'POST'});
     const d = await r.json();
     if (r.ok) {
+      confirmedPrescriptionIds.add(String(pid));
       const statusEl = document.getElementById(`lc-pharm-status-${pid}`);
       if (statusEl) { statusEl.textContent = '약사 확인: 완료'; statusEl.style.color = 'var(--green)'; }
       btn.style.display = 'none';
@@ -565,20 +567,14 @@ async function confirmLoadingById(pid, btn) {
   }
 }
 
-function applyMissionStateToLoadView(m) {
-  const pharmStatusEls = document.querySelectorAll('[id^="lc-pharm-status-"]');
-  pharmStatusEls.forEach(el => {
-    const pid = el.id.replace('lc-pharm-status-', '');
+function applyMissionStateToLoadView(_m) {
+  // 글로벌 missionState 대신 개별 처방전 확인 Set을 기준으로 적용
+  // (missionState는 단일 미션 상태라 모든 처방전에 일괄 적용하면 오동작)
+  confirmedPrescriptionIds.forEach(pid => {
+    const el  = document.getElementById(`lc-pharm-status-${pid}`);
     const btn = document.getElementById(`lc-btn-${pid}`);
-    if (m.pharmacist_confirmed) {
-      el.textContent = '약사 확인: 완료';
-      el.style.color = 'var(--green)';
-      if (btn) btn.style.display = 'none';
-    } else {
-      el.textContent = '약사 확인: 대기 중';
-      el.style.color = '';
-      if (btn) btn.style.display = '';
-    }
+    if (el)  { el.textContent = '약사 확인: 완료'; el.style.color = 'var(--green)'; }
+    if (btn) btn.style.display = 'none';
   });
 }
 
