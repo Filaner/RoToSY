@@ -5,8 +5,6 @@
 
 **[사용 가이드](https://filaner.github.io/RoToSY/)** · **[데모 영상](https://youtu.be/MdKExcUtkrw)**
 
-> 사용 가이드는 GitHub Pages 활성화 후 공개됩니다. 그 전에는 [HTML 파일](hospital_web/docs/guide.html)을 내려받아 브라우저로 열 수 있습니다.
-
 ## 주요 구성
 
 - **인식·집기:** RealSense, ArUco, YOLO로 좌표를 구하고 Doosan E0509·전자석 그리퍼로 약품을 집습니다.
