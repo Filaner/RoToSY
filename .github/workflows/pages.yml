@@ -1,0 +1,42 @@
+name: Publish guide
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - hospital_web/docs/guide.html
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+# A repository admin or maintainer must first select
+# Settings > Pages > Source > GitHub Actions.
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v5
+      - name: Prepare static guide
+        run: |
+          mkdir -p _site
+          cp hospital_web/docs/guide.html _site/index.html
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
